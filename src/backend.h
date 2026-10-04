@@ -40,6 +40,7 @@ class Backend : public QObject {
     Q_PROPERTY(double feather READ feather NOTIFY toolChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
+    Q_PROPERTY(QStringList blends READ blends CONSTANT)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportChanged)
 
@@ -67,6 +68,7 @@ public:
     double feather() const { return m_feather; }
     QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
+    QStringList blends() const { return Scene::blends(); }
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
 
@@ -96,6 +98,10 @@ public:
     Q_INVOKABLE void moveLayer(int direction);
     Q_INVOKABLE void deleteLayer();
     Q_INVOKABLE bool renameLayer(int index, const QString &name);
+    // A copy just above, with the same look and animation, for glows and echoes.
+    Q_INVOKABLE void duplicateLayer();
+    Q_INVOKABLE void setBlend(const QString &blend);
+    Q_INVOKABLE void cycleBlend();
 
     // Properties and keyframes, on the selected layer at the playhead.
     Q_INVOKABLE void setProperty(const QString &property, double value);

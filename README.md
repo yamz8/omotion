@@ -31,7 +31,11 @@ Your original image is copied into the project and never touched.
 4. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
    to change how they ease into the next one. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
-5. **Ctrl+E** exports into `renders/` in the project folder.
+5. Give a layer a look in the inspector: brightness, contrast, saturation,
+   blur, glow, and a blend (**B**). They animate like everything else. A
+   glowing light is a soft copy-cut of it (**Shift+Enter**), set to *add*,
+   with the contrast up, the brightness down and some glow.
+6. **Ctrl+E** exports into `renders/` in the project folder.
 
 ## Shortcuts
 
@@ -62,6 +66,8 @@ Your original image is copied into the project and never touched.
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
 | `R` | Reshape the selected piece; its animation and pivot stay |
 | `P` | Pivot tool: click where the layer turns and scales around |
+| `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
+| `Ctrl+D` | Duplicate the layer |
 | `H` | Hide / show the layer |
 | `F2` | Rename the layer |
 | `Delete` | Delete the layer |
@@ -108,8 +114,12 @@ photo.omotion/
 
 - **Layers** are drawn in order, first at the back. Names must be unique.
 - **Properties** are `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`
-  (degrees, clockwise) and `opacity` (0–1). A property is either a number
-  or animated under `keys`; keys win.
+  (degrees, clockwise) and `opacity` (0–1), and for the layer's look
+  `brightness` (−1 to 1, default 0), `contrast` and `saturation` (1 is
+  unchanged), `blur` and `glow` (in canvas pixels, default 0). A property is
+  either a number or animated under `keys`; keys win.
+- **`blend`** is how a layer mixes with the ones below: `normal`, `add`,
+  `screen`, `multiply`, `overlay`, `lighten` or `darken`.
 - **`x`, `y`** place the layer's `anchor`, its pivot as a fraction of the
   image (`[0.5, 0.5]` is the centre). Without a parent that's in canvas
   pixels. With a `parent` it's in the parent image's pixels, and the layer

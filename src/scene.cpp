@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QPainter>
 #include <QSet>
+#include <QVarLengthArray>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -14,7 +15,18 @@ double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
 }
 
 const QStringList &Scene::properties() {
-    static const QStringList list{"x", "y", "scale", "scaleX", "scaleY", "rotation", "opacity"};
+    static const QStringList list{"x", "y", "scale", "scaleX", "scaleY", "rotation", "opacity",
+                                  "brightness", "contrast", "saturation", "blur", "glow"};
+    return list;
+}
+
+const QStringList &Scene::lookProperties() {
+    static const QStringList list{"brightness", "contrast", "saturation", "blur", "glow"};
+    return list;
+}
+
+const QStringList &Scene::blends() {
+    static const QStringList list{"normal", "add", "screen", "multiply", "overlay", "lighten", "darken"};
     return list;
 }
 
@@ -24,7 +36,8 @@ const QStringList &Scene::eases() {
 }
 
 double Scene::defaultValue(const QString &property) {
-    if (property == "scale" || property == "scaleX" || property == "scaleY" || property == "opacity")
+    if (property == "scale" || property == "scaleX" || property == "scaleY" || property == "opacity" ||
+        property == "contrast" || property == "saturation")
         return 1;
     return 0;
 }
@@ -79,6 +92,10 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         layer.source = object.value("source").toString();
         layer.parent = object.value("parent").toString();
         layer.visible = object.value("visible").toBool(true);
+        layer.blend = object.value("blend").toString("normal");
+        if (!blends().contains(layer.blend))
+            return fail(QString("Layer \"%1\" blends as \"%2\"; use one of %3.")
+                            .arg(object.value("name").toString(), layer.blend, blends().join(", ")));
         if (layer.source.isEmpty())
             return fail(QString("Layer \"%1\" has no source image.").arg(layer.name));
         if (names.contains(layer.name))
@@ -153,8 +170,18 @@ QJsonObject Scene::toJson() const {
             object.insert("parent", layer.parent);
         object.insert("visible", layer.visible);
         object.insert("anchor", QJsonArray{layer.anchor.x(), layer.anchor.y()});
-        for (const QString &property : properties())
-            object.insert(property, layer.base.value(property, defaultValue(property)));
+        if (layer.blend == "normal")
+            object.remove("blend");
+        else
+            object.insert("blend", layer.blend);
+        // Looks only appear once they're used, so plain layers stay short.
+        for (const QString &property : properties()) {
+            const double v = layer.base.value(property, defaultValue(property));
+            if (lookProperties().contains(property) && v == defaultValue(property))
+                object.remove(property);
+            else
+                object.insert(property, v);
+        }
 
         QJsonObject keys;
         for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it) {
@@ -253,8 +280,15 @@ void Scene::keyProperty(int index, const QString &property, double t) {
 }
 
 void Scene::keyAll(int index, double t) {
-    for (const QString &property : properties())
-        keyProperty(index, property, t);
+    if (index < 0 || index >= layers.size())
+        return;
+    for (const QString &property : properties()) {
+        const Layer &layer = layers.at(index);
+        const bool used = layer.keys.contains(property) ||
+                          layer.base.value(property, defaultValue(property)) != defaultValue(property);
+        if (!lookProperties().contains(property) || used)
+            keyProperty(index, property, t);
+    }
 }
 
 bool Scene::removeKeysAt(int index, double t) {
@@ -411,6 +445,8 @@ void AssetCache::setDirectory(const QString &directory) {
         return;
     m_directory = directory;
     m_entries.clear();
+    m_looks.clear();
+    m_lookOrder.clear();
     m_missing.clear();
 }
 
@@ -441,6 +477,128 @@ QImage AssetCache::image(const QString &source) {
 
 QSizeF AssetCache::size(const QString &source) { return image(source).size(); }
 
+QImage AssetCache::mip(const QString &source, double scale, double *factor) {
+    QImage full = image(source);
+    *factor = 1;
+    if (full.isNull())
+        return full;
+    Entry &entry = m_entries[source];
+    QImage current = full;
+    for (int level = 0; *factor / 2 >= scale && current.width() > 16 && current.height() > 16; ++level) {
+        if (level >= entry.mips.size())
+            entry.mips.append(current.scaled(current.size() / 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+        current = entry.mips.at(level);
+        *factor /= 2;
+    }
+    // The halves are rounded down, so the real factor is the size ratio.
+    *factor = double(current.width()) / full.width();
+    return current;
+}
+
+namespace {
+
+// Brightness, contrast and saturation, worked on premultiplied pixels, so
+// "towards white" means towards the pixel's own alpha.
+void tone(QImage &image, double brightness, double contrast, double saturation) {
+    for (int y = 0; y < image.height(); ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            const int a = qAlpha(line[x]);
+            if (a == 0)
+                continue;
+            double c[3] = {double(qRed(line[x])), double(qGreen(line[x])), double(qBlue(line[x]))};
+            const double grey = .299 * c[0] + .587 * c[1] + .114 * c[2];
+            for (double &v : c) {
+                v = grey + (v - grey) * saturation;
+                v = (v - a / 2.0) * contrast + a / 2.0;
+                v = brightness >= 0 ? v + (a - v) * brightness : v * (1 + brightness);
+                v = std::clamp(v, 0.0, double(a));
+            }
+            line[x] = qRgba(int(c[0] + .5), int(c[1] + .5), int(c[2] + .5), a);
+        }
+    }
+}
+
+void blurLine(uchar *line, int count, int stride, int radius, QVarLengthArray<uchar> &scratch) {
+    scratch.resize(count);
+    for (int i = 0; i < count; ++i)
+        scratch[i] = line[i * stride];
+    const int window = 2 * radius + 1;
+    int sum = 0;
+    for (int i = -radius; i <= radius; ++i)
+        sum += scratch[std::clamp(i, 0, count - 1)];
+    for (int i = 0; i < count; ++i) {
+        line[i * stride] = uchar(sum / window);
+        sum += scratch[std::min(i + radius + 1, count - 1)] - scratch[std::max(i - radius, 0)];
+    }
+}
+
+int blurRadius(double width) { return int(std::lround(width / 2.56)); }
+
+}
+
+void soften(QImage &image, double width) {
+    const int radius = blurRadius(width);
+    if (radius < 1 || image.isNull())
+        return;
+    const int channels = image.depth() == 8 ? 1 : 4;
+    QVarLengthArray<uchar> scratch;
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int y = 0; y < image.height(); ++y)
+            for (int c = 0; c < channels; ++c)
+                blurLine(image.scanLine(y) + c, image.width(), channels, radius, scratch);
+        for (int x = 0; x < image.width(); ++x)
+            for (int c = 0; c < channels; ++c)
+                blurLine(image.bits() + x * channels + c, image.height(), int(image.bytesPerLine()), radius, scratch);
+    }
+}
+
+const AssetCache::Look &AssetCache::look(const QString &source, double factor, double brightness, double contrast,
+                                         double saturation, double blur, double glow, double canvasPerPixel) {
+    // Pixel sizes are bucketed, so a slow zoom doesn't redo the work every frame.
+    const double bucket = std::exp(std::round(std::log(std::max(canvasPerPixel, 1e-6)) * 25) / 25);
+    const QString key = QString("%1|%2|%3|%4|%5|%6|%7|%8|%9")
+                            .arg(source)
+                            .arg(m_entries.value(source).modified.toMSecsSinceEpoch())
+                            .arg(factor)
+                            .arg(brightness)
+                            .arg(contrast)
+                            .arg(saturation)
+                            .arg(blur)
+                            .arg(glow)
+                            .arg(bucket);
+    auto found = m_looks.find(key);
+    if (found != m_looks.end())
+        return *found;
+
+    double f = 0;
+    const QImage base = mip(source, factor, &f);
+    // Blur and glow are in canvas pixels; here they're in this copy's pixels.
+    const double blurPixels = blur / bucket, glowPixels = glow / bucket;
+    Look look;
+    look.margin = blurPixels > 0 || glowPixels > 0 ? 3 * (blurRadius(blurPixels) + blurRadius(glowPixels)) + 2 : 0;
+    look.image = QImage(base.width() + 2 * look.margin, base.height() + 2 * look.margin,
+                        QImage::Format_ARGB32_Premultiplied);
+    look.image.fill(Qt::transparent);
+    {
+        QPainter painter(&look.image);
+        painter.drawImage(look.margin, look.margin, base);
+    }
+    if (brightness != 0 || contrast != 1 || saturation != 1)
+        tone(look.image, std::clamp(brightness, -1.0, 1.0), std::max(0.0, contrast), std::max(0.0, saturation));
+    soften(look.image, blurPixels);
+    if (glowPixels > 0) {
+        look.glow = look.image.copy();
+        soften(look.glow, glowPixels);
+    }
+
+    // A small cache: animated looks change every frame anyway.
+    m_lookOrder.append(key);
+    if (m_lookOrder.size() > 24)
+        m_looks.remove(m_lookOrder.takeFirst());
+    return *m_looks.insert(key, look);
+}
+
 QTransform layerTransform(const Scene &scene, AssetCache &assets, int index, double t) {
     QTransform transform;
     QSet<int> seen;
@@ -462,11 +620,31 @@ QTransform layerTransform(const Scene &scene, AssetCache &assets, int index, dou
     return transform;
 }
 
+namespace {
+QPainter::CompositionMode compositionFor(const QString &blend) {
+    if (blend == "add")
+        return QPainter::CompositionMode_Plus;
+    if (blend == "screen")
+        return QPainter::CompositionMode_Screen;
+    if (blend == "multiply")
+        return QPainter::CompositionMode_Multiply;
+    if (blend == "overlay")
+        return QPainter::CompositionMode_Overlay;
+    if (blend == "lighten")
+        return QPainter::CompositionMode_Lighten;
+    if (blend == "darken")
+        return QPainter::CompositionMode_Darken;
+    return QPainter::CompositionMode_SourceOver;
+}
+}
+
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t) {
     painter.save();
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.setRenderHint(QPainter::Antialiasing);
     const QTransform base = painter.transform();
+    // Output pixels per canvas pixel: the view's zoom, or the export's size.
+    const double outputScale = std::sqrt(std::abs(base.determinant()));
     painter.fillRect(QRectF(0, 0, scene.width, scene.height), scene.background);
     painter.setClipRect(QRectF(0, 0, scene.width, scene.height));
     for (int i = 0; i < scene.layers.size(); ++i) {
@@ -474,12 +652,39 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         const double opacity = clamp01(scene.value(layer, "opacity", t));
         if (!layer.visible || opacity <= 0)
             continue;
-        const QImage image = assets.image(layer.source);
+        const QTransform toOutput = layerTransform(scene, assets, i, t) * base;
+        // How many output pixels one image pixel covers, along its longer axis.
+        const double scale = std::max(std::hypot(toOutput.m11(), toOutput.m12()),
+                                      std::hypot(toOutput.m21(), toOutput.m22()));
+        double factor = 1;
+        QImage image = assets.mip(layer.source, scale, &factor);
         if (image.isNull())
             continue;
-        painter.setTransform(layerTransform(scene, assets, i, t) * base);
+
+        QImage glow;
+        int margin = 0;
+        const double brightness = scene.value(layer, "brightness", t), contrast = scene.value(layer, "contrast", t),
+                     saturation = scene.value(layer, "saturation", t), blur = std::max(0.0, scene.value(layer, "blur", t)),
+                     glowSize = std::max(0.0, scene.value(layer, "glow", t));
+        if (brightness != 0 || contrast != 1 || saturation != 1 || blur > 0 || glowSize > 0) {
+            const double canvasPerPixel = scale / factor / std::max(outputScale, 1e-6);
+            const AssetCache::Look &look =
+                assets.look(layer.source, factor, brightness, contrast, saturation, blur, glowSize, canvasPerPixel);
+            image = look.image;
+            glow = look.glow;
+            margin = look.margin;
+        }
+
+        // The copy is drawn back up to the image's full size, less its padding.
+        const QTransform fromCopy(1 / factor, 0, 0, 1 / factor, -margin / factor, -margin / factor);
+        painter.setTransform(fromCopy * toOutput);
         painter.setOpacity(opacity);
+        painter.setCompositionMode(compositionFor(layer.blend));
         painter.drawImage(QPointF(0, 0), image);
+        if (!glow.isNull()) {
+            painter.setCompositionMode(QPainter::CompositionMode_Screen);
+            painter.drawImage(QPointF(0, 0), glow);
+        }
     }
     painter.restore();
 }

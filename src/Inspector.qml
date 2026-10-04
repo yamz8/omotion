@@ -76,7 +76,7 @@ Rectangle {
                 onClicked: backend.keyProperty(row.name)
             }
         }
-        Label { text: row.label; color: win.text; Layout.preferredWidth: 70 }
+        Label { text: row.label; color: win.text; Layout.preferredWidth: 90; elide: Text.ElideRight }
         NumberField {
             Layout.fillWidth: true
             decimals: row.decimals
@@ -149,6 +149,40 @@ Rectangle {
                 PropertyRow { name: "scaleY"; label: "Stretch Y"; decimals: 3 }
                 PropertyRow { name: "rotation"; label: "Rotation°" }
                 PropertyRow { name: "opacity"; label: "Opacity %"; factor: 100; decimals: 0 }
+            }
+
+            Label {
+                visible: inspector.hasLayer
+                Layout.topMargin: 10
+                text: "Look"
+                color: win.text
+                font.bold: true
+            }
+            ColumnLayout {
+                visible: inspector.hasLayer
+                Layout.fillWidth: true
+                spacing: 4
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { width: 14; height: 1 }
+                    Label { text: "Blend"; color: win.text; Layout.preferredWidth: 90 }
+                    ComboBox {
+                        id: blendBox
+                        Layout.fillWidth: true
+                        implicitHeight: 30
+                        font.pixelSize: 13
+                        model: backend.blends
+                        currentIndex: Math.max(0, backend.blends.indexOf(inspector.v.blend || "normal"))
+                        onActivated: function (index) { backend.setBlend(backend.blends[index]); inspector.done() }
+                        background: Rectangle { radius: 4; color: "#1b1b1f"; border.color: blendBox.activeFocus ? theme.accent : win.line }
+                    }
+                }
+                PropertyRow { name: "brightness"; label: "Brightness %"; factor: 100; decimals: 0 }
+                PropertyRow { name: "contrast"; label: "Contrast %"; factor: 100; decimals: 0 }
+                PropertyRow { name: "saturation"; label: "Saturation %"; factor: 100; decimals: 0 }
+                PropertyRow { name: "blur"; label: "Blur px"; decimals: 1 }
+                PropertyRow { name: "glow"; label: "Glow px"; decimals: 1 }
             }
 
             Label {

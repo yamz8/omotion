@@ -399,6 +399,126 @@ private slots:
         QVERIFY(backend.notice().contains("wasn't cut"));
     }
 
+    // A scene of two flat colour squares, one over the other, for checking looks.
+    static Scene twoSquares(QTemporaryDir &dir, AssetCache &assets) {
+        auto square = [&](const QString &name, const QColor &color) {
+            QImage image(40, 40, QImage::Format_ARGB32);
+            image.fill(color);
+            image.save(dir.filePath(name));
+        };
+        square("under.png", QColor(0, 0, 200));
+        square("over.png", QColor(200, 0, 0));
+        Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"width": 100, "height": 100, "layers": [
+            {"name": "under", "source": "under.png", "x": 50, "y": 50},
+            {"name": "over", "source": "over.png", "x": 50, "y": 50}]})").object());
+        assets.setDirectory(dir.path());
+        return scene;
+    }
+
+    void blendsMixWithTheLayersBelow() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(200, 0, 0));
+        scene.layers[1].blend = "add";
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(200, 0, 200));
+        scene.layers[1].blend = "multiply";
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(0, 0, 0));
+        scene.layers[1].blend = "screen";
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(200, 0, 200));
+
+        QString error;
+        Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "a", "source": "a", "blend": "glowy"}]})").object(), &error);
+        QVERIFY(error.contains("blend"));
+        QCOMPARE(scene.toJson()["layers"].toArray()[1].toObject()["blend"].toString(), QString("screen"));
+        QVERIFY(!scene.toJson()["layers"].toArray()[0].toObject().contains("blend"));
+    }
+
+    void toneChangesColour() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        scene.layers[1].base["brightness"] = 1;
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(255, 255, 255));
+        scene.layers[1].base["brightness"] = -1;
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(0, 0, 0));
+        scene.layers[1].base["brightness"] = 0;
+        scene.layers[1].base["saturation"] = 0;
+        const QColor grey = renderFrame(scene, assets, 0).pixelColor(50, 50);
+        QCOMPARE(grey.red(), grey.green());
+        QCOMPARE(grey.green(), grey.blue());
+        scene.layers[1].base["saturation"] = 1;
+        scene.layers[1].base["contrast"] = 3;
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(50, 50), QColor(255, 0, 0));
+        // Looks can be keyframed like anything else.
+        scene.layers[1].keys["brightness"] = {Key{0, 0}, Key{1, -1}};
+        QVERIFY(renderFrame(scene, assets, .5).pixelColor(50, 50).red() < 200);
+    }
+
+    void blurAndGlowSpreadPastTheEdge() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        scene.layers.removeFirst();
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(27, 50), QColor(0, 0, 0));
+        scene.layers[0].base["blur"] = 10;
+        const QImage blurred = renderFrame(scene, assets, 0);
+        QVERIFY(blurred.pixelColor(27, 50).red() > 10);        // Spread outwards...
+        QVERIFY(blurred.pixelColor(50, 50).red() > 190);       // ...the middle stays...
+        QVERIFY(qAbs(blurred.pixelColor(30, 50).red() - blurred.pixelColor(69, 50).red()) < 8);  // ...and centred.
+        scene.layers[0].base["blur"] = 0;
+        scene.layers[0].base["glow"] = 10;
+        const QImage glowing = renderFrame(scene, assets, 0);
+        QVERIFY(glowing.pixelColor(27, 50).red() > 10);
+        QVERIFY(qAbs(glowing.pixelColor(50, 50).red() - (255 - 55 * 55 / 255.0)) <= 1);  // Screened over itself.
+    }
+
+    void keyAllLeavesUnusedLooksAlone() {
+        Scene scene;
+        scene.layers.append(Layer{});
+        scene.layers[0].base["glow"] = 4;
+        scene.keyAll(0, 0);
+        QVERIFY(scene.layers[0].keys.contains("glow"));
+        QVERIFY(!scene.layers[0].keys.contains("blur"));
+        QVERIFY(scene.layers[0].keys.contains("rotation"));
+        QVERIFY(!scene.toJson()["layers"].toArray()[0].toObject().contains("blur"));
+    }
+
+    void smallDrawingUsesShrunkCopiesThatMatch() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {800, 400}), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        double factor = 0;
+        QCOMPARE(assets.mip("assets/p.png", .2, &factor).width(), 200);
+        QCOMPARE(factor, .25);
+        assets.mip("assets/p.png", 2, &factor);
+        QCOMPARE(factor, 1.0);
+        // A quarter-size render from the shrunk copy looks like the full one shrunk.
+        const QImage small = renderFrame(scene, assets, 0, {200, 100});
+        const QImage reference = renderFrame(scene, assets, 0).scaled(200, 100, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        QVERIFY(differences(small, reference) < 200 * 100 / 50);
+    }
+
+    void duplicatesDontInheritCuts() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(5, 5), QPointF(80, 5), QPointF(80, 60), QPointF(5, 60)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        backend.setBlend("add");
+        backend.duplicateLayer();
+        QCOMPARE(backend.selected(), 2);
+        const Layer &copy = backend.scene().layers[2];
+        QCOMPARE(copy.name, QString("p piece copy"));
+        QCOMPARE(copy.blend, QString("add"));
+        QVERIFY(!Project::isCut(backend.scene(), 2));
+        QVERIFY(Project::isCut(backend.scene(), 1));
+    }
+
     void cuttingNothingFails() {
         QTemporaryDir dir;
         const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);

@@ -44,6 +44,7 @@ struct Layer {
     QString parent;   // Name of the layer this one moves with, or empty.
     bool visible = true;
     QPointF anchor{0.5, 0.5};  // Pivot, as a fraction of the image size.
+    QString blend = "normal";  // How it mixes with the layers below.
     QHash<QString, double> base;
     QMap<QString, QList<Key>> keys;
     QJsonObject raw;  // Everything as read, so unknown fields survive a save.
@@ -59,7 +60,10 @@ struct Scene {
     QJsonObject raw;
 
     static const QStringList &properties();
+    // The properties that change how a layer looks rather than where it is.
+    static const QStringList &lookProperties();
     static const QStringList &eases();
+    static const QStringList &blends();
     static double defaultValue(const QString &property);
     static double ease(const QString &name, double progress);
 
@@ -81,7 +85,8 @@ struct Scene {
     // Sets a keyframe at time t holding the property's current value,
     // starting its animation if it had none.
     void keyProperty(int layer, const QString &property, double t);
-    // Keyframes every property at time t.
+    // Keyframes every transform property at time t, and the look properties
+    // the layer uses.
     void keyAll(int layer, double t);
     // Removes the keyframes within half a frame of t; true when any were removed.
     bool removeKeysAt(int layer, double t);
@@ -108,6 +113,19 @@ public:
     QString directory() const { return m_directory; }
     QImage image(const QString &source);
     QSizeF size(const QString &source);
+    // The image shrunk by halves to the smallest copy still at least scale of
+    // full size, so drawing it smaller is quick and doesn't shimmer. factor is
+    // that copy's size relative to the full image.
+    QImage mip(const QString &source, double scale, double *factor);
+
+    // A layer image with its look applied, cached for the next frame.
+    struct Look {
+        QImage image;
+        QImage glow;
+        int margin = 0;  // Padding added around the image, for blur to spread into.
+    };
+    const Look &look(const QString &source, double factor, double brightness, double contrast,
+                     double saturation, double blur, double glow, double canvasPerPixel);
     QStringList missing() const { return m_missing; }
     void clearMissing() { m_missing.clear(); }
 
@@ -115,10 +133,13 @@ private:
     struct Entry {
         QImage image;
         QDateTime modified;
+        QList<QImage> mips;  // Half, quarter, eighth... made as they're needed.
     };
 
     QString m_directory;
     QHash<QString, Entry> m_entries;
+    QHash<QString, Look> m_looks;
+    QStringList m_lookOrder;
     QStringList m_missing;
 };
 
@@ -126,5 +147,8 @@ private:
 QTransform layerTransform(const Scene &scene, AssetCache &assets, int index, double t);
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t);
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
+// Softens an Alpha8 or 32-bit image in place, spreading edges about width
+// pixels: three box blurs, which come close to a Gaussian.
+void soften(QImage &image, double width);
 // The top-most visible layer with an opaque pixel at a canvas point, or -1.
 int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &point);

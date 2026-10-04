@@ -91,6 +91,8 @@ ApplicationWindow {
     Shortcut { sequence: "H"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.toggleVisible(backend.selected) }
     Shortcut { sequence: "Delete"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.deleteLayer() }
     Shortcut { sequence: "F2"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: timeline.rename(backend.selected) }
+    Shortcut { sequence: "Ctrl+D"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.duplicateLayer() }
+    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
 
     Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", -1) }
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", 1) }

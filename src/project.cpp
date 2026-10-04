@@ -6,7 +6,6 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QVarLengthArray>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSaveFile>
@@ -209,21 +208,6 @@ QPolygonF polygonFrom(const QJsonValue &value) {
 // Canvas pixels per image pixel for a layer at a moment: how big its pixels look.
 double pixelScale(const QTransform &transform) { return std::sqrt(std::abs(transform.determinant())); }
 
-// One pass of a running-sum box blur along a line, clamping at the ends.
-void boxBlurLine(uchar *line, int count, int stride, int radius, QVarLengthArray<uchar> &scratch) {
-    scratch.resize(count);
-    for (int i = 0; i < count; ++i)
-        scratch[i] = line[i * stride];
-    const int window = 2 * radius + 1;
-    int sum = 0;
-    for (int i = -radius; i <= radius; ++i)
-        sum += scratch[std::clamp(i, 0, count - 1)];
-    for (int i = 0; i < count; ++i) {
-        line[i * stride] = uchar(sum / window);
-        sum += scratch[std::min(i + radius + 1, count - 1)] - scratch[std::max(i - radius, 0)];
-    }
-}
-
 // The polygon as an 8-bit coverage mask over an area of the image, softened
 // by feather pixels: three box blurs come close to a Gaussian.
 QImage maskFor(const QPolygonF &polygon, double feather, const QRect &area) {
@@ -237,16 +221,7 @@ QImage maskFor(const QPolygonF &polygon, double feather, const QRect &area) {
         painter.setBrush(Qt::black);
         painter.drawPolygon(polygon);
     }
-    const int radius = int(std::lround(feather / 2.56));
-    if (radius < 1)
-        return mask;
-    QVarLengthArray<uchar> scratch;
-    for (int pass = 0; pass < 3; ++pass) {
-        for (int y = 0; y < mask.height(); ++y)
-            boxBlurLine(mask.scanLine(y), mask.width(), 1, radius, scratch);
-        for (int x = 0; x < mask.width(); ++x)
-            boxBlurLine(mask.bits() + x, mask.height(), int(mask.bytesPerLine()), radius, scratch);
-    }
+    soften(mask, feather);
     return mask;
 }
 

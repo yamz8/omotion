@@ -113,6 +113,7 @@ QVariantMap Backend::values() const {
                     {"source", layer.source},
                     {"parent", layer.parent},
                     {"anchorX", layer.anchor.x()},
+                    {"blend", layer.blend},
                     {"anchorY", layer.anchor.y()}};
     QVariantList animated;
     for (const QString &property : Scene::properties()) {
@@ -376,6 +377,40 @@ bool Backend::renameLayer(int index, const QString &wanted) {
     Project::renameCutSource(m_scene, old, name);
     changed();
     return true;
+}
+
+void Backend::duplicateLayer() {
+    if (m_selected < 0)
+        return;
+    checkpoint();
+    Layer copy = m_scene.layers.at(m_selected);
+    copy.name = m_scene.uniqueName(copy.name + " copy");
+    // The copy is just a layer: it wasn't cut out, and has no holes of its own
+    // to redraw, even if the original does.
+    copy.raw.remove("cut");
+    copy.raw.remove("uncut");
+    m_scene.layers.insert(m_selected + 1, copy);
+    m_selected += 1;
+    setKeySelection({});
+    emit selectedChanged();
+    changed();
+    setNotice("Duplicated as " + copy.name);
+}
+
+void Backend::setBlend(const QString &blend) {
+    if (m_selected < 0 || !Scene::blends().contains(blend) || m_scene.layers.at(m_selected).blend == blend)
+        return;
+    checkpoint();
+    m_scene.layers[m_selected].blend = blend;
+    changed();
+    setNotice("Blend: " + blend);
+}
+
+void Backend::cycleBlend() {
+    if (m_selected < 0)
+        return;
+    const QStringList &blends = Scene::blends();
+    setBlend(blends.at((blends.indexOf(m_scene.layers.at(m_selected).blend) + 1) % blends.size()));
 }
 
 void Backend::setProperty(const QString &property, double value) {
