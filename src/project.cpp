@@ -186,7 +186,7 @@ bool save(const QString &directory, const Scene &scene, QString *error, QByteArr
 }
 
 int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
-           bool punch, QString *error) {
+           bool punch, QString *error, const QString &wantedName) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -232,7 +232,9 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
     const QDir dir(assets.directory());
     dir.mkpath("assets");
     const QDir assetDir(dir.filePath("assets"));
-    const QString name = scene.uniqueName(source.name + " piece");
+    if (!wantedName.isEmpty() && scene.indexOf(wantedName) >= 0)
+        return fail(QString("There's already a layer named \"%1\".").arg(wantedName));
+    const QString name = wantedName.isEmpty() ? scene.uniqueName(source.name + " piece") : wantedName;
     const QString pieceSource = "assets/" + uniqueFile(assetDir, slug(name), "png");
     if (!writeImage(piece, dir.filePath(pieceSource), error))
         return -1;

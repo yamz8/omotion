@@ -24,6 +24,9 @@ const char *Usage = R"(Usage:
   omotion render <project> <output>      Render to .mp4, .webm, .gif, or a folder of PNG frames
   omotion frame <project> <seconds> <output.png>
                                          Render one frame as a PNG
+  omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--name <name>] [--at <seconds>]
+                                         Cut the part of a layer inside a polygon (canvas
+                                         pixels) out into a new layer, as the C tool does
 
 A project is a folder holding scene.json. Opening an image makes
 "<image>.omotion" beside it; opening a folder of images makes a scene.json
@@ -50,6 +53,43 @@ int command(const QStringList &args) {
         if (assets.image(layer.source).isNull())
             return fail(QString("Can't read %1 (layer \"%2\").").arg(layer.source, layer.name));
 
+    if (args.at(1) == "cut") {
+        if (args.size() < 4)
+            return fail("cut takes a project, a layer name, and at least three x,y points.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QPolygonF polygon;
+        bool punch = true;
+        QString name;
+        double t = 0;
+        for (int i = 4; i < args.size(); ++i) {
+            const QString arg = args.at(i);
+            if (arg == "--copy") {
+                punch = false;
+            } else if (arg == "--name" && i + 1 < args.size()) {
+                name = args.at(++i);
+            } else if (arg == "--at" && i + 1 < args.size()) {
+                t = args.at(++i).toDouble();
+            } else {
+                const QStringList xy = arg.split(',');
+                bool okX = false, okY = false;
+                if (xy.size() == 2)
+                    polygon.append(QPointF(xy.at(0).toDouble(&okX), xy.at(1).toDouble(&okY)));
+                if (!okX || !okY)
+                    return fail(QString("\"%1\" isn't a point like 120,340.").arg(arg));
+            }
+        }
+        const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name);
+        if (piece < 0)
+            return fail(error);
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << edited.layers.at(piece).name << "\n";
+        return 0;
+    }
+
     if (args.at(1) == "frame") {
         if (args.size() != 5)
             return fail("frame takes a project, a time in seconds, and an output .png.");
@@ -74,7 +114,8 @@ int command(const QStringList &args) {
 }
 
 int main(int argc, char *argv[]) {
-    const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame"));
+    const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
+                                       !std::strcmp(argv[1], "cut"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 

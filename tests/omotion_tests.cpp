@@ -221,6 +221,20 @@ private slots:
         QVERIFY(differences(renderFrame(scene, assets, 0), before) < 200 * 100 / 50);
     }
 
+    void cutPiecesCanBeNamed() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        const QPolygonF square{{5, 5}, {80, 5}, {80, 60}, {5, 60}};
+        QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, false, &error, "Sun"), 1);
+        QCOMPARE(scene.layers[1].name, QString("Sun"));
+        QCOMPARE(scene.layers[1].source, QString("assets/sun.png"));
+        QCOMPARE(scene.layers[0].source, QString("assets/p.png"));  // Copied out, so no hole.
+        QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, false, &error, "Sun"), -1);
+    }
+
     void cuttingNothingFails() {
         QTemporaryDir dir;
         const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);

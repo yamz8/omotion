@@ -31,9 +31,10 @@ bool save(const QString &directory, const Scene &scene, QString *error, QByteArr
 // image and layer, placed exactly where it was and parented to the layer it
 // came from. With punch, the source layer gets a copy of its image with a
 // hole where the piece was. New images are always new files, so undo can go
-// back to the old ones. Returns the new layer's index, or -1.
+// back to the old ones. The piece is named after its source unless given a
+// name. Returns the new layer's index, or -1.
 int cutOut(Scene &scene, AssetCache &assets, int layer, const QPolygonF &polygon, double t,
-           bool punch, QString *error);
+           bool punch, QString *error, const QString &name = {});
 
 // Moves a layer's pivot to a canvas point without moving the layer.
 void setPivot(Scene &scene, AssetCache &assets, int layer, const QPointF &point, double t);

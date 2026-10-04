@@ -123,6 +123,8 @@ The command line uses the same renderer as the window, without opening one:
 ```sh
 omotion render photo.omotion out.mp4      # or .webm, .gif, or a folder for PNG frames
 omotion frame photo.omotion 1.5 f.png     # one frame, to check a moment
+omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --name foreground
+                                          # what the C tool does, with points in canvas pixels
 ```
 
 ## Building
