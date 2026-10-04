@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Main.qml">Main.qml</file>
+        <file alias="Timeline.qml">Timeline.qml</file>
+        <file alias="Inspector.qml">Inspector.qml</file>
+        <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+    </qresource>
+</RCC>

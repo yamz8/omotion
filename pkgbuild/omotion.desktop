@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Omotion
+Comment=Cut a picture into layers and animate it
+Exec=omotion %f
+Icon=omotion
+Terminal=false
+Categories=Graphics;
+StartupWMClass=omotion
