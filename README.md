@@ -20,9 +20,11 @@ omotion my-animation/      # opens a project folder, or makes one from a folder 
 
 Your original image is copied into the project and never touched.
 
-1. Press **C**, click around a part of the picture (an arm, a cloud, a
-   logo), and press **Enter**. The part becomes its own layer and leaves a
-   transparent hole behind (**Shift+Enter** copies it out instead).
+1. Press **C** and drag around a part of the picture (an arm, a cloud, a
+   logo), or click around it point by point. Drag the points to adjust the
+   shape, and press **F** to soften its edge. **Enter** makes the part its
+   own layer and leaves a hole behind (**Shift+Enter** copies it out
+   instead). **R** reshapes a piece later, keeping its animation.
 2. Press **P** and click where the new layer should turn, like a shoulder.
 3. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
@@ -55,7 +57,10 @@ Your original image is copied into the project and never touched.
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
-| `C` | Cut tool: click around a piece, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
+| `C` | Cut tool: drag around a piece or click points, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
+| Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
+| `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
+| `R` | Reshape the selected piece; its animation and pivot stay |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `H` | Hide / show the layer |
 | `F2` | Rename the layer |
@@ -114,6 +119,12 @@ photo.omotion/
   (overshoots and settles), or `hold` (jumps at the next key).
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
+- **`cut`** on a piece remembers how it was made: the layer it came `from`,
+  its `polygon` and `feather` in that layer's image pixels, whether it
+  `punch`ed a hole, and its `order` among that layer's pieces. **`uncut`**
+  on a layer that has holes is its image before any cuts. omotion redraws
+  pieces and holes from these when one is reshaped; edit the polygon by
+  hand and press `R` then `Enter` to apply it.
 - Fields omotion doesn't know about are kept as they are, so notes and
   metadata are safe to add.
 
@@ -127,7 +138,7 @@ The command line uses the same renderer as the window, without opening one:
 ```sh
 omotion render photo.omotion out.mp4      # or .webm, .gif, or a folder for PNG frames
 omotion frame photo.omotion 1.5 f.png     # one frame, to check a moment
-omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --name foreground
+omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --soft 3 --name foreground
                                           # what the C tool does, with points in canvas pixels
 ```
 

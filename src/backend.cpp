@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLineF>
 #include <QUrl>
 #include <algorithm>
 #include <cmath>
@@ -162,6 +163,7 @@ bool Backend::open(const QString &pathOrUrl) {
     m_undo.clear();
     m_redo.clear();
     m_cut.clear();
+    m_reshaping.clear();
     m_keySelection.clear();
     m_clipboard.clear();
     m_tool = "move";
@@ -371,6 +373,7 @@ bool Backend::renameLayer(int index, const QString &wanted) {
     for (Layer &layer : m_scene.layers)
         if (layer.parent == old)
             layer.parent = name;
+    Project::renameCutSource(m_scene, old, name);
     changed();
     return true;
 }
@@ -626,6 +629,36 @@ void Backend::setTool(const QString &tool) {
         togglePlay();
     m_tool = tool;
     m_cut.clear();
+    m_reshaping.clear();
+    emit toolChanged();
+}
+
+void Backend::startReshape() {
+    if (m_selected < 0)
+        return setNotice("Select a piece to reshape.");
+    if (!Project::isCut(m_scene, m_selected))
+        return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.")
+                             .arg(m_scene.layers.at(m_selected).name));
+    double feather = 0;
+    const QPolygonF outline = Project::cutOutline(m_scene, m_assets, m_selected, m_time, &feather);
+    if (outline.isEmpty())
+        return setError(QString("The layer %1 was cut from is gone, so it can't be reshaped.")
+                            .arg(m_scene.layers.at(m_selected).name));
+    if (m_playing)
+        togglePlay();
+    m_tool = "cut";
+    m_cut = outline;
+    m_reshaping = m_scene.layers.at(m_selected).name;
+    m_feather = std::round(feather * 10) / 10;
+    emit toolChanged();
+}
+
+void Backend::cycleFeather() {
+    static const QList<double> steps{0, 1, 3, 8, 20};
+    int next = 0;
+    while (next < steps.size() && steps.at(next) <= m_feather + 1e-6)
+        ++next;
+    m_feather = next < steps.size() ? steps.at(next) : steps.first();
     emit toolChanged();
 }
 
@@ -633,6 +666,58 @@ void Backend::addCutPoint(double x, double y) {
     if (m_tool != "cut")
         return;
     m_cut.append(QPointF(x, y));
+    emit toolChanged();
+}
+
+int Backend::cutPointNear(double x, double y, double radius) const {
+    int best = -1;
+    double bestDistance = radius;
+    for (int i = 0; i < m_cut.size(); ++i) {
+        const double d = QLineF(m_cut.at(i), QPointF(x, y)).length();
+        if (d <= bestDistance) {
+            best = i;
+            bestDistance = d;
+        }
+    }
+    return best;
+}
+
+int Backend::insertCutPoint(double x, double y, double radius) {
+    if (m_tool != "cut" || m_cut.size() < 3)
+        return -1;
+    // The nearest edge of the closed shape, measured to the segment itself.
+    const QPointF point(x, y);
+    int best = -1;
+    double bestDistance = radius;
+    for (int i = 0; i < m_cut.size(); ++i) {
+        const QPointF a = m_cut.at(i), b = m_cut.at((i + 1) % m_cut.size());
+        const QPointF ab = b - a;
+        const double length = QPointF::dotProduct(ab, ab);
+        const double along = length <= 0 ? 0 : std::clamp(QPointF::dotProduct(point - a, ab) / length, 0.0, 1.0);
+        const double d = QLineF(a + ab * along, point).length();
+        if (d <= bestDistance) {
+            best = i + 1;
+            bestDistance = d;
+        }
+    }
+    if (best >= 0) {
+        m_cut.insert(best, point);
+        emit toolChanged();
+    }
+    return best;
+}
+
+void Backend::moveCutPoint(int index, double x, double y) {
+    if (index < 0 || index >= m_cut.size())
+        return;
+    m_cut[index] = QPointF(x, y);
+    emit toolChanged();
+}
+
+void Backend::removeCutPointAt(int index) {
+    if (index < 0 || index >= m_cut.size())
+        return;
+    m_cut.removeAt(index);
     emit toolChanged();
 }
 
@@ -648,20 +733,30 @@ void Backend::finishCut(bool punch) {
         return;
     Scene scene = m_scene;
     QString error;
-    const int index = Project::cutOut(scene, m_assets, m_selected, QPolygonF(m_cut), m_time, punch, &error);
-    if (index < 0)
-        return setError(error);
+    int index = -1;
+    if (!m_reshaping.isEmpty()) {
+        index = scene.indexOf(m_reshaping);
+        if (!Project::reshapeCut(scene, m_assets, index, QPolygonF(m_cut), m_time, m_feather, &error))
+            return setError(error);
+    } else {
+        index = Project::cutOut(scene, m_assets, m_selected, QPolygonF(m_cut), m_time, punch, &error, {}, m_feather);
+        if (index < 0)
+            return setError(error);
+    }
+    const bool reshaped = !m_reshaping.isEmpty();
     checkpoint();
     m_scene = scene;
     m_selected = index;
     m_tool = "move";
     m_cut.clear();
+    m_reshaping.clear();
     emit toolChanged();
     emit selectedChanged();
     changed();
     rearmWatcher();
-    setNotice(QString("Cut out %1. Press P to set where it pivots, then K to start animating it.")
-                  .arg(m_scene.layers.at(index).name));
+    setNotice(reshaped ? QString("Reshaped %1.").arg(m_scene.layers.at(index).name)
+                       : QString("Cut out %1. Press P to set where it pivots, then K to start animating it.")
+                             .arg(m_scene.layers.at(index).name));
 }
 
 void Backend::setPivotAt(double x, double y) {

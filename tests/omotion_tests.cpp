@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLineF>
 #include <QPainter>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -275,6 +276,127 @@ private slots:
         QCOMPARE(scene.layers[1].source, QString("assets/sun.png"));
         QCOMPARE(scene.layers[0].source, QString("assets/p.png"));  // Copied out, so no hole.
         QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, false, &error, "Sun"), -1);
+    }
+
+    void softCutsStillAddUpToTheOriginal() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        const QPolygonF square{{20, 20}, {90, 20}, {90, 70}, {20, 70}};
+        QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, true, &error, "soft", 8), 1);
+        QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
+
+        // The piece fades out across its edge...
+        const QImage piece = assets.image(scene.layers[1].source);
+        const QJsonArray origin = scene.layers[1].raw["cut"].toObject()["origin"].toArray();
+        const int edgeX = 20 - origin[0].toInt(), midY = 45 - origin[1].toInt();
+        QVERIFY(qAlpha(piece.pixel(edgeX, midY)) > 60 && qAlpha(piece.pixel(edgeX, midY)) < 200);
+        QCOMPARE(qAlpha(piece.pixel(edgeX + 15, midY)), 255);
+        // ...and the hole only opens where the piece is solid.
+        const QImage holed = assets.image(scene.layers[0].source);
+        QCOMPARE(qAlpha(holed.pixel(55, 45)), 0);
+        QCOMPARE(qAlpha(holed.pixel(20, 45)), 255);
+    }
+
+    void reshapingKeepsTheAnimationAndPivot() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{10, 10}, {70, 10}, {70, 50}, {10, 50}}, 0, true, &error), 1);
+        Project::setPivot(scene, assets, 1, {15, 15}, 0);
+        scene.keyAll(1, 0);
+        scene.setValue(1, "rotation", 0, 0);
+        const QList<Key> keys = scene.layers[1].keys["rotation"];
+        const double x = scene.layers[1].base["x"];
+
+        const QPolygonF bigger{{5, 5}, {100, 5}, {100, 60}, {5, 60}};
+        QVERIFY2(Project::reshapeCut(scene, assets, 1, bigger, 0, 0, &error), qPrintable(error));
+        QCOMPARE(scene.layers[1].keys["rotation"].size(), keys.size());
+        QCOMPARE(scene.layers[1].base["x"], x);
+        QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
+        // The pivot is still on the picture's 15,15.
+        const QTransform toCanvas = layerTransform(scene, assets, 1, 0);
+        const QSizeF size = assets.size(scene.layers[1].source);
+        const QPointF pivot = toCanvas.map(QPointF(scene.layers[1].anchor.x() * size.width(),
+                                                   scene.layers[1].anchor.y() * size.height()));
+        QVERIFY(QLineF(pivot, QPointF(15, 15)).length() < .01);
+        QCOMPARE(Project::cutOutline(scene, assets, 1, 0).boundingRect(), bigger.boundingRect());
+    }
+
+    void reshapingOnePieceKeepsTheOthersHoles() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{10, 10}, {60, 10}, {60, 50}, {10, 50}}, 0, true, &error, "a"), 1);
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{120, 50}, {170, 50}, {170, 80}, {120, 80}}, 0, true, &error, "b"), 1);
+        QVERIFY(Project::reshapeCut(scene, assets, scene.indexOf("a"), {{10, 10}, {40, 10}, {40, 40}, {10, 40}}, 0, 3, &error));
+        const QImage holed = assets.image(scene.layers[0].source);
+        QCOMPARE(qAlpha(holed.pixel(150, 65)), 0);   // b's hole is still there.
+        QCOMPARE(qAlpha(holed.pixel(55, 45)), 255);  // a's old hole is filled back in.
+        QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
+        QCOMPARE(scene.layers[0].raw["uncut"].toString(), QString("assets/p.png"));
+    }
+
+    void reshapingRedrawsPiecesCutFromPieces() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        Project::cutOut(scene, assets, 0, {{5, 5}, {90, 5}, {90, 70}, {5, 70}}, 0, true, &error, "arm");
+        QVERIFY(Project::cutOut(scene, assets, scene.indexOf("arm"), {{15, 15}, {40, 15}, {40, 40}, {15, 40}}, 0, true,
+                                &error, "hand") > 0);
+        QVERIFY2(Project::reshapeCut(scene, assets, scene.indexOf("arm"), {{5, 5}, {110, 5}, {110, 80}, {5, 80}}, 0, 2, &error),
+                 qPrintable(error));
+        QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
+        // The hand's hole in the arm survived the arm being redrawn.
+        const Layer &arm = scene.layers[scene.indexOf("arm")];
+        QVERIFY(arm.raw.contains("uncut"));
+        QVERIFY(arm.source != arm.raw["uncut"].toString());
+    }
+
+    void renamingASourceKeepsItsPiecesReshapable() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(5, 5), QPointF(80, 5), QPointF(80, 60), QPointF(5, 60)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        QVERIFY(backend.renameLayer(0, "body"));
+        backend.select(1);
+        backend.startReshape();
+        QCOMPARE(backend.tool(), QString("cut"));
+        QCOMPARE(backend.cutPoints().size(), 4);
+        // Drag a corner out and add a point on an edge, then apply.
+        backend.moveCutPoint(backend.cutPointNear(80, 60, 2), 120, 90);
+        QCOMPARE(backend.insertCutPoint(40, 5.5, 2), 1);
+        backend.finishCut(true);
+        QCOMPARE(backend.error(), QString());
+        QCOMPARE(Project::cutOutline(backend.scene(), backend.assets(), 1, 0).size(), 5);
+        backend.undo();
+        QCOMPARE(Project::cutOutline(backend.scene(), backend.assets(), 1, 0).size(), 4);
+    }
+
+    void layersNotCutHereCantBeReshaped() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.startReshape();
+        QCOMPARE(backend.tool(), QString("move"));
+        QVERIFY(backend.notice().contains("wasn't cut"));
     }
 
     void cuttingNothingFails() {

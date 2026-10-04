@@ -117,6 +117,8 @@ ApplicationWindow {
 
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
+    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
+    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.cycleFeather() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(true) }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(false) }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
@@ -233,13 +235,29 @@ ApplicationWindow {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: backend.tool === "move" ? (pressed && backend.selected >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor) : Qt.CrossCursor
                     property bool dragging: false
+                    // In the cut tool: the point being dragged, or a lasso
+                    // being drawn, and where it last dropped a point.
+                    property int cutPoint: -1
+                    property bool lassoing: false
+                    property point lassoAt
 
                     onPressed: function (mouse) {
                         win.focusCanvas();
                         const p = view.toScene(mouse.x, mouse.y);
                         if (backend.tool === "cut") {
-                            if (mouse.button === Qt.RightButton) backend.removeCutPoint();
-                            else backend.addCutPoint(p.x, p.y);
+                            const reach = 9 / view.zoom();
+                            const near = backend.cutPointNear(p.x, p.y, reach);
+                            if (mouse.button === Qt.RightButton) {
+                                if (near >= 0) backend.removeCutPointAt(near);
+                                else backend.removeCutPoint();
+                                return;
+                            }
+                            cutPoint = near >= 0 ? near : backend.insertCutPoint(p.x, p.y, reach * 0.7);
+                            if (cutPoint < 0) {
+                                backend.addCutPoint(p.x, p.y);
+                                lassoing = true;
+                                lassoAt = Qt.point(mouse.x, mouse.y);
+                            }
                             return;
                         }
                         if (backend.tool === "pivot") {
@@ -256,6 +274,18 @@ ApplicationWindow {
                         }
                     }
                     onPositionChanged: function (mouse) {
+                        if (cutPoint >= 0) {
+                            const q = view.toScene(mouse.x, mouse.y);
+                            backend.moveCutPoint(cutPoint, q.x, q.y);
+                            return;
+                        }
+                        // Dragging traces the shape freehand, a point every few pixels.
+                        if (lassoing && Math.hypot(mouse.x - lassoAt.x, mouse.y - lassoAt.y) >= 6) {
+                            const q = view.toScene(mouse.x, mouse.y);
+                            backend.addCutPoint(q.x, q.y);
+                            lassoAt = Qt.point(mouse.x, mouse.y);
+                            return;
+                        }
                         if (!dragging)
                             return;
                         const p = view.toScene(mouse.x, mouse.y);
@@ -265,6 +295,8 @@ ApplicationWindow {
                         if (dragging)
                             backend.endDrag();
                         dragging = false;
+                        cutPoint = -1;
+                        lassoing = false;
                     }
                     onWheel: function (wheel) {
                         if (backend.selected < 0)
@@ -286,15 +318,24 @@ ApplicationWindow {
                     radius: 6
                     color: "#e0141417"
                     border.color: theme.accent
-                    width: toolHint.implicitWidth + 28
-                    height: toolHint.implicitHeight + 14
+                    width: Math.min(toolHint.implicitWidth + 28, parent.width - 24)
+                    height: toolHint.height + 14
                     Label {
                         id: toolHint
                         anchors.centerIn: parent
+                        width: parent.width - 28
+                        wrapMode: Text.WordWrap
                         color: win.text
-                        text: backend.tool === "cut"
-                              ? "Cut: click around the piece (" + backend.cutPoints.length + " points)   ·   Enter cut out   ·   Shift+Enter copy out   ·   Backspace undo point   ·   Esc cancel"
-                              : "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
+                        horizontalAlignment: Text.AlignHCenter
+                        lineHeight: 1.3
+                        text: backend.tool !== "cut"
+                              ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
+                              : (backend.reshaping !== ""
+                                 ? "Reshape " + backend.reshaping + ": drag points, click an edge to add one, right-click one to remove it"
+                                 : "Cut: drag around the piece, or click point by point (" + backend.cutPoints.length + " so far)")
+                                + "\nF soft edge: " + backend.feather + " px   ·   "
+                                + (backend.reshaping !== "" ? "Enter apply" : "Enter cut out   ·   Shift+Enter copy out")
+                                + "   ·   Backspace drops the last point   ·   Esc cancel"
                     }
                 }
 

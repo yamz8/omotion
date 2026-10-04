@@ -23,6 +23,8 @@ public:
 
     // Item coordinates to canvas pixels.
     Q_INVOKABLE QPointF toScene(double x, double y) const;
+    // How many item pixels one canvas pixel takes up.
+    Q_INVOKABLE double zoom() const { return viewTransform().m11(); }
 
     void paint(QPainter *painter) override;
 

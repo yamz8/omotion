@@ -118,9 +118,11 @@ void SceneView::paint(QPainter *painter) {
             painter->setPen(QPen(m_accent, 1.5, Qt::DashLine));
             painter->drawLine(shape.last(), shape.first());
         }
-        painter->setPen(Qt::NoPen);
+        // Handles to grab; a traced lasso has so many that they shrink to dots.
+        const double radius = shape.size() > 40 ? 2.5 : 4.5;
+        painter->setPen(QPen(QColor("#0e0e10"), 1.5));
         painter->setBrush(m_accent);
         for (const QPointF &point : shape)
-            painter->drawEllipse(point, 3.5, 3.5);
+            painter->drawEllipse(point, radius, radius);
     }
 }

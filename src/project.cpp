@@ -4,7 +4,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QVarLengthArray>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSaveFile>
@@ -185,8 +187,187 @@ bool save(const QString &directory, const Scene &scene, QString *error, QByteArr
     return true;
 }
 
+namespace {
+
+QJsonArray polygonJson(const QPolygonF &polygon) {
+    QJsonArray array;
+    for (const QPointF &point : polygon)
+        array.append(QJsonArray{std::round(point.x() * 100) / 100, std::round(point.y() * 100) / 100});
+    return array;
+}
+
+QPolygonF polygonFrom(const QJsonValue &value) {
+    QPolygonF polygon;
+    for (const QJsonValue &point : value.toArray()) {
+        const QJsonArray xy = point.toArray();
+        if (xy.size() == 2)
+            polygon.append(QPointF(xy.at(0).toDouble(), xy.at(1).toDouble()));
+    }
+    return polygon;
+}
+
+// Canvas pixels per image pixel for a layer at a moment: how big its pixels look.
+double pixelScale(const QTransform &transform) { return std::sqrt(std::abs(transform.determinant())); }
+
+// One pass of a running-sum box blur along a line, clamping at the ends.
+void boxBlurLine(uchar *line, int count, int stride, int radius, QVarLengthArray<uchar> &scratch) {
+    scratch.resize(count);
+    for (int i = 0; i < count; ++i)
+        scratch[i] = line[i * stride];
+    const int window = 2 * radius + 1;
+    int sum = 0;
+    for (int i = -radius; i <= radius; ++i)
+        sum += scratch[std::clamp(i, 0, count - 1)];
+    for (int i = 0; i < count; ++i) {
+        line[i * stride] = uchar(sum / window);
+        sum += scratch[std::min(i + radius + 1, count - 1)] - scratch[std::max(i - radius, 0)];
+    }
+}
+
+// The polygon as an 8-bit coverage mask over an area of the image, softened
+// by feather pixels: three box blurs come close to a Gaussian.
+QImage maskFor(const QPolygonF &polygon, double feather, const QRect &area) {
+    QImage mask(area.size(), QImage::Format_Alpha8);
+    mask.fill(0);
+    {
+        QPainter painter(&mask);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.translate(-area.topLeft());
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::black);
+        painter.drawPolygon(polygon);
+    }
+    const int radius = int(std::lround(feather / 2.56));
+    if (radius < 1)
+        return mask;
+    QVarLengthArray<uchar> scratch;
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int y = 0; y < mask.height(); ++y)
+            boxBlurLine(mask.scanLine(y), mask.width(), 1, radius, scratch);
+        for (int x = 0; x < mask.width(); ++x)
+            boxBlurLine(mask.bits() + x, mask.height(), int(mask.bytesPerLine()), radius, scratch);
+    }
+    return mask;
+}
+
+// Pieces cut from a layer, oldest first.
+QList<int> piecesOf(const Scene &scene, const QString &name) {
+    QList<int> pieces;
+    for (int i = 0; i < scene.layers.size(); ++i)
+        if (scene.layers.at(i).raw.value("cut").toObject().value("from").toString() == name)
+            pieces.append(i);
+    std::stable_sort(pieces.begin(), pieces.end(), [&](int a, int b) {
+        return scene.layers.at(a).raw.value("cut").toObject().value("order").toInt() <
+               scene.layers.at(b).raw.value("cut").toObject().value("order").toInt();
+    });
+    return pieces;
+}
+
+// Redraws every piece cut from a layer, and the layer's holes, from the image
+// it had before any cuts ("uncut"). Each punched piece takes its pixels out
+// of what the earlier ones left, and the hole it leaves is worked out so
+// that piece over hole is exactly the original: with a soft edge, the hole's
+// alpha at a pixel is a(1 - m) / (1 - a·m) for image alpha a and mask m.
+bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, int depth = 0) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (depth > 16)
+        return fail("Pieces are cut from each other too deeply.");
+    Layer &source = scene.layers[index];
+    const QString root = source.raw.value("uncut").toString(source.source);
+    QImage remaining = assets.image(root).convertToFormat(QImage::Format_ARGB32);
+    if (remaining.isNull())
+        return fail(QString("Couldn't read %1.").arg(root));
+
+    const QDir dir(assets.directory());
+    dir.mkpath("assets");
+    const QDir assetDir(dir.filePath("assets"));
+    bool punched = false;
+
+    for (const int i : piecesOf(scene, source.name)) {
+        Layer &piece = scene.layers[i];
+        QJsonObject cut = piece.raw.value("cut").toObject();
+        const QPolygonF polygon = polygonFrom(cut.value("polygon"));
+        const double feather = std::max(0.0, cut.value("feather").toDouble());
+        const bool punch = cut.value("punch").toBool(true);
+        const int margin = int(std::ceil(feather));
+        const QRect area = polygon.boundingRect().toAlignedRect().adjusted(-margin, -margin, margin, margin) &
+                           remaining.rect();
+        if (polygon.size() < 3 || area.isEmpty())
+            return fail(QString("The shape of %1 doesn't cover any of %2.").arg(piece.name, source.name));
+
+        const QImage mask = maskFor(polygon, feather, area);
+        QImage image(area.size(), QImage::Format_ARGB32);
+        bool opaque = false;
+        for (int y = 0; y < area.height(); ++y) {
+            QRgb *from = reinterpret_cast<QRgb *>(remaining.scanLine(area.y() + y)) + area.x();
+            QRgb *to = reinterpret_cast<QRgb *>(image.scanLine(y));
+            const uchar *coverage = mask.constScanLine(y);
+            for (int x = 0; x < area.width(); ++x) {
+                const QRgb pixel = from[x];
+                const int a = qAlpha(pixel), m = coverage[x];
+                const int pieceAlpha = (a * m + 127) / 255;
+                to[x] = qRgba(qRed(pixel), qGreen(pixel), qBlue(pixel), pieceAlpha);
+                opaque |= pieceAlpha > 0;
+                if (punch && m > 0) {
+                    const double af = a / 255.0, mf = m / 255.0, rest = 1 - af * mf;
+                    const double hole = rest <= 1e-6 ? 0 : af * (1 - mf) / rest;
+                    from[x] = qRgba(qRed(pixel), qGreen(pixel), qBlue(pixel), int(std::lround(hole * 255)));
+                }
+            }
+        }
+        if (!opaque)
+            return fail(QString("The shape of %1 only covers transparent pixels.").arg(piece.name));
+
+        // A reshaped piece keeps its pivot on the same spot of the picture,
+        // so its position and every keyframe still mean what they did.
+        const QJsonArray origin = cut.value("origin").toArray();
+        const QSizeF oldSize = assets.size(piece.source);
+        if (origin.size() == 2 && !oldSize.isEmpty()) {
+            const QPointF pivot = QPointF(origin.at(0).toDouble(), origin.at(1).toDouble()) +
+                                  QPointF(piece.anchor.x() * oldSize.width(), piece.anchor.y() * oldSize.height());
+            piece.anchor = QPointF((pivot.x() - area.x()) / area.width(), (pivot.y() - area.y()) / area.height());
+        } else {
+            // New, so it sits where it was cut from, turning about its centre.
+            piece.anchor = QPointF(.5, .5);
+            piece.base["x"] = QRectF(area).center().x();
+            piece.base["y"] = QRectF(area).center().y();
+        }
+        cut["origin"] = QJsonArray{area.x(), area.y()};
+        piece.raw["cut"] = cut;
+
+        const QString file = "assets/" + uniqueFile(assetDir, slug(piece.name), "png");
+        if (!writeImage(image, dir.filePath(file), error))
+            return false;
+        piece.source = file;
+        if (!piecesOf(scene, piece.name).isEmpty()) {
+            scene.layers[i].raw["uncut"] = file;
+            if (!rebuildCuts(scene, assets, i, error, depth + 1))
+                return false;
+        }
+        punched |= punch;
+    }
+
+    Layer &updated = scene.layers[index];
+    if (punched) {
+        const QString file = "assets/" + uniqueFile(assetDir, slug(updated.name), "png");
+        if (!writeImage(remaining, dir.filePath(file), error))
+            return false;
+        updated.raw["uncut"] = root;
+        updated.source = file;
+    } else {
+        updated.source = root;
+    }
+    return true;
+}
+
+}
+
 int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
-           bool punch, QString *error, const QString &wantedName) {
+           bool punch, QString *error, const QString &wantedName, double feather) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -196,78 +377,101 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
         return fail("Select the layer to cut a piece out of.");
     if (polygon.size() < 3)
         return fail("Click at least three points around the piece.");
-
-    const Layer source = scene.layers.at(index);
-    const QImage image = assets.image(source.source);
-    if (image.isNull())
+    if (!wantedName.isEmpty() && scene.indexOf(wantedName) >= 0)
+        return fail(QString("There's already a layer named \"%1\".").arg(wantedName));
+    const Layer &source = scene.layers.at(index);
+    if (assets.image(source.source).isNull())
         return fail(QString("Couldn't read %1.").arg(source.source));
+    const QTransform transform = layerTransform(scene, assets, index, t);
     bool invertible = false;
-    const QTransform inverse = layerTransform(scene, assets, index, t).inverted(&invertible);
+    const QTransform inverse = transform.inverted(&invertible);
     if (!invertible)
         return fail("The layer is scaled to nothing at this point in time.");
 
-    QPainterPath path;
-    path.addPolygon(inverse.map(polygon));
-    path.closeSubpath();
-    const QRect bounds = path.boundingRect().toAlignedRect() & image.rect();
-    if (bounds.isEmpty())
-        return fail("The shape doesn't cover any of the layer.");
+    int order = 0;
+    for (const int i : piecesOf(scene, source.name))
+        order = std::max(order, scene.layers.at(i).raw.value("cut").toObject().value("order").toInt() + 1);
 
-    QImage piece(bounds.size(), QImage::Format_ARGB32_Premultiplied);
-    piece.fill(Qt::transparent);
-    {
-        QPainter painter(&piece);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.translate(-bounds.topLeft());
-        painter.setClipPath(path);
-        painter.drawImage(0, 0, image);
-    }
-    bool opaque = false;
-    for (int y = 0; y < piece.height() && !opaque; ++y)
-        for (int x = 0; x < piece.width() && !opaque; ++x)
-            opaque = qAlpha(piece.pixel(x, y)) > 0;
-    if (!opaque)
-        return fail("The shape only covers transparent pixels.");
-
-    const QDir dir(assets.directory());
-    dir.mkpath("assets");
-    const QDir assetDir(dir.filePath("assets"));
-    if (!wantedName.isEmpty() && scene.indexOf(wantedName) >= 0)
-        return fail(QString("There's already a layer named \"%1\".").arg(wantedName));
-    const QString name = wantedName.isEmpty() ? scene.uniqueName(source.name + " piece") : wantedName;
-    const QString pieceSource = "assets/" + uniqueFile(assetDir, slug(name), "png");
-    if (!writeImage(piece, dir.filePath(pieceSource), error))
-        return -1;
-
-    if (punch) {
-        QImage holed = image.copy();
-        {
-            QPainter painter(&holed);
-            painter.setRenderHint(QPainter::Antialiasing);
-            painter.setCompositionMode(QPainter::CompositionMode_Clear);
-            painter.fillPath(path, Qt::black);
-        }
-        const QString holedSource = "assets/" + uniqueFile(assetDir, slug(source.name), "png");
-        if (!writeImage(holed, dir.filePath(holedSource), error))
-            return -1;
-        scene.layers[index].source = holedSource;
-    }
-
-    // The piece lives in its source layer's pixel space, so x and y are where
-    // its centre sat in the source image, and it moves with the source.
+    // The piece lives in its source layer's pixel space and moves with it.
     Layer layer;
-    layer.name = name;
-    layer.source = pieceSource;
+    layer.name = wantedName.isEmpty() ? scene.uniqueName(source.name + " piece") : wantedName;
     layer.parent = source.name;
     for (const QString &property : Scene::properties())
         layer.base.insert(property, Scene::defaultValue(property));
-    const QPointF centre = QRectF(bounds).center();
-    layer.base["x"] = centre.x();
-    layer.base["y"] = centre.y();
-    scene.layers.insert(index + 1, layer);
+    layer.raw["cut"] = QJsonObject{{"from", source.name},
+                                   {"polygon", polygonJson(inverse.map(polygon))},
+                                   {"feather", std::round(feather / pixelScale(transform) * 100) / 100},
+                                   {"punch", punch},
+                                   {"order", order}};
+
+    Scene edited = scene;
+    edited.layers.insert(index + 1, layer);
+    if (!rebuildCuts(edited, assets, index, error))
+        return -1;
+    scene = edited;
     if (error)
         error->clear();
     return index + 1;
+}
+
+bool reshapeCut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
+                double feather, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("Select the piece to reshape.");
+    if (polygon.size() < 3)
+        return fail("A shape needs at least three points.");
+    QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
+    const int from = scene.indexOf(cut.value("from").toString());
+    if (from < 0)
+        return fail(QString("%1 was cut from \"%2\", which is gone, so it can't be reshaped.")
+                        .arg(scene.layers.at(index).name, cut.value("from").toString()));
+    const QTransform transform = layerTransform(scene, assets, from, t);
+    bool invertible = false;
+    const QTransform inverse = transform.inverted(&invertible);
+    if (!invertible)
+        return fail("The layer it was cut from is scaled to nothing at this point in time.");
+
+    cut["polygon"] = polygonJson(inverse.map(polygon));
+    cut["feather"] = std::round(feather / pixelScale(transform) * 100) / 100;
+    Scene edited = scene;
+    edited.layers[index].raw["cut"] = cut;
+    if (!rebuildCuts(edited, assets, from, error))
+        return false;
+    scene = edited;
+    return true;
+}
+
+bool isCut(const Scene &scene, int index) {
+    return index >= 0 && index < scene.layers.size() &&
+           scene.layers.at(index).raw.value("cut").toObject().contains("polygon");
+}
+
+QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t, double *feather) {
+    if (!isCut(scene, index))
+        return {};
+    const QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
+    const int from = scene.indexOf(cut.value("from").toString());
+    if (from < 0)
+        return {};
+    const QTransform transform = layerTransform(scene, assets, from, t);
+    if (feather)
+        *feather = cut.value("feather").toDouble() * pixelScale(transform);
+    return transform.map(polygonFrom(cut.value("polygon")));
+}
+
+void renameCutSource(Scene &scene, const QString &from, const QString &to) {
+    for (Layer &layer : scene.layers) {
+        QJsonObject cut = layer.raw.value("cut").toObject();
+        if (cut.value("from").toString() == from) {
+            cut["from"] = to;
+            layer.raw["cut"] = cut;
+        }
+    }
 }
 
 void setPivot(Scene &scene, AssetCache &assets, int index, const QPointF &point, double t) {

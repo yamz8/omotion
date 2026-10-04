@@ -29,12 +29,24 @@ bool save(const QString &directory, const Scene &scene, QString *error, QByteArr
 
 // Cuts the part of a layer inside a canvas-space polygon out into its own
 // image and layer, placed exactly where it was and parented to the layer it
-// came from. With punch, the source layer gets a copy of its image with a
-// hole where the piece was. New images are always new files, so undo can go
-// back to the old ones. The piece is named after its source unless given a
-// name. Returns the new layer's index, or -1.
+// came from. feather softens the edge, in canvas pixels. With punch, the
+// source layer gets a hole where the piece was, worked out so the two still
+// add up to the original. The piece remembers its shape (in "cut", in the
+// source's pixels), so it can be reshaped later. New images are always new
+// files, so undo can go back to the old ones. The piece is named after its
+// source unless given a name. Returns the new layer's index, or -1.
 int cutOut(Scene &scene, AssetCache &assets, int layer, const QPolygonF &polygon, double t,
-           bool punch, QString *error, const QString &name = {});
+           bool punch, QString *error, const QString &name = {}, double feather = 0);
+
+// Gives a piece a new shape and edge, redrawing it and its source's holes
+// from the source's original image. Its animation and pivot are kept.
+bool reshapeCut(Scene &scene, AssetCache &assets, int piece, const QPolygonF &polygon, double t,
+                double feather, QString *error);
+bool isCut(const Scene &scene, int layer);
+// A piece's shape in canvas pixels at time t, and its edge softness.
+QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int piece, double t, double *feather = nullptr);
+// Keeps pieces pointing at their source when it's renamed.
+void renameCutSource(Scene &scene, const QString &from, const QString &to);
 
 // Moves a layer's pivot to a canvas point without moving the layer.
 void setPivot(Scene &scene, AssetCache &assets, int layer, const QPointF &point, double t);

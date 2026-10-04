@@ -24,7 +24,7 @@ const char *Usage = R"(Usage:
   omotion render <project> <output>      Render to .mp4, .webm, .gif, or a folder of PNG frames
   omotion frame <project> <seconds> <output.png>
                                          Render one frame as a PNG
-  omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--name <name>] [--at <seconds>]
+  omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--name <name>] [--soft <px>] [--at <seconds>]
                                          Cut the part of a layer inside a polygon (canvas
                                          pixels) out into a new layer, as the C tool does
 
@@ -64,12 +64,15 @@ int command(const QStringList &args) {
         bool punch = true;
         QString name;
         double t = 0;
+        double feather = 0;
         for (int i = 4; i < args.size(); ++i) {
             const QString arg = args.at(i);
             if (arg == "--copy") {
                 punch = false;
             } else if (arg == "--name" && i + 1 < args.size()) {
                 name = args.at(++i);
+            } else if (arg == "--soft" && i + 1 < args.size()) {
+                feather = args.at(++i).toDouble();
             } else if (arg == "--at" && i + 1 < args.size()) {
                 t = args.at(++i).toDouble();
             } else {
@@ -81,7 +84,7 @@ int command(const QStringList &args) {
                     return fail(QString("\"%1\" isn't a point like 120,340.").arg(arg));
             }
         }
-        const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name);
+        const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name, feather);
         if (piece < 0)
             return fail(error);
         if (!Project::save(directory, edited, &error))

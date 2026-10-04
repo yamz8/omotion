@@ -37,6 +37,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
     Q_PROPERTY(QString tool READ tool NOTIFY toolChanged)
     Q_PROPERTY(QVariantList cutPoints READ cutPoints NOTIFY toolChanged)
+    Q_PROPERTY(double feather READ feather NOTIFY toolChanged)
+    Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportChanged)
@@ -62,6 +64,8 @@ public:
     bool canRedo() const { return !m_redo.isEmpty(); }
     QString tool() const { return m_tool; }
     QVariantList cutPoints() const;
+    double feather() const { return m_feather; }
+    QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
@@ -124,6 +128,16 @@ public:
     Q_INVOKABLE void setTool(const QString &tool);
     Q_INVOKABLE void addCutPoint(double x, double y);
     Q_INVOKABLE void removeCutPoint();
+    // Editing the shape: the point within radius of x, y; a new point on the
+    // edge within radius (its index, or -1); moving and removing points.
+    Q_INVOKABLE int cutPointNear(double x, double y, double radius) const;
+    Q_INVOKABLE int insertCutPoint(double x, double y, double radius);
+    Q_INVOKABLE void moveCutPoint(int index, double x, double y);
+    Q_INVOKABLE void removeCutPointAt(int index);
+    // Steps the soft edge for the next cut: 0, 1, 3, 8, 20 canvas pixels.
+    Q_INVOKABLE void cycleFeather();
+    // Opens the selected piece's shape in the cut tool to change it.
+    Q_INVOKABLE void startReshape();
     Q_INVOKABLE void finishCut(bool punch);
     Q_INVOKABLE void setPivotAt(double x, double y);
 
@@ -192,6 +206,8 @@ private:
     int m_revision = 0;
     QString m_tool = "move";
     QList<QPointF> m_cut;
+    QString m_reshaping;
+    double m_feather = 1;
     QPointF m_dragStart;
     QPointF m_dragOrigin;
     bool m_dragging = false;
