@@ -110,6 +110,48 @@ private slots:
         QVERIFY(scene.cycleEaseAt(0, 1).isEmpty());
     }
 
+    void shiftsKeyColumnsTogether() {
+        Scene scene;
+        scene.layers.append(Layer{});
+        scene.layers[0].keys["x"] = {Key{0, 0, "inOut"}, Key{1, 10, "out"}, Key{2, 20, "linear"}};
+        scene.layers[0].keys["rotation"] = {Key{1, 45, "inOut"}};
+        const QList<KeyRef> moved = scene.shiftKeys({{0, 1}}, .51);
+        // Snapped to a frame, and every property's key at that time came along.
+        QCOMPARE(moved, (QList<KeyRef>{{0, 1.5}}));
+        QCOMPARE(scene.layers[0].keys["x"][1].t, 1.5);
+        QCOMPARE(scene.layers[0].keys["x"][1].ease, QString("out"));
+        QCOMPARE(scene.layers[0].keys["rotation"][0].t, 1.5);
+
+        // Landing on another key replaces it.
+        scene.shiftKeys({{0, 1.5}}, .5);
+        QCOMPARE(scene.layers[0].keys["x"].size(), 2);
+        QCOMPARE(scene.value(scene.layers[0], "x", 2), 10.0);
+    }
+
+    void shiftedColumnsDontTrampleEachOther() {
+        Scene scene;
+        scene.layers.append(Layer{});
+        scene.layers[0].keys["x"] = {Key{1, 10}, Key{2, 20}};
+        // Moving both a second later passes 1 onto 2's old time; both survive.
+        scene.shiftKeys({{0, 1}, {0, 2}}, 1);
+        QCOMPARE(scene.layers[0].keys["x"].size(), 2);
+        QCOMPARE(scene.layers[0].keys["x"][0].t, 2.0);
+        QCOMPARE(scene.layers[0].keys["x"][0].v, 10.0);
+        QCOMPARE(scene.layers[0].keys["x"][1].t, 3.0);
+    }
+
+    void copiesAndPastesKeysOntoAnotherLayer() {
+        Scene scene;
+        scene.layers.append(Layer{});
+        scene.layers.append(Layer{});
+        scene.layers[0].keys["y"] = {Key{1, 5, "outBack"}, Key{1.5, 50, "inOut"}};
+        const QList<KeyClip> clip = scene.copyKeys({{0, 1}, {0, 1.5}});
+        QCOMPARE(clip.size(), 2);
+        QCOMPARE(scene.pasteKeys(1, 3, clip), (QList<KeyRef>{{1, 3}, {1, 3.5}}));
+        QCOMPARE(scene.layers[1].keys["y"][0].ease, QString("outBack"));
+        QCOMPARE(scene.value(scene.layers[1], "y", 3.5), 50.0);
+    }
+
     void jsonRoundTripsAndKeepsUnknownFields() {
         const QByteArray json = R"({"width": 640, "height": 360, "fps": 24, "duration": 2, "notes": "mine",
             "layers": [{"name": "a", "source": "a.png", "x": 5, "comment": "hi",
@@ -285,6 +327,58 @@ private slots:
         backend.seek(.5);
         QCOMPARE(backend.values()["rotation"].toDouble(), 45.0);  // inOut is halfway at the middle.
         QCOMPARE(backend.layers()[0].toMap()["keyTimes"].toList().size(), 2);
+    }
+
+    void backendRetimesSelectedKeysAsOneUndo() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.keyAll();
+        backend.seek(1);
+        backend.setProperty("x", 300);
+        backend.selectKey(0, 1, false);
+        backend.beginKeyDrag();
+        backend.dragKeys(.4);
+        backend.dragKeys(9);  // Past the end: held at the last frame.
+        backend.endKeyDrag();
+        QCOMPARE(backend.layers()[0].toMap()["keyTimes"].toList().last().toDouble(), 4.0);
+        QCOMPARE(backend.keySelection().size(), 1);
+        QCOMPARE(backend.keySelection()[0].toMap()["t"].toDouble(), 4.0);
+        backend.undo();
+        QCOMPARE(backend.layers()[0].toMap()["keyTimes"].toList().last().toDouble(), 1.0);
+    }
+
+    void backendActsOnPickedKeysOrThePlayhead() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.keyAll();
+        backend.seek(2);
+        backend.keyAll();
+        backend.seek(3);
+        backend.keyAll();
+        backend.selectKey(0, 0, false);
+        backend.selectKey(0, 2, true);
+        backend.cycleEase();
+        QCOMPARE(backend.scene().layers[0].keys["x"][0].ease, QString("outBack"));
+        QCOMPARE(backend.scene().layers[0].keys["x"][1].ease, QString("outBack"));
+        QCOMPARE(backend.scene().layers[0].keys["x"][2].ease, QString("inOut"));
+
+        backend.copyKeys();
+        backend.removeKeys();
+        QCOMPARE(backend.scene().keyTimes(0), (QList<double>{3}));
+        backend.seek(1);
+        backend.pasteKeys();
+        QCOMPARE(backend.scene().keyTimes(0), (QList<double>{1, 3}));  // 3 replaced by the copy of 2.
+        QCOMPARE(backend.scene().layers[0].keys["x"][1].ease, QString("outBack"));
+
+        // With nothing picked, X takes the keys under the playhead.
+        backend.clearKeySelection();
+        backend.seek(1);
+        backend.removeKeys();
+        QCOMPARE(backend.scene().keyTimes(0), (QList<double>{3}));
     }
 
     void backendDragsInTheParentsPixels() {

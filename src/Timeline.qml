@@ -16,6 +16,13 @@ Rectangle {
     property int renaming: -1
 
     function rename(index) { renaming = index; }
+    function picked(layer, t) {
+        const selection = backend.keySelection;
+        for (let i = 0; i < selection.length; ++i)
+            if (selection[i].layer === layer && Math.abs(selection[i].t - t) < 1e-6)
+                return true;
+        return false;
+    }
     function format(t) { return Number(t).toFixed(2); }
 
     ColumnLayout {
@@ -49,7 +56,7 @@ Rectangle {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideLeft
-                text: ", .  frame    < >  keyframe    K key    E ease    C cut    ?  all keys"
+                text: "drag ◆ to retime    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
                 color: win.muted
             }
         }
@@ -192,28 +199,65 @@ Rectangle {
                         Layout.fillHeight: true
                         Layout.rightMargin: 14
 
+                        // Pressing on a keyframe selects and drags it (Shift adds
+                        // to the selection); anywhere else scrubs. This lives on
+                        // the track rather than each diamond, because diamonds
+                        // are rebuilt as keys move, which would end the drag.
                         MouseArea {
                             anchors.fill: parent
+                            property bool draggingKeys: false
+                            property real startX: 0
+                            cursorShape: draggingKeys ? Qt.SizeHorCursor : Qt.ArrowCursor
                             function scrub(x) { backend.seek(Math.max(0, x) / track.width * timeline.duration) }
+                            function keyNear(x) {
+                                const times = row.entry.keyTimes || [];
+                                let best = -1, bestDistance = 7;
+                                for (let i = 0; i < times.length; ++i) {
+                                    const d = Math.abs(times[i] / timeline.duration * track.width - x);
+                                    if (d <= bestDistance) { best = times[i]; bestDistance = d; }
+                                }
+                                return best;
+                            }
                             onPressed: function (mouse) {
                                 if (backend.playing) backend.togglePlay();
+                                const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                                const t = keyNear(mouse.x);
+                                if (t >= 0) {
+                                    backend.selectKey(row.layerIndex, t, shift);
+                                    startX = mouse.x;
+                                    draggingKeys = true;
+                                    backend.beginKeyDrag();
+                                    return;
+                                }
+                                if (!shift) backend.clearKeySelection();
                                 backend.select(row.layerIndex);
                                 scrub(mouse.x);
                             }
-                            onPositionChanged: function (mouse) { scrub(mouse.x) }
-                            onReleased: timeline.done()
+                            onPositionChanged: function (mouse) {
+                                if (draggingKeys)
+                                    backend.dragKeys((mouse.x - startX) / track.width * timeline.duration);
+                                else
+                                    scrub(mouse.x);
+                            }
+                            onReleased: {
+                                if (draggingKeys) backend.endKeyDrag();
+                                draggingKeys = false;
+                                timeline.done();
+                            }
                         }
                         Repeater {
                             model: row.entry.keyTimes || []
                             delegate: Rectangle {
                                 required property var modelData
-                                width: 9
-                                height: 9
+                                readonly property bool picked: timeline.picked(row.layerIndex, modelData)
+                                width: picked ? 11 : 9
+                                height: width
                                 rotation: 45
                                 x: modelData / timeline.duration * track.width - width / 2
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: row.selected ? theme.accent : "#9a9aa4"
-                                border.color: "#0e0e10"
+                                color: picked ? "white" : (row.selected ? theme.accent : "#9a9aa4")
+                                border.color: picked ? theme.accent : "#0e0e10"
+                                border.width: picked ? 2 : 1
                             }
                         }
                     }

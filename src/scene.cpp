@@ -7,6 +7,7 @@
 #include <QSet>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
@@ -293,6 +294,102 @@ QString Scene::cycleEaseAt(int index, double t) {
         }
     }
     return next;
+}
+
+bool KeyRef::operator==(const KeyRef &other) const {
+    return layer == other.layer && std::abs(t - other.t) < 1e-6;
+}
+
+double Scene::snap(double t) const { return std::clamp(std::round(t * fps) / fps, 0.0, duration); }
+
+bool Scene::setEaseAt(int index, double t, const QString &ease) {
+    if (index < 0 || index >= layers.size() || !eases().contains(ease))
+        return false;
+    const double tolerance = .5 / fps;
+    bool found = false;
+    for (auto &keys : layers[index].keys)
+        for (Key &key : keys)
+            if (std::abs(key.t - t) < tolerance) {
+                key.ease = ease;
+                found = true;
+            }
+    return found;
+}
+
+namespace {
+// Puts a key into a property's list in time order, replacing one already
+// within half a frame of it.
+void placeKey(QList<Key> &keys, const Key &key, double tolerance) {
+    keys.erase(std::remove_if(keys.begin(), keys.end(),
+                              [&](const Key &k) { return std::abs(k.t - key.t) < tolerance; }),
+               keys.end());
+    auto at = std::lower_bound(keys.begin(), keys.end(), key.t, [](const Key &k, double t) { return k.t < t; });
+    keys.insert(at, key);
+}
+}
+
+QList<KeyRef> Scene::shiftKeys(const QList<KeyRef> &refs, double delta) {
+    const double tolerance = .5 / fps;
+    struct Lifted {
+        int layer;
+        QString property;
+        Key key;
+    };
+    // Lift every selected key off first, so columns moving past each other
+    // don't trample one another, then set them all down at their new times.
+    QList<Lifted> lifted;
+    for (const KeyRef &ref : refs) {
+        if (ref.layer < 0 || ref.layer >= layers.size())
+            continue;
+        for (auto it = layers[ref.layer].keys.begin(); it != layers[ref.layer].keys.end(); ++it) {
+            QList<Key> &keys = *it;
+            for (int i = keys.size() - 1; i >= 0; --i)
+                if (std::abs(keys.at(i).t - ref.t) < tolerance)
+                    lifted.append({ref.layer, it.key(), keys.takeAt(i)});
+        }
+    }
+    QList<KeyRef> moved;
+    for (Lifted &item : lifted) {
+        item.key.t = snap(item.key.t + delta);
+        placeKey(layers[item.layer].keys[item.property], item.key, tolerance);
+        const KeyRef ref{item.layer, item.key.t};
+        if (!moved.contains(ref))
+            moved.append(ref);
+    }
+    return moved;
+}
+
+QList<KeyClip> Scene::copyKeys(const QList<KeyRef> &refs) const {
+    const double tolerance = .5 / fps;
+    QList<KeyClip> clip;
+    double first = std::numeric_limits<double>::max();
+    for (const KeyRef &ref : refs)
+        first = std::min(first, ref.t);
+    for (const KeyRef &ref : refs) {
+        if (ref.layer < 0 || ref.layer >= layers.size())
+            continue;
+        const Layer &layer = layers.at(ref.layer);
+        for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
+            for (const Key &key : *it)
+                if (std::abs(key.t - ref.t) < tolerance)
+                    clip.append({it.key(), Key{key.t - first, key.v, key.ease}});
+    }
+    return clip;
+}
+
+QList<KeyRef> Scene::pasteKeys(int index, double t, const QList<KeyClip> &clip) {
+    QList<KeyRef> pasted;
+    if (index < 0 || index >= layers.size())
+        return pasted;
+    for (const KeyClip &item : clip) {
+        Key key = item.key;
+        key.t = snap(t + key.t);
+        placeKey(layers[index].keys[item.property], key, .5 / fps);
+        const KeyRef ref{index, key.t};
+        if (!pasted.contains(ref))
+            pasted.append(ref);
+    }
+    return pasted;
 }
 
 QList<double> Scene::keyTimes(int index) const {

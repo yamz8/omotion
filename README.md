@@ -26,7 +26,9 @@ Your original image is copied into the project and never touched.
 2. Press **P** and click where the new layer should turn, like a shoulder.
 3. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
-4. **E** changes how a keyframe eases into the next one.
+4. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
+   to change how they ease into the next one. **Ctrl+C** and **Ctrl+V**
+   reuse a motion on another layer.
 5. **Ctrl+E** exports into `renders/` in the project folder.
 
 ## Shortcuts
@@ -49,8 +51,10 @@ Your original image is copied into the project and never touched.
 | `-` `=` | Scale down / up |
 | `9` `0` | Opacity down / up |
 | `K` | Keyframe every property at the playhead |
-| `X` | Remove the keyframes at the playhead |
-| `E` | Change the easing out of the keyframe at the playhead |
+| Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
+| `X` | Remove the picked keyframes, or those at the playhead |
+| `E` | Change the easing out of the picked keyframes, or those at the playhead |
+| `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
 | `C` | Cut tool: click around a piece, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `H` | Hide / show the layer |

@@ -37,6 +37,7 @@ class Backend : public QObject {
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
     Q_PROPERTY(QString tool READ tool NOTIFY toolChanged)
     Q_PROPERTY(QVariantList cutPoints READ cutPoints NOTIFY toolChanged)
+    Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportChanged)
 
@@ -61,6 +62,7 @@ public:
     bool canRedo() const { return !m_redo.isEmpty(); }
     QString tool() const { return m_tool; }
     QVariantList cutPoints() const;
+    QVariantList keySelection() const;
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
 
@@ -101,6 +103,16 @@ public:
     Q_INVOKABLE void cycleEase();
     Q_INVOKABLE void setSceneValue(const QString &name, const QVariant &value);
 
+    // Selecting keyframe columns on the timeline, retiming them by dragging,
+    // and copying them, onto the same layer or another.
+    Q_INVOKABLE void selectKey(int layer, double t, bool add);
+    Q_INVOKABLE void clearKeySelection();
+    Q_INVOKABLE void beginKeyDrag();
+    Q_INVOKABLE void dragKeys(double delta);
+    Q_INVOKABLE void endKeyDrag();
+    Q_INVOKABLE void copyKeys();
+    Q_INVOKABLE void pasteKeys();
+
     // Dragging a layer around the canvas, as one undo step.
     Q_INVOKABLE void beginDrag(double x, double y);
     Q_INVOKABLE void dragTo(double x, double y);
@@ -137,6 +149,7 @@ signals:
     void historyChanged();
     void toolChanged();
     void exportChanged();
+    void keySelectionChanged();
 
 private:
     void setError(const QString &error);
@@ -152,6 +165,9 @@ private:
     void reportMissing();
     QString selectedName() const;
     void restoreSelection(const QString &name);
+    void setKeySelection(const QList<KeyRef> &refs);
+    // The selected columns, or the selected layer's keys at the playhead.
+    QList<KeyRef> targetKeys() const;
 
     FilePicker *m_picker = nullptr;
     QString m_directory;
@@ -179,6 +195,11 @@ private:
     QPointF m_dragStart;
     QPointF m_dragOrigin;
     bool m_dragging = false;
+    QList<KeyRef> m_keySelection;
+    QList<KeyRef> m_keyDragFrom;
+    Scene m_keyDragBase;
+    bool m_keyDragging = false;
+    QList<KeyClip> m_clipboard;
     Exporter m_exporter;
     double m_exportProgress = 0;
     QString m_exportTarget;

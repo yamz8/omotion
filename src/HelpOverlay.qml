@@ -20,8 +20,9 @@ Rectangle {
                     ["H", "Hide / show"], ["F2", "Rename"], ["Delete", "Delete"]]],
         ["Animate", [["← → ↑ ↓", "Nudge 1px (Shift: 10px)"], ["[ ]", "Rotate 1° ({ }: 15°)"],
                      ["- =", "Scale down / up (or the mouse wheel)"], ["9 0", "Opacity down / up"],
-                     ["K", "Keyframe everything at the playhead"], ["X", "Remove keyframes at the playhead"],
-                     ["E", "Change the easing out of this keyframe"]]],
+                     ["K", "Keyframe everything at the playhead"], ["Drag ◆", "Retime keyframes (Shift+click picks more)"],
+                     ["X", "Remove the picked keyframes, or those at the playhead"],
+                     ["E", "Change their easing"], ["Ctrl+C Ctrl+V", "Copy them, paste at the playhead on any layer"]]],
         ["Break apart", [["C", "Cut tool: click around a piece"], ["Enter", "Cut it out, leaving a hole"],
                          ["Shift+Enter", "Copy it out, leaving the source whole"], ["Backspace", "Undo the last point"],
                          ["P", "Pivot tool: click where the layer turns"], ["Esc", "Cancel / deselect"]]]

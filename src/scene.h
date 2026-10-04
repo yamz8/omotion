@@ -25,6 +25,19 @@ struct Key {
     QString ease = "linear";
 };
 
+// A column of keyframes on one layer: every property's key at that time.
+struct KeyRef {
+    int layer = -1;
+    double t = 0;
+    bool operator==(const KeyRef &other) const;
+};
+
+// Keyframes lifted off a layer, with times relative to the earliest.
+struct KeyClip {
+    QString property;
+    Key key;
+};
+
 struct Layer {
     QString name;
     QString source;   // Relative to the project folder.
@@ -74,6 +87,15 @@ struct Scene {
     bool removeKeysAt(int layer, double t);
     // Cycles the easing of the keyframes at t; returns the new easing or empty.
     QString cycleEaseAt(int layer, double t);
+    // Sets the easing of the keyframes at t; true when there were any.
+    bool setEaseAt(int layer, double t, const QString &ease);
+    // Moves keyframe columns by delta seconds together, snapped to frames.
+    // Keys they land on are replaced. Returns where the columns ended up.
+    QList<KeyRef> shiftKeys(const QList<KeyRef> &refs, double delta);
+    QList<KeyClip> copyKeys(const QList<KeyRef> &refs) const;
+    // Pastes keyframes onto a layer starting at t, replacing keys they land on.
+    QList<KeyRef> pasteKeys(int layer, double t, const QList<KeyClip> &clip);
+    double snap(double t) const;
     QList<double> keyTimes(int layer) const;
 };
 

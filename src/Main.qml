@@ -60,6 +60,7 @@ ApplicationWindow {
             else if (win.exportMenuVisible) win.exportMenuVisible = false;
             else if (backend.exporting) backend.cancelExport();
             else if (backend.tool !== "move") backend.setTool("move");
+            else if (backend.keySelection.length > 0) backend.clearKeySelection();
             else if (backend.error !== "") backend.dismissError();
             else if (!canvasArea.activeFocus) win.focusCanvas();
             else backend.select(-1);
@@ -111,6 +112,8 @@ ApplicationWindow {
     Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.keyAll() }
     Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.removeKeys() }
     Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleEase() }
+    Shortcut { sequence: "Ctrl+C"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.copyKeys() }
+    Shortcut { sequence: "Ctrl+V"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.pasteKeys() }
 
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }

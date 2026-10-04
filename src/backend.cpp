@@ -162,6 +162,8 @@ bool Backend::open(const QString &pathOrUrl) {
     m_undo.clear();
     m_redo.clear();
     m_cut.clear();
+    m_keySelection.clear();
+    m_clipboard.clear();
     m_tool = "move";
     m_time = 0;
     m_selected = m_scene.layers.isEmpty() ? -1 : m_scene.layers.size() - 1;
@@ -324,6 +326,7 @@ void Backend::moveLayer(int direction) {
     const int target = m_selected + direction;
     if (m_selected < 0 || target < 0 || target >= m_scene.layers.size())
         return;
+    setKeySelection({});
     checkpoint();
     m_scene.layers.swapItemsAt(m_selected, target);
     m_selected = target;
@@ -334,6 +337,7 @@ void Backend::moveLayer(int direction) {
 void Backend::deleteLayer() {
     if (m_selected < 0)
         return;
+    setKeySelection({});
     checkpoint();
     const QString name = m_scene.layers.at(m_selected).name;
     m_scene.layers.removeAt(m_selected);
@@ -409,27 +413,35 @@ void Backend::keyAll() {
 }
 
 void Backend::removeKeys() {
-    if (m_selected < 0)
-        return;
+    const QList<KeyRef> refs = targetKeys();
     Scene scene = m_scene;
-    if (!scene.removeKeysAt(m_selected, m_time))
+    bool removed = false;
+    for (const KeyRef &ref : refs)
+        removed |= scene.removeKeysAt(ref.layer, ref.t);
+    if (!removed)
         return setNotice("No keyframes at the playhead.");
     checkpoint();
     m_scene = scene;
+    setKeySelection({});
     changed();
 }
 
 void Backend::cycleEase() {
-    if (m_selected < 0)
-        return;
+    const QList<KeyRef> refs = targetKeys();
+    if (refs.isEmpty())
+        return setNotice("No keyframes at the playhead to ease.");
     Scene scene = m_scene;
-    const QString ease = scene.cycleEaseAt(m_selected, m_time);
+    // Every target takes the easing after the first one's, so a mixed
+    // selection ends up all alike.
+    const QString ease = scene.cycleEaseAt(refs.first().layer, refs.first().t);
     if (ease.isEmpty())
         return setNotice("No keyframes at the playhead to ease.");
+    for (const KeyRef &ref : refs)
+        scene.setEaseAt(ref.layer, ref.t, ease);
     checkpoint();
     m_scene = scene;
     changed();
-    setNotice("Easing out of this keyframe: " + ease);
+    setNotice("Easing out of these keyframes: " + ease);
 }
 
 void Backend::setSceneValue(const QString &name, const QVariant &value) {
@@ -463,6 +475,104 @@ void Backend::setSceneValue(const QString &name, const QVariant &value) {
     m_scene = scene;
     if (m_time > m_scene.duration)
         seek(m_scene.duration);
+    changed();
+}
+
+QVariantList Backend::keySelection() const {
+    QVariantList list;
+    for (const KeyRef &ref : m_keySelection)
+        list.append(QVariantMap{{"layer", ref.layer}, {"t", ref.t}});
+    return list;
+}
+
+void Backend::setKeySelection(const QList<KeyRef> &refs) {
+    if (refs == m_keySelection)
+        return;
+    m_keySelection = refs;
+    emit keySelectionChanged();
+}
+
+QList<KeyRef> Backend::targetKeys() const {
+    if (!m_keySelection.isEmpty())
+        return m_keySelection;
+    if (m_selected < 0)
+        return {};
+    for (double t : m_scene.keyTimes(m_selected))
+        if (std::abs(t - m_time) < .5 / m_scene.fps)
+            return {KeyRef{m_selected, t}};
+    return {};
+}
+
+void Backend::selectKey(int layer, double t, bool add) {
+    if (layer < 0 || layer >= m_scene.layers.size())
+        return;
+    const KeyRef ref{layer, t};
+    QList<KeyRef> refs = m_keySelection;
+    if (add) {
+        if (refs.contains(ref))
+            refs.removeAll(ref);
+        else
+            refs.append(ref);
+    } else if (!refs.contains(ref)) {
+        // Pressing on a key that's already selected keeps the rest, so the
+        // whole selection can be dragged from any of its keys.
+        refs = {ref};
+    }
+    select(layer);
+    setKeySelection(refs);
+}
+
+void Backend::clearKeySelection() { setKeySelection({}); }
+
+void Backend::beginKeyDrag() {
+    if (m_keySelection.isEmpty())
+        return;
+    if (m_playing)
+        togglePlay();
+    beginGesture();
+    m_keyDragBase = m_scene;
+    m_keyDragFrom = m_keySelection;
+    m_keyDragging = true;
+}
+
+void Backend::dragKeys(double delta) {
+    if (!m_keyDragging)
+        return;
+    // Keep the whole selection inside the animation, so spacing never squashes
+    // against either end.
+    double first = m_scene.duration, last = 0;
+    for (const KeyRef &ref : m_keyDragFrom) {
+        first = std::min(first, ref.t);
+        last = std::max(last, ref.t);
+    }
+    delta = std::clamp(delta, -first, m_scene.duration - last);
+    delta = std::round(delta * m_scene.fps) / m_scene.fps;
+    m_scene = m_keyDragBase;
+    setKeySelection(m_scene.shiftKeys(m_keyDragFrom, delta));
+    changed();
+    setNotice(QString("%1%2 s").arg(delta >= 0 ? "+" : "").arg(delta, 0, 'f', 2));
+}
+
+void Backend::endKeyDrag() {
+    m_keyDragging = false;
+    endGesture();
+}
+
+void Backend::copyKeys() {
+    const QList<KeyRef> refs = targetKeys();
+    if (refs.isEmpty())
+        return setNotice("Select keyframes to copy, or put the playhead on some.");
+    m_clipboard = m_scene.copyKeys(refs);
+    setNotice(QString("Copied %1 keyframe%2").arg(m_clipboard.size()).arg(m_clipboard.size() == 1 ? "" : "s"));
+}
+
+void Backend::pasteKeys() {
+    if (m_clipboard.isEmpty())
+        return setNotice("Nothing copied yet.");
+    if (m_selected < 0)
+        return setNotice("Select the layer to paste onto.");
+    checkpoint();
+    setKeySelection(m_scene.pasteKeys(m_selected, m_time, m_clipboard));
     changed();
 }
 
@@ -567,6 +677,7 @@ void Backend::setPivotAt(double x, double y) {
 void Backend::undo() {
     if (m_undo.isEmpty())
         return;
+    setKeySelection({});
     const QString name = selectedName();
     m_redo.append(m_scene.toJson());
     m_scene = Scene::fromJson(m_undo.takeLast());
@@ -578,6 +689,7 @@ void Backend::undo() {
 void Backend::redo() {
     if (m_redo.isEmpty())
         return;
+    setKeySelection({});
     const QString name = selectedName();
     m_undo.append(m_scene.toJson());
     m_scene = Scene::fromJson(m_redo.takeLast());
@@ -688,6 +800,7 @@ void Backend::reloadFromDisk() {
         setError({});
     const QString name = selectedName();
     checkpoint();
+    setKeySelection({});
     m_scene = scene;
     m_written = bytes;
     restoreSelection(name);
