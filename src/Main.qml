@@ -26,9 +26,10 @@ ApplicationWindow {
     property bool exportMenuVisible: false
     property bool exportHalf: false
     property bool presetMenuVisible: false
+    property bool particleMenuVisible: false
     property bool quitConfirmVisible: false
     // Editing shortcuts go quiet while an overlay is up.
-    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible
+    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible
                                   && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool hasLayer: ready && backend.selected >= 0
     // Something whose properties edits act on: a layer, or the camera.
@@ -56,7 +57,7 @@ ApplicationWindow {
 
     // ---- Shortcuts -------------------------------------------------------
 
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.exportMenuVisible = false; win.presetMenuVisible = false; win.helpVisible = !win.helpVisible } }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.exportMenuVisible = false; win.presetMenuVisible = false; win.particleMenuVisible = false; win.helpVisible = !win.helpVisible } }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: win.quit() }
     Shortcut {
         sequence: "Escape"
@@ -68,6 +69,7 @@ ApplicationWindow {
             else if (win.helpVisible) win.helpVisible = false;
             else if (win.exportMenuVisible) win.exportMenuVisible = false;
             else if (win.presetMenuVisible) win.presetMenuVisible = false;
+            else if (win.particleMenuVisible) win.particleMenuVisible = false;
             else if (backend.exporting) backend.cancelExport();
             else if (backend.tool !== "move") backend.setTool("move");
             else if (backend.keySelection.length > 0) backend.clearKeySelection();
@@ -81,6 +83,7 @@ ApplicationWindow {
     Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: backend.openImageDialog() }
     Shortcut { sequence: "Shift+O"; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: backend.openFolderDialog() }
     Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.importImageDialog() }
+    Shortcut { sequence: "Shift+I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: win.particleMenuVisible = true }
     Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; enabled: win.ready && !backend.exporting; onActivated: win.exportMenuVisible = true }
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.togglePlay() }
@@ -661,6 +664,78 @@ ApplicationWindow {
                             Label { text: modelData[2]; color: win.muted }
                         }
                         MouseArea { id: presetMouse; anchors.fill: parent; hoverEnabled: true; onClicked: presetChoice.pick(modelData[3]) }
+                    }
+                }
+                Item { width: 1; height: 4 }
+                Label { text: "Esc closes"; color: win.muted }
+            }
+        }
+    }
+
+    Rectangle {
+        id: particleMenu
+        anchors.fill: parent
+        visible: win.particleMenuVisible
+        color: "#b0000000"
+        MouseArea { anchors.fill: parent; onClicked: win.particleMenuVisible = false }
+        readonly property var choices: [["1", "Snow", "Drifting down", "snow"], ["2", "Rain", "Slanting streaks", "rain"],
+                                        ["3", "Dust", "Motes in the light", "dust"], ["4", "Fireflies", "Glowing, wandering", "fireflies"],
+                                        ["5", "Leaves", "Tumbling down", "leaves"], ["6", "Embers", "Rising sparks", "embers"]]
+        Repeater {
+            model: 6
+            delegate: Item {
+                required property int index
+                Shortcut {
+                    sequence: String(index + 1)
+                    context: Qt.ApplicationShortcut
+                    enabled: win.particleMenuVisible
+                    onActivated: particleChoice.pick(particleMenu.choices[index][3])
+                }
+            }
+        }
+        Rectangle {
+            id: particleChoice
+            anchors.centerIn: parent
+            width: 440
+            height: particleColumn.implicitHeight + 40
+            radius: 10
+            color: win.panel
+            border.color: win.line
+            function pick(kind) {
+                win.particleMenuVisible = false;
+                backend.addParticles(kind);
+            }
+            Column {
+                id: particleColumn
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 6
+                Label { text: "Add particles"; font.pixelSize: 20; font.bold: true; color: win.text }
+                Label {
+                    text: "A layer of them on top, looping with the scene. Shape them in the inspector."
+                    color: win.muted
+                    wrapMode: Text.Wrap
+                    width: parent.width
+                }
+                Item { width: 1; height: 6 }
+                Repeater {
+                    model: particleMenu.choices
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: particleColumn.width
+                        height: 40
+                        radius: 6
+                        color: particleMouse.containsMouse ? "#1f1f24" : "transparent"
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            spacing: 14
+                            Label { text: modelData[0]; color: theme.accent; font.bold: true; width: 14 }
+                            Label { text: modelData[1]; color: win.text; font.bold: true; width: 90 }
+                            Label { text: modelData[2]; color: win.muted }
+                        }
+                        MouseArea { id: particleMouse; anchors.fill: parent; hoverEnabled: true; onClicked: particleChoice.pick(modelData[3]) }
                     }
                 }
                 Item { width: 1; height: 4 }

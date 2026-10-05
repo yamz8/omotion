@@ -52,6 +52,9 @@ const char *Usage = R"(Usage:
                                          Move where a layer turns, without moving it, as P does
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
+  omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
+                                         Add a particle layer; settings: count, size, speed,
+                                         direction, spread, sway, twinkle, color, seed
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 350 MB, checked against their hashes)
@@ -91,7 +94,7 @@ int command(const QStringList &args) {
 
     AssetCache assets(directory);
     for (const Layer &layer : scene.layers)
-        if (assets.image(layer.source).isNull())
+        if (layer.particles.isEmpty() && assets.image(layer.source).isNull())
             return fail(QString("Can't read %1 (layer \"%2\").").arg(layer.source, layer.name));
 
     if (args.at(1) == "cut") {
@@ -295,6 +298,27 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "particles") {
+        if (args.size() < 4)
+            return fail("particles takes a project and a kind.");
+        QJsonObject settings;
+        for (int i = 4; i < args.size(); ++i) {
+            const QString setting = args.at(i).mid(2);
+            if (!args.at(i).startsWith("--") || i + 1 >= args.size())
+                return fail(QString("particles settings go --name value; not \"%1\".").arg(args.at(i)));
+            const QString value = args.at(++i);
+            bool number = false;
+            const double v = value.toDouble(&number);
+            settings.insert(setting, number ? QJsonValue(v) : QJsonValue(value));
+        }
+        Scene edited = scene;
+        const int index = Project::addParticles(edited, args.at(3), settings, &error);
+        if (index < 0 || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << edited.layers.at(index).name << "\n";
+        return 0;
+    }
+
     if (args.at(1) == "clean") {
         const QList<QJsonObject> scenes{scene.toJson()};
         if (args.contains("--dry-run")) {
@@ -388,7 +412,7 @@ int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
-                                       !std::strcmp(argv[1], "info") ||
+                                       !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");

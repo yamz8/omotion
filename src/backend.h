@@ -140,6 +140,12 @@ public:
     Q_INVOKABLE bool renameLayer(int index, const QString &name);
     // A copy just above, with the same look and animation, for glows and echoes.
     Q_INVOKABLE void duplicateLayer();
+    // Adds rain, snow and the like on top (see Scene::particleKinds), and
+    // changes the selected particle layer's settings.
+    Q_INVOKABLE void addParticles(const QString &kind);
+    Q_INVOKABLE void setParticle(const QString &setting, const QVariant &value);
+    Q_PROPERTY(QStringList particleKinds READ particleKinds CONSTANT)
+    QStringList particleKinds() const { return Scene::particleKinds(); }
     Q_INVOKABLE void setBlend(const QString &blend);
     Q_INVOKABLE void cycleBlend();
 

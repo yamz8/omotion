@@ -85,7 +85,8 @@ void SceneView::paint(QPainter *painter) {
     painter->drawRect(canvas);
 
     const int selected = m_backend->selected();
-    if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing()) {
+    if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
+        scene.layers.at(selected).particles.isEmpty()) {
         const Layer &layer = scene.layers.at(selected);
         const QSizeF size = m_backend->assets().size(layer.source);
         const QTransform toView = layerTransform(scene, m_backend->assets(), selected, m_backend->time()) * view;

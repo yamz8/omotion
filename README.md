@@ -68,6 +68,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
 | `I` | Add an image as a layer |
+| `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF or PNG frames (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
 | `Space` | Play / pause |
@@ -185,6 +186,12 @@ photo.omotion/
   `brightness` (−1 to 1, default 0), `contrast` and `saturation` (1 is
   unchanged), `blur` and `glow` (in canvas pixels, default 0). A property is
   either a number or animated under `keys`; keys win.
+- **`particles`** makes a layer of rain, snow and the like instead of an
+  image: `kind` (`snow`, `rain`, `dust`, `fireflies`, `leaves`, `embers`),
+  `count`, `size`, `speed` (canvas pixels a second), `direction` (degrees,
+  90 is down), `spread`, `sway`, `twinkle` (0–1), `color` and `seed`. They're
+  fitted to loop with the scene, and take the layer's opacity, blend, blur,
+  glow and follow.
 - **`blend`** is how a layer mixes with the ones below: `normal`, `add`,
   `screen`, `multiply`, `overlay`, `lighten` or `darken`.
 - **`camera`** is what part of the world the canvas shows: `x`, `y` (the
@@ -239,6 +246,8 @@ omotion models --download                 # fetch the AI models
 omotion info photo.omotion                # every layer's place on the canvas, as JSON
 omotion pivot photo.omotion pine 1460,780 # P: where it turns, here the foot of the tree
 omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
+omotion particles photo.omotion snow --count 400
+                                          # Shift+I: a particle layer (any setting as --name value)
 omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```
 

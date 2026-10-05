@@ -177,6 +177,12 @@ QVariantMap Backend::values() const {
     }
     map.insert("animated", animated);
     map.insert("follow", followOf(m_scene, m_selected));
+    if (!layer.particles.isEmpty()) {
+        QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
+        for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
+            settings.insert(it.key(), it.value());
+        map.insert("particles", settings.toVariantMap());
+    }
     map.insert("ownFollow", !std::isnan(layer.follow));
     // The easing of a keyframe under the playhead, for the inspector.
     map.insert("keyEase", easeHere(layer));
@@ -478,6 +484,45 @@ void Backend::duplicateLayer() {
     emit selectedChanged();
     changed();
     setNotice("Duplicated as " + copy.name);
+}
+
+void Backend::addParticles(const QString &kind) {
+    if (!hasProject())
+        return;
+    Scene scene = m_scene;
+    QString error;
+    const int index = Project::addParticles(scene, kind, {}, &error);
+    if (index < 0)
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    m_selected = index;
+    m_cameraSelected = false;
+    setKeySelection({});
+    emit selectedChanged();
+    changed();
+    setNotice(QString("Added %1. Its settings are in the inspector; they loop with the scene.").arg(kind));
+}
+
+void Backend::setParticle(const QString &setting, const QVariant &value) {
+    if (m_selected < 0 || m_scene.layers.at(m_selected).particles.isEmpty())
+        return;
+    QJsonValue json;
+    if (setting == "color") {
+        if (!QColor(value.toString()).isValid())
+            return setError(QString("\"%1\" isn't a colour.").arg(value.toString()));
+        json = value.toString();
+    } else if (setting == "count" || setting == "seed") {
+        json = std::clamp(value.toInt(), 0, setting == "count" ? 5000 : 1 << 30);
+    } else {
+        const double number = value.toDouble();
+        if (!std::isfinite(number))
+            return;
+        json = setting == "twinkle" ? std::clamp(number, 0.0, 1.0) : number;
+    }
+    checkpoint();
+    m_scene.layers[m_selected].particles.insert(setting, json);
+    changed();
 }
 
 void Backend::setBlend(const QString &blend) {
@@ -1609,7 +1654,7 @@ void Backend::rearmWatcher() {
 void Backend::reportMissing() {
     QStringList missing;
     for (const Layer &layer : m_scene.layers)
-        if (!QFileInfo::exists(QDir(m_directory).absoluteFilePath(layer.source)))
+        if (layer.particles.isEmpty() && !QFileInfo::exists(QDir(m_directory).absoluteFilePath(layer.source)))
             missing.append(QString("%1 (layer \"%2\")").arg(layer.source, layer.name));
     if (!missing.isEmpty())
         setError("Can't find " + missing.join(", ") + " in the project folder.");

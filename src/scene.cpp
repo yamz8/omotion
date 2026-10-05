@@ -5,6 +5,9 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QPainter>
+#include <QRandomGenerator>
+#include <QRadialGradient>
+#include <QtMath>
 #include <QRegularExpression>
 #include <QSet>
 #include <QVarLengthArray>
@@ -35,6 +38,33 @@ const QStringList &Scene::blends() {
 const QStringList &Scene::eases() {
     static const QStringList list{"linear", "in", "out", "inOut", "outBack", "hold"};
     return list;
+}
+
+const QStringList &Scene::particleKinds() {
+    static const QStringList list{"snow", "rain", "dust", "fireflies", "leaves", "embers"};
+    return list;
+}
+
+QJsonObject Scene::particleDefaults(const QString &kind) {
+    // Speeds in canvas pixels a second, directions in degrees (90 is down),
+    // sizes in canvas pixels; twinkle is how much they flicker, 0 to 1.
+    if (kind == "rain")
+        return {{"kind", kind}, {"count", 320}, {"size", 2}, {"speed", 900}, {"direction", 100}, {"spread", 4},
+                {"sway", 0}, {"twinkle", 0}, {"color", "#c8d8ff"}, {"seed", 1}};
+    if (kind == "dust")
+        return {{"kind", kind}, {"count", 140}, {"size", 2.5}, {"speed", 12}, {"direction", 20}, {"spread", 180},
+                {"sway", 12}, {"twinkle", .5}, {"color", "#fff4dc"}, {"seed", 1}};
+    if (kind == "fireflies")
+        return {{"kind", kind}, {"count", 40}, {"size", 3}, {"speed", 10}, {"direction", 0}, {"spread", 180},
+                {"sway", 40}, {"twinkle", .9}, {"color", "#ffe27a"}, {"seed", 1}};
+    if (kind == "leaves")
+        return {{"kind", kind}, {"count", 28}, {"size", 9}, {"speed", 70}, {"direction", 80}, {"spread", 20},
+                {"sway", 45}, {"twinkle", 0}, {"color", "#e07a2f"}, {"seed", 1}};
+    if (kind == "embers")
+        return {{"kind", kind}, {"count", 90}, {"size", 2.5}, {"speed", 60}, {"direction", -90}, {"spread", 25},
+                {"sway", 20}, {"twinkle", .6}, {"color", "#ff9a3c"}, {"seed", 1}};
+    return {{"kind", "snow"}, {"count", 260}, {"size", 3}, {"speed", 55}, {"direction", 90}, {"spread", 15},
+            {"sway", 18}, {"twinkle", 0}, {"color", "#ffffff"}, {"seed", 1}};
 }
 
 const QStringList &Scene::cameraProperties() {
@@ -190,7 +220,11 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         if (!blends().contains(layer.blend))
             return fail(QString("Layer \"%1\" blends as \"%2\"; use one of %3.")
                             .arg(object.value("name").toString(), layer.blend, blends().join(", ")));
-        if (layer.source.isEmpty())
+        layer.particles = object.value("particles").toObject();
+        if (!layer.particles.isEmpty() && !particleKinds().contains(layer.particles.value("kind").toString()))
+            return fail(QString("Layer \"%1\" has particles of kind \"%2\"; use one of %3.")
+                            .arg(layer.name, layer.particles.value("kind").toString(), particleKinds().join(", ")));
+        if (layer.source.isEmpty() && layer.particles.isEmpty())
             return fail(QString("Layer \"%1\" has no source image.").arg(layer.name));
         if (names.contains(layer.name))
             return fail(QString("Two layers are named \"%1\"; names must be unique.").arg(layer.name));
@@ -298,6 +332,12 @@ QJsonObject Scene::toJson() const {
             object.remove("blend");
         else
             object.insert("blend", layer.blend);
+        if (layer.particles.isEmpty())
+            object.remove("particles");
+        else
+            object.insert("particles", layer.particles);
+        if (layer.source.isEmpty())
+            object.remove("source");
         if (std::isnan(layer.follow))
             object.remove("follow");
         else
@@ -609,6 +649,8 @@ void AssetCache::setDirectory(const QString &directory) {
 }
 
 AssetCache::Entry *AssetCache::entry(const QString &source) {
+    if (source.isEmpty())
+        return nullptr;  // A layer without a picture, like particles.
     const QString path = QDir(m_directory).absoluteFilePath(source);
     const QFileInfo info(path);
     auto missing = [&]() -> Entry * {
@@ -874,6 +916,93 @@ QPainter::CompositionMode compositionFor(const QString &blend) {
 }
 }
 
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t) {
+    QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
+    for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
+        settings.insert(it.key(), it.value());
+    const QString kind = settings.value("kind").toString();
+    const int count = std::clamp(settings.value("count").toInt(), 0, 5000);
+    const double size = std::max(.2, settings.value("size").toDouble());
+    const double speed = settings.value("speed").toDouble();
+    const double direction = qDegreesToRadians(settings.value("direction").toDouble());
+    const double spread = qDegreesToRadians(settings.value("spread").toDouble());
+    const double sway = settings.value("sway").toDouble();
+    const double twinkle = std::clamp(settings.value("twinkle").toDouble(), 0.0, 1.0);
+    const QColor color(settings.value("color").toString("#ffffff"));
+    const double d = std::max(.01, scene.duration);
+    // They wrap around a box a little bigger than the canvas, so they come
+    // and go off screen.
+    const double margin = std::max({60.0, size * 6, std::abs(sway) + 20});
+    const QRectF box(-margin, -margin, scene.width + 2 * margin, scene.height + 2 * margin);
+    auto wrap = [](double v, double from, double length) {
+        const double r = std::fmod(v - from, length);
+        return from + (r < 0 ? r + length : r);
+    };
+    // The same particles every frame: a fixed sequence of random numbers.
+    QRandomGenerator random(quint32(settings.value("seed").toInt(1)));
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    for (int i = 0; i < count; ++i) {
+        const double startX = random.generateDouble(), startY = random.generateDouble();
+        const double pace = .6 + .8 * random.generateDouble();
+        const double angle = direction + spread * (random.generateDouble() * 2 - 1);
+        const double phase = random.generateDouble() * 2 * M_PI, flicker = random.generateDouble() * 2 * M_PI;
+        const double grow = .5 + random.generateDouble(), turn = random.generateDouble();
+        // Movement fitted to the loop: whole trips around the box in the
+        // scene's length, so the last frame leads into the first.
+        auto fitted = [d](double v, double length) {
+            const double trips = std::round(v * d / length);
+            return trips * length / d;
+        };
+        const double vx = fitted(std::cos(angle) * speed * pace, box.width());
+        const double vy = fitted(std::sin(angle) * speed * pace, box.height());
+        const int swings = std::max(1, int(std::round(d / (2.5 + 3 * turn))));
+        double x = wrap(box.x() + startX * box.width() + vx * t, box.x(), box.width());
+        double y = wrap(box.y() + startY * box.height() + vy * t, box.y(), box.height());
+        x += sway * grow * std::sin(2 * M_PI * swings * t / d + phase);
+        if (kind == "fireflies")
+            y += sway * .6 * grow * std::cos(2 * M_PI * swings * t / d + flicker);
+        const double glow = 1 - twinkle * (.5 + .5 * std::sin(2 * M_PI * std::max(1, swings * 2) * t / d + flicker));
+        const double r = size * grow;
+        QColor c = color;
+        c.setAlphaF(std::clamp(c.alphaF() * glow, 0.0, 1.0));
+
+        if (kind == "rain") {
+            // Streaks along their fall, longer the faster.
+            const QPointF along(std::cos(angle), std::sin(angle));
+            painter.setPen(QPen(c, r * .45, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(QPointF(x, y), QPointF(x, y) - along * (8 + std::abs(speed) * pace * .03) * grow);
+            painter.setPen(Qt::NoPen);
+        } else if (kind == "fireflies" || kind == "embers" || kind == "dust") {
+            // A soft dot that glows out.
+            QRadialGradient light(QPointF(x, y), r * (kind == "dust" ? 1.5 : 3.5));
+            light.setColorAt(0, c);
+            QColor edge = c;
+            edge.setAlpha(0);
+            light.setColorAt(kind == "dust" ? 1 : .35, kind == "dust" ? edge : c);
+            light.setColorAt(1, edge);
+            painter.setBrush(light);
+            painter.drawEllipse(QPointF(x, y), r * (kind == "dust" ? 1.5 : 3.5), r * (kind == "dust" ? 1.5 : 3.5));
+        } else if (kind == "leaves") {
+            // Little leaves, tumbling a whole number of turns.
+            painter.save();
+            painter.translate(x, y);
+            const int turns = std::max(1, int(std::round(d / (3 + 4 * turn))));
+            painter.rotate(360.0 * (turn + turns * t / d));
+            painter.scale(1, .55 + .45 * std::cos(2 * M_PI * turns * t / d + phase));
+            QColor leaf = c;
+            leaf = leaf.lighter(80 + int(40 * turn));
+            painter.setBrush(leaf);
+            painter.drawEllipse(QPointF(0, 0), r, r * .5);
+            painter.restore();
+        } else {
+            painter.setBrush(c);
+            painter.drawEllipse(QPointF(x, y), r, r);
+        }
+    }
+    painter.restore();
+}
+
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t) {
     painter.save();
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -888,6 +1017,39 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         const double opacity = clamp01(scene.value(layer, "opacity", t));
         if (!layer.visible || opacity <= 0)
             continue;
+        if (!layer.particles.isEmpty()) {
+            // Particles live in the world, seen through the camera; their
+            // look (blur, glow) is worked on the frame they make.
+            const QTransform toOutput = cameraTransform(scene, followOf(scene, i), t) * base;
+            const double blur = std::max(0.0, scene.value(layer, "blur", t)) * outputScale;
+            const double glowSize = std::max(0.0, scene.value(layer, "glow", t)) * outputScale;
+            painter.setOpacity(opacity);
+            if (blur <= 0 && glowSize <= 0) {
+                painter.setTransform(toOutput);
+                painter.setCompositionMode(compositionFor(layer.blend));
+                drawParticles(painter, scene, layer, t);
+                continue;
+            }
+            const QRect device(0, 0, painter.device()->width(), painter.device()->height());
+            QImage frame(device.size(), QImage::Format_ARGB32_Premultiplied);
+            frame.fill(Qt::transparent);
+            {
+                QPainter into(&frame);
+                into.setRenderHint(QPainter::Antialiasing);
+                into.setTransform(toOutput);
+                drawParticles(into, scene, layer, t);
+            }
+            soften(frame, blur);
+            painter.setTransform(QTransform());
+            painter.setCompositionMode(compositionFor(layer.blend));
+            painter.drawImage(QPointF(0, 0), frame);
+            if (glowSize > 0) {
+                soften(frame, glowSize);
+                painter.setCompositionMode(QPainter::CompositionMode_Screen);
+                painter.drawImage(QPointF(0, 0), frame);
+            }
+            continue;
+        }
         const QTransform toOutput = layerTransform(scene, assets, i, t) * base;
         // How many output pixels one image pixel covers, along its longer axis.
         const double scale = std::max(std::hypot(toOutput.m11(), toOutput.m12()),

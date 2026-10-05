@@ -1221,6 +1221,26 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
     return true;
 }
 
+int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings, QString *error) {
+    if (!Scene::particleKinds().contains(kind)) {
+        if (error)
+            *error = QString("There's no particle kind \"%1\"; there's %2.").arg(kind, Scene::particleKinds().join(", "));
+        return -1;
+    }
+    Layer layer;
+    layer.name = scene.uniqueName(kind);
+    for (const QString &property : Scene::properties())
+        layer.base.insert(property, Scene::defaultValue(property));
+    layer.particles = Scene::particleDefaults(kind);
+    for (auto it = settings.begin(); it != settings.end(); ++it)
+        layer.particles.insert(it.key(), it.value());
+    // Light things glow on what's under them.
+    if (kind == "fireflies" || kind == "embers")
+        layer.blend = "add";
+    scene.layers.append(layer);
+    return int(scene.layers.size()) - 1;
+}
+
 const QStringList &presets() {
     static const QStringList list{"sway", "float", "pulse", "bounce", "spin", "fade"};
     return list;

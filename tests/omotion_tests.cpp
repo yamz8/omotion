@@ -872,6 +872,46 @@ private slots:
         QVERIFY(error.contains("camera"));
     }
 
+    void particlesLoopAndKeepTheirSettings() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        for (const QString &kind : Scene::particleKinds())
+            QVERIFY2(Project::addParticles(scene, kind, {{"count", 60}}, &error) > 0, qPrintable(error));
+        QVERIFY(Project::addParticles(scene, "hail", {}, &error) < 0);
+        // Exactly the same at the end as at the start, and moving between.
+        const QImage start = renderFrame(scene, assets, 0), end = renderFrame(scene, assets, scene.duration);
+        QCOMPARE(differences(start, end), 0);
+        QVERIFY(differences(start, renderFrame(scene, assets, scene.duration / 3)) > 50);
+        // The same seed draws the same; another seed, others.
+        QCOMPARE(differences(renderFrame(scene, assets, 1), renderFrame(scene, assets, 1)), 0);
+        Scene reseeded = scene;
+        reseeded.layers[1].particles["seed"] = 7;
+        QVERIFY(differences(renderFrame(reseeded, assets, 1), renderFrame(scene, assets, 1)) > 20);
+        // Through JSON and back: no source needed, settings kept.
+        const Scene again = Scene::fromJson(scene.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(again.layers[1].particles["kind"].toString(), QString("snow"));
+        QCOMPARE(again.layers[1].particles["count"].toInt(), 60);
+        QVERIFY(!scene.toJson()["layers"].toArray()[1].toObject().contains("source"));
+        QCOMPARE(scene.layers[scene.indexOf("fireflies")].blend, QString("add"));
+        QJsonObject bad = scene.toJson();
+        QJsonArray layers = bad["layers"].toArray();
+        QJsonObject odd = layers[1].toObject();
+        odd["particles"] = QJsonObject{{"kind", "hail"}};
+        layers[1] = odd;
+        bad["layers"] = layers;
+        Scene::fromJson(bad, &error);
+        QVERIFY(error.contains("hail"));
+        // Nothing to click on: they don't catch the mouse.
+        Scene onlySnow = scene;
+        onlySnow.layers.resize(2);
+        onlySnow.layers[0].visible = false;
+        QCOMPARE(layerAt(onlySnow, assets, 0, QPointF(100, 50)), -1);
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;
@@ -1450,6 +1490,24 @@ private slots:
         QCOMPARE(backend.tool(), QString("move"));
         backend.undo();
         QVERIFY(backend.scene().layers[1].raw["cut"].toObject().contains("polygon"));
+    }
+
+    void backendAddsAndTunesParticles() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.addParticles("rain");
+        QCOMPARE(backend.selected(), 1);
+        QCOMPARE(backend.values()["particles"].toMap()["kind"].toString(), QString("rain"));
+        backend.setParticle("count", 50);
+        backend.setParticle("color", "#ff0000");
+        backend.setParticle("color", "not a colour");
+        QVERIFY(backend.error().contains("colour"));
+        QCOMPARE(backend.scene().layers[1].particles["count"].toInt(), 50);
+        QCOMPARE(backend.scene().layers[1].particles["color"].toString(), QString("#ff0000"));
+        QVERIFY(!backend.error().contains("Can't find"));  // No picture isn't a missing picture.
+        backend.undo();
+        QCOMPARE(backend.scene().layers[1].particles["color"].toString(), QString("#c8d8ff"));
     }
 
     void backendEditsTheCamera() {

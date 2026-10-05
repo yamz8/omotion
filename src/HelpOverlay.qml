@@ -10,7 +10,7 @@ Rectangle {
     MouseArea { anchors.fill: parent; onClicked: win.helpVisible = false }
 
     readonly property var groups: [
-        ["Project", [["O", "Animate an image"], ["Shift+O", "Open an animation folder"], ["I", "Add an image as a layer"],
+        ["Project", [["O", "Animate an image"], ["Shift+O", "Open an animation folder"], ["I", "Add an image as a layer"], ["Shift+I", "Add particles: snow, rain, dust, fireflies, leaves, embers"],
                      ["Ctrl+E", "Export MP4, WebM, GIF or PNG frames"], ["Ctrl+Shift+K", "Move unused images to the trash"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
                      ["?", "This list"], ["Q", "Quit"]]],
         ["Time", [["Space", "Play / pause"], [", .", "Previous / next frame"], ["< >", "Previous / next keyframe"],

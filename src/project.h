@@ -92,6 +92,10 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImag
 // stretching any animation it already has to match.
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
 
+// Adds a particle layer of a kind (see Scene::particleKinds) on top, with
+// its default settings and any given over them. Returns its index, or -1.
+int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings, QString *error);
+
 // The motion presets, by name: sway, float, pulse, bounce, spin, fade.
 const QStringList &presets();
 // Gives a layer a ready-made motion, replacing that property's animation.

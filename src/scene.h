@@ -49,6 +49,9 @@ struct Layer {
     // How much the camera moves it: 1 fully, 0 not at all (stuck to the
     // screen), between for depth. NaN when not set: then its parent's.
     double follow = std::numeric_limits<double>::quiet_NaN();
+    // A particle layer has no image: rain, snow and the like, drawn from
+    // these settings (see Scene::particleKinds). Empty for picture layers.
+    QJsonObject particles;
     QHash<QString, double> base;
     QMap<QString, QList<Key>> keys;
     QJsonObject raw;  // Everything as read, so unknown fields survive a save.
@@ -69,6 +72,9 @@ struct Scene {
     QJsonObject raw;
     static constexpr int CameraIndex = -2;
     static const QStringList &cameraProperties();
+    // The kinds of particles, and each one's settings to start from.
+    static const QStringList &particleKinds();
+    static QJsonObject particleDefaults(const QString &kind);
     // A layer by index, or the camera for CameraIndex; null when neither.
     Layer *at(int index);
     const Layer *at(int index) const;
@@ -186,6 +192,8 @@ QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, dou
 // the canvas, through the camera as this layer sees it.
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t);
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t);
+// A particle layer's particles at time t, in world pixels.
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t);
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
 // Softens an Alpha8 or 32-bit image in place, spreading edges about width
 // pixels: three box blurs, which come close to a Gaussian.

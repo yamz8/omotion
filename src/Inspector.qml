@@ -14,6 +14,7 @@ Rectangle {
 
     readonly property var v: backend.values
     readonly property bool hasLayer: backend.selected >= 0 || backend.cameraSelected
+    readonly property bool isParticles: !!(v && v.particles)
 
     // Compact fields; Material's own are sized for touch.
     component SmallField: TextField {
@@ -122,7 +123,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Label {
-                visible: inspector.hasLayer && !backend.cameraSelected
+                visible: inspector.hasLayer && !backend.cameraSelected && !inspector.isParticles
                 text: (inspector.v.source || "") + (inspector.v.parent ? "\nmoves with " + inspector.v.parent : "")
                 color: win.muted
                 font.pixelSize: 12
@@ -157,8 +158,72 @@ Rectangle {
                 }
             }
 
+            // A particle layer's settings.
             ColumnLayout {
-                visible: inspector.hasLayer && !backend.cameraSelected
+                visible: inspector.isParticles
+                Layout.fillWidth: true
+                Layout.topMargin: 8
+                spacing: 4
+                component ParticleRow: RowLayout {
+                    id: prow
+                    property string name
+                    property string label
+                    property int decimals: 0
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { width: 14; height: 1 }
+                    Label { text: prow.label; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField {
+                        Layout.fillWidth: true
+                        decimals: prow.decimals
+                        value: inspector.isParticles ? (inspector.v.particles[prow.name] || 0) : 0
+                        onCommitted: function (n) { backend.setParticle(prow.name, n) }
+                    }
+                }
+                Label {
+                    text: "Particles: " + (inspector.isParticles ? inspector.v.particles.kind : "")
+                    color: win.text
+                    font.bold: true
+                }
+                ParticleRow { name: "count"; label: "Count" }
+                ParticleRow { name: "size"; label: "Size px"; decimals: 1 }
+                ParticleRow { name: "speed"; label: "Speed px/s" }
+                ParticleRow { name: "direction"; label: "Direction°" }
+                ParticleRow { name: "spread"; label: "Spread°" }
+                ParticleRow { name: "sway"; label: "Sway px" }
+                ParticleRow { name: "twinkle"; label: "Twinkle"; decimals: 2 }
+                ParticleRow { name: "seed"; label: "Seed" }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { width: 14; height: 1 }
+                    Label { text: "Colour"; color: win.text; Layout.preferredWidth: 90 }
+                    Rectangle {
+                        width: 18; height: 18; radius: 3
+                        color: inspector.isParticles ? inspector.v.particles.color : "white"
+                        border.color: win.line
+                    }
+                    SmallField {
+                        Layout.fillWidth: true
+                        property string value: inspector.isParticles ? inspector.v.particles.color : ""
+                        onValueChanged: if (!activeFocus) text = value
+                        onActiveFocusChanged: if (!activeFocus) text = value
+                        Component.onCompleted: text = value
+                        onAccepted: { backend.setParticle("color", text); inspector.done() }
+                    }
+                }
+                PropertyRow { name: "opacity"; label: "Opacity %"; factor: 100; decimals: 0 }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "Direction 90° is down. They loop with the scene; another seed scatters them differently."
+                }
+            }
+
+            ColumnLayout {
+                visible: inspector.hasLayer && !backend.cameraSelected && !inspector.isParticles
                 Layout.fillWidth: true
                 Layout.topMargin: 8
                 spacing: 4
@@ -198,9 +263,9 @@ Rectangle {
                         background: Rectangle { radius: 4; color: "#1b1b1f"; border.color: blendBox.activeFocus ? theme.accent : win.line }
                     }
                 }
-                PropertyRow { name: "brightness"; label: "Brightness %"; factor: 100; decimals: 0 }
-                PropertyRow { name: "contrast"; label: "Contrast %"; factor: 100; decimals: 0 }
-                PropertyRow { name: "saturation"; label: "Saturation %"; factor: 100; decimals: 0 }
+                PropertyRow { visible: !inspector.isParticles; name: "brightness"; label: "Brightness %"; factor: 100; decimals: 0 }
+                PropertyRow { visible: !inspector.isParticles; name: "contrast"; label: "Contrast %"; factor: 100; decimals: 0 }
+                PropertyRow { visible: !inspector.isParticles; name: "saturation"; label: "Saturation %"; factor: 100; decimals: 0 }
                 PropertyRow { name: "blur"; label: "Blur px"; decimals: 1 }
                 PropertyRow { name: "glow"; label: "Glow px"; decimals: 1 }
                 RowLayout {
