@@ -969,9 +969,12 @@ void Backend::waitForJobs() {
 void Backend::startReshape() {
     if (m_selected < 0)
         return setNotice("Select a piece to reshape.");
-    if (!Project::isCut(m_scene, m_selected))
-        return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.")
-                             .arg(m_scene.layers.at(m_selected).name));
+    if (!Project::isCut(m_scene, m_selected)) {
+        const Layer &layer = m_scene.layers.at(m_selected);
+        if (layer.raw.value("cut").toObject().contains("mask"))
+            return setNotice(QString("%1 is shaped by depth rather than an outline, so R can't reshape it.").arg(layer.name));
+        return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.").arg(layer.name));
+    }
     double feather = 0;
     bool fill = false;
     const QPolygonF outline = Project::cutOutline(m_scene, m_assets, m_selected, m_time, &feather, &fill);
