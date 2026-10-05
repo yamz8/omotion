@@ -1715,6 +1715,21 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         }
     }
 
+    // Behind a piece cut out low in the picture, there's ground: where a
+    // filled-in cell looks down at it, it lies on the ground, not on a blend
+    // of the ground before and the hills beyond (which stands up as a wall
+    // when the camera moves).
+    for (int y = 0; y < shape.height; ++y)
+        for (int x = 0; x < shape.width; ++x) {
+            if (!hole.constScanLine(y)[x])
+                continue;
+            const double px = (x + .5) / toCell, py = (y + .5) / toCell;
+            const QVector3D ray(float((px - picture.width() / 2.0) / shape.focal), float((py - picture.height() / 2.0) / shape.focal), 1);
+            const double down = QVector3D::dotProduct(up, ray);
+            if (down < -.01)
+                reinterpret_cast<quint16 *>(behind.scanLine(y))[x] = encodeDepth(std::min(Far, height / -down));
+        }
+
     // Past the edges: the picture carried on by the AI, and its distances by
     // the cells around, or the ground where a view down meets it, so a
     // camera can turn a little without looking off the world.
