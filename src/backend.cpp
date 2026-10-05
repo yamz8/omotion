@@ -654,7 +654,7 @@ void Backend::endDrag() {
 }
 
 void Backend::setTool(const QString &tool) {
-    if (tool != "move" && tool != "cut" && tool != "pivot")
+    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand")
         return;
     if (tool != "move" && m_selected < 0) {
         setNotice(tool == "cut" ? "Select the layer to cut a piece out of first." : "Select a layer first.");
@@ -662,11 +662,68 @@ void Backend::setTool(const QString &tool) {
     }
     if (m_playing)
         togglePlay();
+    // A smart selection carries over into the cut tool, to fine-tune its points.
+    const bool keepShape = tool == "cut" && m_tool == "wand" && !m_cut.isEmpty();
     m_tool = tool;
-    m_cut.clear();
-    m_reshaping.clear();
-    m_fill = true;
+    m_seeds.clear();
+    m_seedLevels.clear();
+    m_tolerance = -1;
+    if (!keepShape) {
+        m_cut.clear();
+        m_reshaping.clear();
+        m_fill = true;
+    }
     emit toolChanged();
+}
+
+void Backend::smartSelect(double x, double y, bool add) {
+    if (m_tool != "wand" || m_selected < 0)
+        return;
+    if (!add) {
+        m_seeds.clear();
+        m_seedLevels.clear();
+        m_tolerance = -1;
+    }
+    m_seeds.append(QPointF(x, y));
+    reselect();
+}
+
+void Backend::adjustTolerance(int delta) {
+    if (m_seeds.isEmpty())
+        return;
+    m_tolerance = std::clamp((m_tolerance < 0 ? m_usedTolerance : m_tolerance) + delta, 1, 160);
+    reselect();
+}
+
+void Backend::cycleTolerance() {
+    // Automatic, then by hand from tight to loose, then back to automatic.
+    static const QList<int> steps{8, 16, 24, 32, 48, 64};
+    if (m_tolerance < 0) {
+        m_tolerance = steps.first();
+    } else {
+        int next = 0;
+        while (next < steps.size() && steps.at(next) <= m_tolerance)
+            ++next;
+        m_tolerance = next < steps.size() ? steps.at(next) : -1;
+    }
+    reselect();
+}
+
+void Backend::reselect() {
+    if (m_seeds.isEmpty() || m_selected < 0) {
+        emit toolChanged();
+        return;
+    }
+    const Layer &layer = m_scene.layers.at(m_selected);
+    int regions = 0;
+    const QPolygonF outline = Project::smartOutline(m_scene, m_assets, m_selected, m_seeds, m_time, m_tolerance,
+                                                    &regions, &m_usedTolerance, &m_seedLevels);
+    m_cut = outline;
+    emit toolChanged();
+    if (outline.isEmpty())
+        return setNotice(QString("That's not on %1. Click a part of it.").arg(layer.name));
+    if (regions > 1)
+        setNotice("Only areas that touch make one shape; this is the biggest.");
 }
 
 void Backend::startReshape() {
@@ -772,7 +829,7 @@ void Backend::removeCutPoint() {
 }
 
 void Backend::finishCut(bool punch) {
-    if (m_tool != "cut")
+    if (m_tool != "cut" && m_tool != "wand")
         return;
     Scene scene = m_scene;
     QString error;

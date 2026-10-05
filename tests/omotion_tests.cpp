@@ -14,6 +14,7 @@
 #include "exporter.h"
 #include "project.h"
 #include "scene.h"
+#include "select.h"
 #include "theme.h"
 
 namespace {
@@ -575,6 +576,86 @@ private slots:
         const QColor middle = renderFrame(scene, assets, 0).pixelColor(960, 600);
         // Halfway along a red-to-blue gradient, the fill is a mix of both.
         QVERIFY2(middle.red() > 80 && middle.blue() > 80, qPrintable(middle.name()));
+    }
+
+    void smartSelectFindsTheClickedArea() {
+        // A blue background with a red ring around a white middle.
+        QImage image(100, 80, QImage::Format_ARGB32);
+        image.fill(QColor(0, 0, 200));
+        QPainter painter(&image);
+        painter.fillRect(20, 20, 50, 40, QColor(200, 0, 0));
+        painter.fillRect(35, 30, 20, 20, Qt::white);
+        painter.end();
+
+        const QImage red = Select::region(image, {22, 22}, 30);
+        QCOMPARE(Select::regionCount(red), 1);
+        // The white middle is inside the red, so it's taken too: the shape is solid.
+        QCOMPARE(red.pixelColor(45, 40).alpha(), 255);
+        QCOMPARE(red.pixelColor(10, 10).alpha(), 0);
+        const QRectF bounds = Select::outline(red).boundingRect();
+        QVERIFY(qAbs(bounds.left() - 20.5) < 1 && qAbs(bounds.right() - 69.5) < 1);
+        QVERIFY(qAbs(bounds.top() - 20.5) < 1 && qAbs(bounds.bottom() - 59.5) < 1);
+        QVERIFY(Select::outline(red).size() <= 8);  // A rectangle simplifies to a few corners.
+
+        // The background is the outside; it doesn't swallow the ring.
+        const QImage blue = Select::region(image, {2, 2}, 30);
+        QCOMPARE(blue.pixelColor(22, 22).alpha(), 0);
+        // Outside the image, or on clear pixels, there's nothing.
+        QCOMPARE(Select::regionCount(Select::region(image, {200, 2}, 30)), 0);
+    }
+
+    void smartSelectToleranceSetsHowFarColoursReach() {
+        QImage image(256, 10, QImage::Format_ARGB32);
+        for (int x = 0; x < 256; ++x)
+            for (int y = 0; y < 10; ++y)
+                image.setPixelColor(x, y, QColor(x, x, x));
+        auto width = [&](int tolerance) {
+            return Select::outline(Select::region(image, {128, 5}, tolerance)).boundingRect().width();
+        };
+        QVERIFY(width(10) < width(40));
+        QVERIFY(qAbs(width(40) - 80) < 3);  // 128 ± 40.
+    }
+
+    void smartSelectWorksOnTurnedLayersAndJoinsClicks() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));  // 200×100: red at 10,10 60×40; green at 120,50 50×30.
+        backend.select(0);
+        backend.setProperty("rotation", 90);
+        backend.setTool("wand");
+        QCOMPARE(backend.tool(), QString("wand"));
+        // Turned 90° clockwise about the centre (100, 50): image (40, 30) is canvas (120, -10).
+        backend.smartSelect(120, -10, false);
+        const QRectF red = QPolygonF(backend.cutPolygon()).boundingRect();
+        // 40×60 turned, traced through pixel centres, and grown 2 px for the blended edge.
+        QVERIFY2(qAbs(red.width() - 43) < 2 && qAbs(red.height() - 63) < 2,
+                 qPrintable(QString("%1x%2").arg(red.width()).arg(red.height())));
+
+        // A second shift-click on something that doesn't touch keeps the biggest.
+        backend.smartSelect(85, 95, true);  // Image (145, 65): the green.
+        QVERIFY(backend.notice().contains("touch"));
+
+        // On to a real cut, with the shape the wand found.
+        backend.smartSelect(120, -10, false);
+        backend.finishCut(true);
+        QCOMPARE(backend.error(), QString());
+        QCOMPARE(backend.scene().layers.size(), 2);
+        QCOMPARE(backend.tool(), QString("move"));
+    }
+
+    void smartSelectHandsItsShapeToTheCutTool() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setTool("wand");
+        backend.smartSelect(40, 30, false);
+        const int points = backend.cutPoints().size();
+        QVERIFY(points >= 4);
+        backend.setTool("cut");
+        QCOMPARE(backend.cutPoints().size(), points);
+        backend.adjustTolerance(10);  // Not the wand any more: no reselect.
+        QCOMPARE(backend.cutPoints().size(), points);
     }
 
     void cuttingNothingFails() {

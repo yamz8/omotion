@@ -1,9 +1,11 @@
 #include "project.h"
+#include "select.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
+#include <QImageWriter>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPainter>
@@ -62,11 +64,33 @@ Layer centeredLayer(const Scene &scene, const QString &name, const QString &sour
 
 bool writeImage(const QImage &image, const QString &path, QString *error) {
     QSaveFile file(path);
-    if (file.open(QIODevice::WriteOnly) && image.save(&file, "PNG") && file.commit())
+    // Light compression: big images save in half the time for files a
+    // fifth bigger, and every cut saves at least one.
+    QImageWriter writer(&file, "png");
+    writer.setQuality(60);
+    if (file.open(QIODevice::WriteOnly) && writer.write(image) && file.commit())
         return true;
     if (error)
         *error = QString("Couldn't write %1: %2").arg(path, file.errorString());
     return false;
+}
+
+// Keeps the file a layer already has when the pixels haven't changed, so
+// redrawing a layer's pieces doesn't write every one of them again;
+// otherwise writes a new file named after stem.
+bool storeImage(const QImage &image, const QString &current, AssetCache &assets, const QString &stem, QString *file,
+                QString *error) {
+    const QDir dir(assets.directory());
+    if (!current.isEmpty() && QFileInfo::exists(dir.filePath(current))) {
+        const QImage existing = assets.image(current);
+        if (!existing.isNull() && existing == image.convertToFormat(existing.format())) {
+            *file = current;
+            return true;
+        }
+    }
+    dir.mkpath("assets");
+    *file = "assets/" + uniqueFile(QDir(dir.filePath("assets")), stem, "png");
+    return writeImage(image, dir.filePath(*file), error);
 }
 
 }
@@ -471,11 +495,13 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         cut["origin"] = QJsonArray{area.x(), area.y()};
         piece.raw["cut"] = cut;
 
-        const QString file = "assets/" + uniqueFile(assetDir, slug(piece.name), "png");
-        if (!writeImage(image, dir.filePath(file), error))
+        const bool hasPieces = !piecesOf(scene, piece.name).isEmpty();
+        QString file;
+        if (!storeImage(image, hasPieces ? piece.raw.value("uncut").toString(piece.source) : piece.source, assets,
+                        slug(piece.name), &file, error))
             return false;
         piece.source = file;
-        if (!piecesOf(scene, piece.name).isEmpty()) {
+        if (hasPieces) {
             scene.layers[i].raw["uncut"] = file;
             if (!rebuildCuts(scene, assets, i, error, depth + 1))
                 return false;
@@ -485,8 +511,9 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
 
     Layer &updated = scene.layers[index];
     if (punched) {
-        const QString file = "assets/" + uniqueFile(assetDir, slug(updated.name), "png");
-        if (!writeImage(remaining, dir.filePath(file), error))
+        QString file;
+        if (!storeImage(remaining, updated.source != root ? updated.source : QString(), assets, slug(updated.name), &file,
+                        error))
             return false;
         updated.raw["uncut"] = root;
         updated.source = file;
@@ -599,6 +626,58 @@ QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t
     if (fill)
         *fill = cut.value("fill").toBool(false);
     return transform.map(polygonFrom(cut.value("polygon")));
+}
+
+QPolygonF smartOutline(const Scene &scene, AssetCache &assets, int index, const QList<QPointF> &points, double t,
+                       int tolerance, int *regions, int *used, QList<QImage> *levels) {
+    if (regions)
+        *regions = 0;
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const QString source = scene.layers.at(index).source;
+    const QSizeF full = assets.size(source);
+    if (full.isEmpty())
+        return {};
+    // Big images are searched at around 2000 pixels across: plenty for an
+    // outline, and quick enough to follow a click.
+    double factor = 1;
+    const QImage image = assets.mip(source, std::min(1.0, 2048.0 / std::max(full.width(), full.height())), &factor);
+    const QTransform toCanvas = layerTransform(scene, assets, index, t);
+    bool invertible = false;
+    const QTransform toImage = toCanvas.inverted(&invertible);
+    if (!invertible)
+        return {};
+
+    QList<QImage> computed;
+    QList<QImage> &searches = levels ? *levels : computed;
+    if (searches.size() > points.size())
+        searches.clear();
+    for (int i = searches.size(); i < points.size(); ++i)
+        searches.append(Select::joinLevels(image, (toImage.map(points.at(i)) * factor).toPoint()));
+
+    QImage mask;
+    for (const QImage &search : searches) {
+        const int at = tolerance >= 0 ? tolerance : Select::autoTolerance(search);
+        if (used)
+            *used = at;
+        const QImage area = Select::regionAt(search, at);
+        if (Select::regionCount(area) == 0)
+            continue;
+        if (mask.isNull())
+            mask = area;
+        else
+            Select::unite(mask, area);
+    }
+    if (mask.isNull())
+        return {};
+    // About a canvas pixel and a half more, for the blended edge.
+    Select::grow(mask, std::max(1, int(std::lround(1.5 * factor * pixelScale(toImage)))));
+    if (regions)
+        *regions = Select::regionCount(mask);
+    QPolygonF outline;
+    for (const QPointF &point : Select::outline(mask, 1.0))
+        outline.append(toCanvas.map(point / factor));
+    return outline;
 }
 
 void renameCutSource(Scene &scene, const QString &from, const QString &to) {

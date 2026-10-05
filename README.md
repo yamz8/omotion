@@ -20,8 +20,11 @@ omotion my-animation/      # opens a project folder, or makes one from a folder 
 
 Your original image is copied into the project and never touched.
 
-1. Press **C** and drag around a part of the picture (an arm, a cloud, a
-   logo), or click around it point by point. Drag the points to adjust the
+1. Press **W** and click a part of the picture (an arm, a cloud, a logo):
+   smart select takes the area of similar colour around the click, picking
+   how similar by itself (the mouse wheel or **T** changes it, Shift+click
+   adds more). Or press **C** and drag around the part, or click around it
+   point by point. Drag the points to adjust the
    shape, and press **F** to soften its edge. **Enter** makes the part its
    own layer, and paints the hole it leaves from the colours around it, so
    the piece can move away without leaving a gap (**G** leaves the hole
@@ -63,6 +66,8 @@ Your original image is copied into the project and never touched.
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
+| `W` | Smart select: click a part to select the area of similar colour around it, Shift+click to add; `C` then fine-tunes its points |
+| Wheel / `T` | Smart select tolerance; it's picked for each click until you change it |
 | `C` | Cut tool: drag around a piece or click points, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
 | Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
@@ -154,6 +159,8 @@ omotion render photo.omotion out.mp4      # or .webm, .gif, or a folder for PNG 
 omotion frame photo.omotion 1.5 f.png     # one frame, to check a moment
 omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --soft 3 --name foreground
                                           # what the C tool does, with points in canvas pixels
+omotion cut photo.omotion photo --pick 316,703 --name deer
+                                          # what the W tool does: the thing under the point
 ```
 
 ## Building

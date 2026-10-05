@@ -25,9 +25,12 @@ const char *Usage = R"(Usage:
   omotion frame <project> <seconds> <output.png>
                                          Render one frame as a PNG
   omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--no-fill] [--name <name>] [--soft <px>] [--at <seconds>]
+  omotion cut <project> <layer> --pick <x,y> [--pick <x,y>]... [--tolerance <0-160>, picked when left out] [same options]
                                          Cut the part of a layer inside a polygon (canvas
                                          pixels) out into a new layer, as the C tool does;
-                                         the hole it leaves is filled unless --no-fill
+                                         the hole it leaves is filled unless --no-fill.
+                                         --pick cuts the area of similar colour around a
+                                         point instead, as the W tool does
 
 A project is a folder holding scene.json. Opening an image makes
 "<image>.omotion" beside it; opening a folder of images makes a scene.json
@@ -67,12 +70,21 @@ int command(const QStringList &args) {
         double t = 0;
         double feather = 0;
         bool fill = true;
+        int tolerance = -1;
+        QList<QPointF> picks;
         for (int i = 4; i < args.size(); ++i) {
             const QString arg = args.at(i);
             if (arg == "--copy") {
                 punch = false;
             } else if (arg == "--no-fill") {
                 fill = false;
+            } else if (arg == "--tolerance" && i + 1 < args.size()) {
+                tolerance = args.at(++i).toInt();
+            } else if (arg == "--pick" && i + 1 < args.size()) {
+                const QStringList xy = args.at(++i).split(',');
+                if (xy.size() != 2)
+                    return fail(QString("\"%1\" isn't a point like 120,340.").arg(args.at(i)));
+                picks.append(QPointF(xy.at(0).toDouble(), xy.at(1).toDouble()));
             } else if (arg == "--name" && i + 1 < args.size()) {
                 name = args.at(++i);
             } else if (arg == "--soft" && i + 1 < args.size()) {
@@ -87,6 +99,16 @@ int command(const QStringList &args) {
                 if (!okX || !okY)
                     return fail(QString("\"%1\" isn't a point like 120,340.").arg(arg));
             }
+        }
+        if (!picks.isEmpty()) {
+            if (!polygon.isEmpty())
+                return fail("Give either points to cut around or --pick, not both.");
+            int regions = 0;
+            polygon = Project::smartOutline(edited, assets, layer, picks, t, tolerance, &regions);
+            if (polygon.isEmpty())
+                return fail(QString("Nothing of \"%1\" is under those points.").arg(args.at(3)));
+            if (regions > 1)
+                QTextStream(stderr) << "omotion: only areas that touch make one shape; cutting the biggest.\n";
         }
         const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name, feather, fill);
         if (piece < 0)

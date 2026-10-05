@@ -48,6 +48,15 @@ bool isCut(const Scene &scene, int layer);
 // A piece's shape in canvas pixels at time t, and its edge softness.
 QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int piece, double t, double *feather = nullptr,
                      bool *fill = nullptr);
+// Smart select on a layer: the area of colour within tolerance around each
+// canvas point, joined, as a cut shape in canvas pixels. A tolerance below 0
+// picks one for each point (see Select::autoTolerance), and *used says the
+// last one. regions says how many separate areas that made; only the biggest
+// is outlined. levels, when given, keeps each point's search to reuse while
+// the points stay the same, so trying tolerances is instant.
+QPolygonF smartOutline(const Scene &scene, AssetCache &assets, int layer, const QList<QPointF> &points, double t,
+                       int tolerance, int *regions = nullptr, int *used = nullptr, QList<QImage> *levels = nullptr);
+
 // Keeps pieces pointing at their source when it's renamed.
 void renameCutSource(Scene &scene, const QString &from, const QString &to);
 

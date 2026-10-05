@@ -12,6 +12,7 @@ HEADERS += \
     src/project.h \
     src/scene.h \
     src/sceneview.h \
+    src/select.h \
     src/theme.h
 
 SOURCES += \
@@ -22,6 +23,7 @@ SOURCES += \
     src/project.cpp \
     src/scene.cpp \
     src/sceneview.cpp \
+    src/select.cpp \
     src/theme.cpp
 
 RESOURCES += src/resources.qrc

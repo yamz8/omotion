@@ -120,10 +120,12 @@ ApplicationWindow {
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
-    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.cycleFeather() }
-    Shortcut { sequence: "G"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.toggleFill() }
-    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(true) }
-    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(false) }
+    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.cycleFeather() }
+    Shortcut { sequence: "G"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.toggleFill() }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.finishCut(true) }
+    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.finishCut(false) }
+    Shortcut { sequence: "W"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "wand" ? "move" : "wand") }
+    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "wand"; onActivated: backend.cycleTolerance() }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
 
     // ---- Layout ----------------------------------------------------------
@@ -263,6 +265,11 @@ ApplicationWindow {
                             }
                             return;
                         }
+                        if (backend.tool === "wand") {
+                            if (mouse.button === Qt.LeftButton)
+                                backend.smartSelect(p.x, p.y, (mouse.modifiers & Qt.ShiftModifier) !== 0);
+                            return;
+                        }
                         if (backend.tool === "pivot") {
                             backend.setPivotAt(p.x, p.y);
                             return;
@@ -302,6 +309,10 @@ ApplicationWindow {
                         lassoing = false;
                     }
                     onWheel: function (wheel) {
+                        if (backend.tool === "wand") {
+                            backend.adjustTolerance(wheel.angleDelta.y > 0 ? 4 : -4);
+                            return;
+                        }
                         if (backend.selected < 0)
                             return;
                         const step = wheel.angleDelta.y > 0 ? 1 : -1;
@@ -331,8 +342,13 @@ ApplicationWindow {
                         color: win.text
                         horizontalAlignment: Text.AlignHCenter
                         lineHeight: 1.3
-                        text: backend.tool !== "cut"
+                        text: backend.tool === "pivot"
                               ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
+                              : backend.tool === "wand"
+                              ? "Smart select: click a part of " + (backend.values.name || "the layer") + " (Shift+click adds)   ·   wheel or T: tolerance "
+                                + (backend.tolerance < 0 ? (backend.cutPoints.length ? "auto, " + backend.usedTolerance : "auto") : backend.tolerance)
+                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off")
+                                + "   ·   Enter cut out   ·   Shift+Enter copy out   ·   Esc cancel"
                               : (backend.reshaping !== ""
                                  ? "Reshape " + backend.reshaping + ": drag points, click an edge to add one, right-click one to remove it"
                                  : "Cut: drag around the piece, or click point by point (" + backend.cutPoints.length + " so far)")

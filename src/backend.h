@@ -39,6 +39,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList cutPoints READ cutPoints NOTIFY toolChanged)
     Q_PROPERTY(double feather READ feather NOTIFY toolChanged)
     Q_PROPERTY(bool fill READ fill NOTIFY toolChanged)
+    Q_PROPERTY(int tolerance READ tolerance NOTIFY toolChanged)
+    Q_PROPERTY(int usedTolerance READ usedTolerance NOTIFY toolChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
@@ -68,6 +70,9 @@ public:
     QVariantList cutPoints() const;
     double feather() const { return m_feather; }
     bool fill() const { return m_fill; }
+    // The smart select tolerance; below 0 while it's picked automatically.
+    int tolerance() const { return m_tolerance; }
+    int usedTolerance() const { return m_usedTolerance; }
     QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
     QStringList blends() const { return Scene::blends(); }
@@ -148,6 +153,14 @@ public:
     Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
+    // Smart select (the "wand" tool): the area of similar colour around a
+    // canvas point on the selected layer becomes the cut shape; add joins it
+    // to what's selected. The tolerance is picked for each click until it's
+    // changed by hand; changing it redoes the clicks. cycleTolerance goes
+    // back to automatic after the steps.
+    Q_INVOKABLE void smartSelect(double x, double y, bool add);
+    Q_INVOKABLE void adjustTolerance(int delta);
+    Q_INVOKABLE void cycleTolerance();
     Q_INVOKABLE void finishCut(bool punch);
     Q_INVOKABLE void setPivotAt(double x, double y);
 
@@ -219,6 +232,11 @@ private:
     QString m_reshaping;
     double m_feather = 1;
     bool m_fill = true;
+    int m_tolerance = -1;
+    int m_usedTolerance = 0;
+    QList<QPointF> m_seeds;
+    QList<QImage> m_seedLevels;
+    void reselect();
     QPointF m_dragStart;
     QPointF m_dragOrigin;
     bool m_dragging = false;
