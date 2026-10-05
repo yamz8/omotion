@@ -1937,7 +1937,35 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
         painter.drawImage(0, 0, world);
     }
     painter.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
-    renderScene(painter, scene, assets, t, !world.isNull());
+    // A flat scene can ask for a shutter too ("shutter" in degrees): moments
+    // across it are drawn and averaged, so what moves fast smears.
+    const double flatShutter = world.isNull() ? scene.raw.value("shutter").toDouble(0) / 360 / scene.fps : 0;
+    if (flatShutter > 0) {
+        constexpr int samples = 12;
+        std::vector<float> sum(size_t(target.width()) * target.height() * 4, 0);
+        for (int i = 0; i < samples; ++i) {
+            QImage moment(target, QImage::Format_ARGB32_Premultiplied);
+            moment.fill(Qt::transparent);
+            QPainter into(&moment);
+            into.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
+            renderScene(into, scene, assets, std::max(0.0, t + flatShutter * (double(i) / (samples - 1) - .5)));
+            into.end();
+            for (int y = 0; y < moment.height(); ++y) {
+                const uchar *line = moment.constScanLine(y);
+                float *to = sum.data() + size_t(y) * moment.width() * 4;
+                for (int x = 0; x < moment.width() * 4; ++x)
+                    to[x] += line[x];
+            }
+        }
+        for (int y = 0; y < frame.height(); ++y) {
+            uchar *line = frame.scanLine(y);
+            const float *from = sum.data() + size_t(y) * frame.width() * 4;
+            for (int x = 0; x < frame.width() * 4; ++x)
+                line[x] = uchar(std::lround(from[x] / samples));
+        }
+    } else {
+        renderScene(painter, scene, assets, t, !world.isNull());
+    }
     painter.end();
     // Film grain over a world's frame, the painting and what moves in it
     // alike, so the two share one surface. Seeded by the frame's time, so a

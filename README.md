@@ -325,6 +325,9 @@ photo.omotion/
   `arc(h)` is a jump, straight across with `y` rising `h` pixels at the
   middle along a gravity parabola (other properties go straight, so an arc
   on every property's key is fine).
+- **`shutter`** (degrees, 0 unless set) blurs what moves fast in a flat
+  scene's exports, as film does: 180 is a film camera's. Worlds blur by
+  default.
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
 - **`links`** drive a property from another, so a scene says how things
