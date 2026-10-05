@@ -4,41 +4,69 @@
 
 The Quattro demo (a car flying into the wallpaper) looked like a sticker
 moving over a photo: the wheels didn't turn, the dust didn't react, the
-motion had no weight. These make a scene react to what moves in it, in order:
+motion had no weight, and it slid in sideways though the car faces the
+camera. A cut-out can only move the way it faces: this shot works as a jump
+toward the camera over the crest, a landing, and a bounce. In order:
 
 1. ~~**Property links.**~~ Done in 0.3.0: `links` in `scene.json`, ⛓ in
-   the inspector, `omotion link`. Particle settings (count, speed) aren't
-   properties yet, so dust can only thicken through opacity.
+   the inspector, `omotion link`.
 2. **Physics motion.** Springs that overshoot and settle, gravity arcs for
-   jumps, impacts on landing. Set the start and landing; the path follows.
-3. **Layer-attached emitters.** Particles from a point on a layer (a rear
-   wheel), only while it touches the ground, inheriting its velocity, then
-   slowing, spreading, swirling and fading. Soft lit puffs in scene colours.
+   jumps, bounces on landing; links that follow their source on a spring,
+   for suspension, lean and a camera with weight.
+3. **A 3D path.** A layer's distance from the camera sets its size and
+   height on screen through perspective, instead of keying scale and
+   position apart.
 4. **Wheel rigs.** Click a wheel: AI select cuts it, fills behind, centres
-   the pivot, parents it to the body; it spins from travel and bounces.
-5. **Velocity motion blur and contact shadows**, from the actual motion.
-6. **Living background.** Slow noise warp of a masked area so painted dust,
+   the pivot, parents it to the body. The body sinks on its suspension
+   while the wheels stay down. Wheels spin in their own tilted plane (a
+   wheel at three-quarters is an ellipse), with a blur around the hub.
+5. **Layer-attached emitters.** Particles from a point on a layer (a rear
+   wheel), only while it touches the ground, inheriting its velocity, then
+   slowing, spreading, swirling and fading. Soft puffs lit from behind.
+   Cleaning painted dust and the car out of the background goes with it.
+6. **Velocity motion blur and contact shadows**, from the actual motion.
+7. **A camera with weight**: a noise source to link to, for shake on impact
+   and a hand-held drift.
+8. **Belonging to the picture**: light wrap (the background's light
+   bleeding round a cut-out's edges), haze toward a colour with distance,
+   and film grain over everything.
+9. **Living background.** Slow noise warp of a masked area so painted dust,
    smoke, clouds or water billow (cinemagraph).
 
-Then remake the Quattro: jumps in, lands with a spring, wheels spin, dust
-bursts from the tyres, the cloud billows.
+Then remake the Quattro: it clears the crest, flies at the camera, lands on
+a spring, wheels spinning, dust bursting from the tyres, the cloud billowing.
 
-## Video layers
+## Video layers (after realism)
 
-New angles (a car turning toward the camera) need invented pixels, which
-omotion can't make. Let a layer be a video clip (from a cloud image-to-video
-tool, e.g. Veo, Kling, Runway, or Wan on a GPU machine) so it can be cut,
-looped and composited with the rest. This laptop (Intel UHD, 7 GB) can't run
-the open video models.
+New angles (a car turning, sliding sideways, showing its back) need invented
+pixels, which only a generative model makes. First let a layer be a video
+clip, made by hand in a cloud image-to-video tool (Veo, Kling, Runway, or
+Wan on a GPU machine), so it can be cut, looped and composited with the
+rest. Calling a provider from inside omotion waits until one is chosen.
+This laptop (Intel UHD, 7 GB) can't run the open video models.
+
+## Later
+
+- **Depth warping**: small turns (5–10°) of the scene or one object, by
+  bending the picture over its AI depth and filling the edges that open.
+- Not planned for now: image-to-3D (slow here, rough on details like a
+  livery) and hand-painted extra views (Live2D style).
 
 ## Smaller
 
 - A "highlights only" look, so glow lights up lamps without washing a road.
+- Particle settings (count, speed) as properties, so links can drive them;
+  until then dust reacts only through opacity.
 - Onion-skin ghosts are drawn unbent on pinned layers.
 - Adding a pin to a bent layer can shift the rest of the bend slightly.
+- Dragging a linked pin ignores its link.
+- Saved motions keep keys but not links.
+- One link per property.
+- Links read a parented layer's x and y in its parent's pixels; there's no
+  canvas position to link to.
+- A layer named "camera" can't be a link's source: the name means the camera.
 - Sound playback has only been tested silently; mouse interactions only in
-  code.
-- The link field in the inspector hasn't been clicked through by hand.
+  code; the link field in the inspector hasn't been clicked through by hand.
 
 ## To discuss with the user
 
