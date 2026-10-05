@@ -10,6 +10,7 @@
 // the world looks exactly like the picture.
 
 #include <QByteArray>
+#include <QColor>
 #include <QImage>
 #include <QList>
 #include <QMatrix4x4>
@@ -100,8 +101,25 @@ struct Shadow {
     float yaw = 0;       // Degrees, turned as the piece is.
     float opacity = 0;
 };
+// Dust thrown up where a piece leaves the ground or lands on it.
+struct Burst {
+    QVector3D position;  // On the ground.
+    QVector3D away;      // Which way it's kicked: back from the way it goes.
+    double time = 0;     // Seconds.
+    float strength = 1;  // Landings 1, takeoffs less.
+};
+// One puff of that dust at the frame's time.
+struct Puff {
+    QVector3D position;
+    float size = 1;   // Across, in meters.
+    float alpha = 0;
+};
 struct Frame {
+    double time = 0;
     QList<Shadow> shadows;
+    QList<Burst> bursts;
+    QList<Puff> puffs;
+    QColor dust{217, 160, 142};
     QVector3D cameraPosition;
     QQuaternion cameraRotation;
     double fov = 40;  // Vertical, in degrees.

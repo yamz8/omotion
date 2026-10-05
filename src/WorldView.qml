@@ -50,6 +50,24 @@ Item {
             }
         }
 
+        // Dust thrown up where things leave the ground and land: soft puffs
+        // facing the camera, worked out for the frame's time (so the same
+        // frame always shows the same dust).
+        Model {
+            visible: (view.frame.dustCount || 0) > 0
+            geometry: DustGeometry { source: view.source }
+            materials: CustomMaterial {
+                shadingMode: CustomMaterial.Unshaded
+                cullMode: Material.NoCulling
+                depthDrawMode: Material.NeverDepthDraw
+                sourceBlend: CustomMaterial.One
+                destinationBlend: CustomMaterial.OneMinusSrcAlpha
+                vertexShader: "qrc:/dust.vert"
+                fragmentShader: "qrc:/dust.frag"
+                property TextureInput sprite: TextureInput { texture: Texture { source: "qrc:/puff.png" } }
+            }
+        }
+
         Repeater3D {
             model: view.source ? view.source.layers : []
             delegate: Node {

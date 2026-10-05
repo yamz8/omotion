@@ -558,9 +558,31 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     const double half = std::atan(picture.height() / 2 / world.focal) ;
     frame.fov = 2 * std::atan(std::tan(half) / zoom) * 180 / M_PI;
 
+    frame.time = t;
     for (const int index : layers(scene)) {
         const Layer &layer = scene.layers.at(index);
         const QVector3D centre = pivot(scene, assets, index);
+        // Where it touched the ground and when, for the dust it throws up.
+        auto placedAt = [&](double when) {
+            return centre + QVector3D(scene.value(layer, "worldX", when), scene.value(layer, "worldY", when),
+                                      -scene.value(layer, "worldZ", when));
+        };
+        for (const QString &kind : {QString("landings"), QString("takeoffs")})
+            for (const QJsonValue &value : layer.raw.value(kind).toArray()) {
+                const double when = value.toDouble();
+                const QVector3D here = placedAt(when);
+                const double ground = groundAt(scene, assets, here.x(), here.z());
+                if (std::isnan(ground))
+                    continue;
+                QVector3D going = placedAt(when + .05) - placedAt(when - .05);
+                going.setY(0);
+                Burst burst;
+                burst.position = QVector3D(here.x(), float(ground), here.z());
+                burst.away = going.length() > 1e-4 ? -going.normalized() : QVector3D();
+                burst.time = when;
+                burst.strength = kind == "landings" ? 1 : .5f;
+                frame.bursts.append(burst);
+            }
         Placement place;
         place.layer = index;
         place.visible = layer.visible;
@@ -594,6 +616,40 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         shadow.yaw = float(scene.value(layer, "yaw", t));
         shadow.opacity = float(.75 * place.opacity / (1 + 1.2 * height * height));
         frame.shadows.append(shadow);
+    }
+    // The dust: each burst throws up puffs, every one worked out from its
+    // own seed and the time since, so any frame can be drawn on its own.
+    // They're kicked back from the way the piece went, slowed by the air,
+    // rise as they spread, and fade.
+    const QJsonObject look = scene.raw.value("world").toObject();
+    if (QColor(look.value("dust").toString()).isValid())
+        frame.dust = QColor(look.value("dust").toString());
+    for (int b = 0; b < frame.bursts.size(); ++b) {
+        const Burst &burst = frame.bursts.at(b);
+        const int count = int(std::lround(70 * burst.strength));
+        for (int i = 0; i < count; ++i) {
+            quint32 state = quint32(b * 7919 + i * 104729 + 17);
+            auto random = [&state] {
+                state = state * 1664525u + 1013904223u;
+                return (state >> 8) / double(1 << 24);
+            };
+            const double delay = random() * .25, life = 1.8 + random() * 1.4;
+            const double age = t - burst.time - delay;
+            const double r1 = random(), r2 = random(), r3 = random(), r4 = random(), r5 = random(), r6 = random();
+            if (age < 0 || age > life)
+                continue;
+            const double angle = r1 * 2 * M_PI, reach = std::sqrt(r2) * .9;
+            const QVector3D start = burst.position + QVector3D(float(std::cos(angle) * reach), .05f, float(std::sin(angle) * reach));
+            const QVector3D sideways(float((r3 - .5) * 2.4), 0, float((r4 - .5) * 2.4));
+            const QVector3D kick = burst.away * float(.8 + 2 * r5) + sideways + QVector3D(0, float(.4 + 1.4 * r6), 0);
+            const double drag = 1.8, travelled = (1 - std::exp(-drag * age)) / drag;
+            Puff puff;
+            puff.position = start + kick * float(travelled) + QVector3D(0, float(.15 * age), 0);
+            const double grown = age / life;
+            puff.size = float((.35 + .3 * r1) * (1 + 2.2 * grown));
+            puff.alpha = float(std::min(1.0, age / .12) * std::pow(1 - grown, 1.3) * .5 * burst.strength);
+            frame.puffs.append(puff);
+        }
     }
     return frame;
 }
@@ -819,7 +875,7 @@ bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, con
     bool flying = false;
     if (landings)
         landings->clear();
-    QJsonArray landed;
+    QJsonArray landed, tookOff;
     for (double time = 0; time <= duration + dt / 2; time += dt) {
         path.push_back({time, s, y, vy});
         const double next = s + speed * dt, below = groundAlong(next);
@@ -828,6 +884,7 @@ bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, con
             // Springs soak up a little; past that the ground drops away.
             if ((vyNext - vy) / dt < -1.2 * gravity) {
                 flying = true;
+                tookOff.append(std::round((t + time) * 1000) / 1000);
             } else {
                 y = below, vy = vyNext;
             }
@@ -836,6 +893,9 @@ bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, con
             vy -= gravity * dt;
             y += vy * dt;
             if (y <= below) {
+                // A hop over a bump isn't a jump: no dust for it.
+                if (!tookOff.isEmpty() && t + time - tookOff.last().toDouble() < .15)
+                    tookOff.removeLast();
                 // Down: whatever speed it had into the ground is spent.
                 if (vy < -1) {
                     if (landings)
@@ -884,6 +944,7 @@ bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, con
     for (const QString &property : {QString("worldX"), QString("worldY"), QString("worldZ"), QString("yaw"), QString("pitch")})
         std::stable_sort(layer.keys[property].begin(), layer.keys[property].end(), [](const Key &a, const Key &b) { return a.t < b.t; });
     layer.raw["landings"] = landed;
+    layer.raw["takeoffs"] = tookOff;
     if (end_ > scene.duration)
         scene.duration = std::ceil(end_ * 10) / 10;
     return true;
@@ -1251,6 +1312,30 @@ void fillDepth(QImage &depth, const QImage &hole) {
     }
 }
 
+namespace {
+// Dust takes the colour of the ground it comes from, lit: the average of
+// the picture's lower part, more saturated and lighter, as dust in the air
+// catches the light.
+QColor dustColour(const QImage &picture) {
+    // The brightest quarter of the picture's lower half: lit ground, or the
+    // dust already in it, rather than the shadows between.
+    const QImage small = picture.scaled(64, 64, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+    QList<QRgb> lower;
+    for (int y = 32; y < 64; ++y)
+        for (int x = 0; x < 64; ++x)
+            lower.append(small.pixel(x, y));
+    std::sort(lower.begin(), lower.end(), [](QRgb a, QRgb b) { return qGray(a) > qGray(b); });
+    double r = 0, g = 0, b = 0;
+    const int n = std::max<qsizetype>(1, lower.size() / 4);
+    for (int i = 0; i < n; ++i)
+        r += qRed(lower.at(i)), g += qGreen(lower.at(i)), b += qBlue(lower.at(i));
+    QColor colour(int(r / n), int(g / n), int(b / n));
+    float h, s, l;
+    colour.getHslF(&h, &s, &l);
+    return QColor::fromHslF(h, std::min(1.f, s * 1.15f), std::min(.85f, l * 1.1f));
+}
+}
+
 bool build(Scene &scene, AssetCache &assets, int index, QString *error, double horizon) {
     auto fail = [error](const QString &message) {
         if (error)
@@ -1403,6 +1488,7 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         {"behind", behindFile},
         {"focal", std::round(focal * 10) / 10},
         {"wide", wideFile},
+        {"dust", dustColour(picture).name()},
         {"margin", QJsonArray{margin.width(), margin.height()}},
         {"ground", QJsonObject{{"up", QJsonArray{std::round(up.x() * 1e4) / 1e4, std::round(up.y() * 1e4) / 1e4,
                                                    std::round(up.z() * 1e4) / 1e4}},

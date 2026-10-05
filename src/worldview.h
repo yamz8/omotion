@@ -38,6 +38,9 @@ public:
     QVariantMap frame() const { return m_frame; }
     int revision() const { return m_revision; }
     const World::Mesh &mesh(int layer);
+    // The frame's dust as camera-facing quads: position, uv, colour.
+    const QByteArray &dustVertices() const { return m_dustVertices; }
+    const QByteArray &dustIndices() const { return m_dustIndices; }
 
 signals:
     void changed();
@@ -52,6 +55,8 @@ private:
     QVariantList m_layers;
     QVariantMap m_frame;
     QHash<int, World::Mesh> m_meshes;
+    QByteArray m_dustVertices;
+    QByteArray m_dustIndices;
     QByteArray m_meshKey;
     double m_time = 0;
     int m_revision = 0;
@@ -78,6 +83,23 @@ private:
 
     QPointer<WorldSource> m_source;
     int m_layer = -1;
+};
+
+// The dust of the current frame, for a Model in QML.
+class DustGeometry : public QQuick3DGeometry {
+    Q_OBJECT
+    Q_PROPERTY(WorldSource *source READ source WRITE setSource NOTIFY sourceChanged)
+
+public:
+    WorldSource *source() const { return m_source; }
+    void setSource(WorldSource *source);
+
+signals:
+    void sourceChanged();
+
+private:
+    void rebuild();
+    QPointer<WorldSource> m_source;
 };
 
 // Draws worlds without a window, on the GPU; one per program, made on first

@@ -6,5 +6,8 @@
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="WorldView.qml">WorldView.qml</file>
         <file alias="shadow.png">shadow.png</file>
+        <file alias="puff.png">puff.png</file>
+        <file alias="dust.vert">dust.vert</file>
+        <file alias="dust.frag">dust.frag</file>
     </qresource>
 </RCC>

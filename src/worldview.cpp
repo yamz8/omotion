@@ -1,6 +1,7 @@
 #include "worldview.h"
 
 #include <QCoreApplication>
+#include <algorithm>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -85,6 +86,43 @@ void WorldSource::update() {
                                        {"yaw", shadow.yaw},
                                        {"opacity", shadow.opacity}});
         frame["shadows"] = shadows;
+        QVariantList bursts;
+        for (const World::Burst &burst : f.bursts)
+            bursts.append(QVariantMap{{"position", QVariant::fromValue(burst.position)},
+                                      {"away", QVariant::fromValue(burst.away)},
+                                      {"time", burst.time},
+                                      {"strength", burst.strength}});
+        frame["bursts"] = bursts;
+        frame["time"] = f.time;
+        frame["dustCount"] = f.puffs.size();
+
+        // Puffs face the camera and are drawn far to near, so they blend.
+        QList<World::Puff> puffs = f.puffs;
+        const QVector3D eye = f.cameraPosition;
+        std::sort(puffs.begin(), puffs.end(), [&](const World::Puff &a, const World::Puff &b) {
+            return (a.position - eye).lengthSquared() > (b.position - eye).lengthSquared();
+        });
+        const QVector3D right = f.cameraRotation.rotatedVector(QVector3D(1, 0, 0));
+        const QVector3D up = f.cameraRotation.rotatedVector(QVector3D(0, 1, 0));
+        m_dustVertices.resize(qsizetype(puffs.size()) * 4 * 9 * sizeof(float));
+        m_dustIndices.resize(qsizetype(puffs.size()) * 6 * sizeof(quint32));
+        float *v = reinterpret_cast<float *>(m_dustVertices.data());
+        quint32 *i = reinterpret_cast<quint32 *>(m_dustIndices.data());
+        const float r = float(f.dust.redF()), g = float(f.dust.greenF()), b = float(f.dust.blueF());
+        for (int n = 0; n < puffs.size(); ++n) {
+            const World::Puff &puff = puffs.at(n);
+            const QVector3D half = right * (puff.size / 2), lift = up * (puff.size / 2);
+            const QVector3D corners[4] = {puff.position - half - lift, puff.position + half - lift,
+                                          puff.position + half + lift, puff.position - half + lift};
+            const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+            for (int k = 0; k < 4; ++k) {
+                *v++ = corners[k].x(), *v++ = corners[k].y(), *v++ = corners[k].z();
+                *v++ = uv[k][0], *v++ = uv[k][1];
+                *v++ = r, *v++ = g, *v++ = b, *v++ = puff.alpha;
+            }
+            const quint32 base = quint32(n * 4);
+            *i++ = base, *i++ = base + 1, *i++ = base + 2, *i++ = base, *i++ = base + 2, *i++ = base + 3;
+        }
     }
     m_frame = frame;
     emit frameChanged();
@@ -124,6 +162,34 @@ void WorldGeometry::rebuild() {
             addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
             setBounds(mesh.minimum, mesh.maximum);
         }
+    }
+    update();
+}
+
+void DustGeometry::setSource(WorldSource *source) {
+    if (m_source == source)
+        return;
+    if (m_source)
+        disconnect(m_source, nullptr, this, nullptr);
+    m_source = source;
+    if (m_source)
+        connect(m_source, &WorldSource::frameChanged, this, &DustGeometry::rebuild);
+    emit sourceChanged();
+    rebuild();
+}
+
+void DustGeometry::rebuild() {
+    clear();
+    if (m_source && !m_source->dustVertices().isEmpty()) {
+        setVertexData(m_source->dustVertices());
+        setIndexData(m_source->dustIndices());
+        setStride(9 * sizeof(float));
+        setPrimitiveType(PrimitiveType::Triangles);
+        addAttribute(Attribute::PositionSemantic, 0, Attribute::F32Type);
+        addAttribute(Attribute::TexCoord0Semantic, 3 * sizeof(float), Attribute::F32Type);
+        addAttribute(Attribute::ColorSemantic, 5 * sizeof(float), Attribute::F32Type);
+        addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
+        setBounds(QVector3D(-1e4f, -1e4f, -1e4f), QVector3D(1e4f, 1e4f, 1e4f));
     }
     update();
 }
@@ -229,6 +295,7 @@ QImage WorldRenderer::render(const Scene &scene, const QString &directory, doubl
 
 void registerWorld() {
     qmlRegisterType<WorldGeometry>("Omotion", 1, 0, "WorldGeometry");
+    qmlRegisterType<DustGeometry>("Omotion", 1, 0, "DustGeometry");
     qmlRegisterUncreatableType<WorldSource>("Omotion", 1, 0, "WorldSource", "Made by omotion.");
     setWorldRenderer([](const Scene &scene, AssetCache &assets, double t, const QSize &size) {
         return WorldRenderer::instance().render(scene, assets.directory(), t, size);
