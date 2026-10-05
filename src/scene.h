@@ -87,6 +87,13 @@ struct Scene {
     double fps = 30;
     double duration = 4;
     QColor background = QColor("#000000");
+    // Perspective for layers set back with z: they shrink toward the
+    // vanishing point, by distance / (distance + z), as a camera sees things
+    // further off. NaN until set: then the canvas centre, and its width.
+    QPointF vanish{std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+    double distance = std::numeric_limits<double>::quiet_NaN();
+    QPointF vanishPoint() const;
+    double focalDistance() const;
     QList<Layer> layers;
     // The camera: what part of the world the canvas shows. x and y are the
     // world point at the canvas centre, zoom and rotation turn the view; all
@@ -106,6 +113,9 @@ struct Scene {
     static const QStringList &properties();
     // The properties that change how a layer looks rather than where it is.
     static const QStringList &lookProperties();
+    // Properties left out of scene.json at their default, and keyed by K only
+    // once they're used: the looks, and z.
+    static const QStringList &optionalProperties();
     static const QStringList &eases();
     static const QStringList &blends();
     static double defaultValue(const QString &property);
@@ -242,6 +252,10 @@ private:
 // Maps the world to the canvas for a layer that follows the camera this
 // much (1 fully, 0 not at all).
 QTransform cameraTransform(const Scene &scene, double follow, double t);
+// How far a layer is set back at time t: its z and its parents'.
+double depthOf(const Scene &scene, int index, double t);
+// Shrinks the world toward the vanishing point for things that far back.
+QTransform perspectiveTransform(const Scene &scene, double depth);
 // How much a layer follows the camera: its own amount, or its parent's.
 double followOf(const Scene &scene, int index);
 // Maps a layer's image pixels to canvas pixels at time t, through its parents

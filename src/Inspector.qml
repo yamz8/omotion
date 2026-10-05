@@ -278,6 +278,7 @@ Rectangle {
                 spacing: 4
                 PropertyRow { name: "x"; label: "X" }
                 PropertyRow { name: "y"; label: "Y" }
+                PropertyRow { name: "z"; label: "Depth z" }
                 PropertyRow { name: "scale"; label: "Scale"; decimals: 3 }
                 PropertyRow { name: "scaleX"; label: "Stretch X"; decimals: 3 }
                 PropertyRow { name: "scaleY"; label: "Stretch Y"; decimals: 3 }
@@ -489,6 +490,16 @@ Rectangle {
                 color: win.muted
                 font.pixelSize: 12
                 text: "#00000000 is transparent, for WebM and GIF."
+            }
+            SceneRow { name: "vanishX"; label: "Vanish X"; decimals: 0 }
+            SceneRow { name: "vanishY"; label: "Vanish Y"; decimals: 0 }
+            SceneRow { name: "distance"; label: "Distance"; decimals: 0 }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 12
+                text: "A layer's Depth z sets it back: it shrinks toward the vanishing point, where the road meets the horizon, half size at z = Distance."
             }
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 4; height: 1; color: win.line }

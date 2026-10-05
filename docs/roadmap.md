@@ -13,9 +13,9 @@ toward the camera over the crest, a landing, and a bounce. In order:
 2. **Physics motion.** Springs that overshoot and settle, gravity arcs for
    jumps, bounces on landing; links that follow their source on a spring,
    for suspension, lean and a camera with weight.
-3. **A 3D path.** A layer's distance from the camera sets its size and
-   height on screen through perspective, instead of keying scale and
-   position apart.
+3. ~~**A 3D path.**~~ Done: a layer's `z` and the scene's `perspective`
+   (vanishing point, focal distance). The camera itself is still flat: it
+   pans and zooms, but doesn't move through the depth.
 4. **Wheel rigs.** Click a wheel: AI select cuts it, fills behind, centres
    the pivot, parents it to the body. The body sinks on its suspension
    while the wheels stay down. Wheels spin in their own tilted plane (a

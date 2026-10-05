@@ -23,10 +23,21 @@ double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
 }
 
 const QStringList &Scene::properties() {
-    static const QStringList list{"x", "y", "scale", "scaleX", "scaleY", "rotation", "opacity",
+    static const QStringList list{"x", "y", "z", "scale", "scaleX", "scaleY", "rotation", "opacity",
                                   "brightness", "contrast", "saturation", "blur", "glow"};
     return list;
 }
+
+const QStringList &Scene::optionalProperties() {
+    static const QStringList list = QStringList(lookProperties()) << "z";
+    return list;
+}
+
+QPointF Scene::vanishPoint() const {
+    return std::isnan(vanish.x()) ? QPointF(width / 2.0, height / 2.0) : vanish;
+}
+
+double Scene::focalDistance() const { return std::isnan(distance) ? double(width) : distance; }
 
 const QStringList &Scene::lookProperties() {
     static const QStringList list{"brightness", "contrast", "saturation", "blur", "glow"};
@@ -325,6 +336,14 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         return fail("duration must be more than 0 seconds.");
     if (!scene.background.isValid())
         return fail("background must be a color like \"#000000\".");
+    const QJsonObject perspective = json.value("perspective").toObject();
+    const QJsonArray vanish = perspective.value("vanish").toArray();
+    if (vanish.size() == 2)
+        scene.vanish = QPointF(vanish.at(0).toDouble(), vanish.at(1).toDouble());
+    if (perspective.contains("distance"))
+        scene.distance = perspective.value("distance").toDouble(-1);
+    if (perspective.contains("distance") && !(scene.distance > 0))
+        return fail("perspective's distance must be more than 0 pixels.");
 
     QSet<QString> names;
     const QJsonArray layers = json.value("layers").toArray();
@@ -455,6 +474,19 @@ QJsonObject Scene::toJson() const {
     json.insert("duration", duration);
     // Keep the alpha when the background is see-through, for WebM and GIF.
     json.insert("background", background.name(background.alpha() < 255 ? QColor::HexArgb : QColor::HexRgb));
+    QJsonObject perspective = raw.value("perspective").toObject();
+    if (std::isnan(vanish.x()))
+        perspective.remove("vanish");
+    else
+        perspective.insert("vanish", QJsonArray{vanish.x(), vanish.y()});
+    if (std::isnan(distance))
+        perspective.remove("distance");
+    else
+        perspective.insert("distance", distance);
+    if (perspective.isEmpty())
+        json.remove("perspective");
+    else
+        json.insert("perspective", perspective);
 
     QJsonArray array;
     for (const Layer &layer : layers) {
@@ -505,7 +537,7 @@ QJsonObject Scene::toJson() const {
         // Looks only appear once they're used, so plain layers stay short.
         for (const QString &property : properties()) {
             const double v = layer.base.value(property, defaultValue(property));
-            if (lookProperties().contains(property) && v == defaultValue(property))
+            if (optionalProperties().contains(property) && v == defaultValue(property))
                 object.remove(property);
             else
                 object.insert(property, v);
@@ -988,7 +1020,7 @@ void Scene::keyAll(int index, double t) {
         const Layer &layer = (*at(index));
         const bool used = layer.keys.contains(property) ||
                           layer.base.value(property, defaultValue(property)) != defaultValue(property);
-        if (!lookProperties().contains(property) || used)
+        if (!optionalProperties().contains(property) || used)
             keyProperty(index, property, t);
     }
 }
@@ -1382,16 +1414,42 @@ double followOf(const Scene &scene, int index) {
     return 1;
 }
 
+double depthOf(const Scene &scene, int index, double t) {
+    double depth = 0;
+    QSet<int> seen;
+    while (index >= 0 && index < scene.layers.size() && !seen.contains(index)) {
+        seen.insert(index);
+        const Layer &layer = scene.layers.at(index);
+        depth += scene.value(layer, "z", t);
+        index = layer.parent.isEmpty() ? -1 : scene.indexOf(layer.parent);
+    }
+    return depth;
+}
+
+QTransform perspectiveTransform(const Scene &scene, double depth) {
+    if (depth == 0)
+        return {};
+    // A card facing the camera, depth further off than where it's placed:
+    // everything on it closes in on the vanishing point by the same factor.
+    // Held short of the camera, where it would grow without end.
+    const double d = scene.focalDistance();
+    const double f = d / std::max(d + depth, d / 50);
+    const QPointF v = scene.vanishPoint();
+    return QTransform(f, 0, 0, f, v.x() * (1 - f), v.y() * (1 - f));
+}
+
 QTransform layerTransform(const Scene &scene, AssetCache &assets, int index, double t) {
-    return chainTransform(scene, assets, index, t) * cameraTransform(scene, followOf(scene, index), t);
+    return chainTransform(scene, assets, index, t) * perspectiveTransform(scene, depthOf(scene, index, t)) *
+           cameraTransform(scene, followOf(scene, index), t);
 }
 
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t) {
     if (index < 0 || index >= scene.layers.size())
         return {};
     const int parent = scene.indexOf(scene.layers.at(index).parent);
+    // Its own depth too: x and y move it in a world that far back.
     return (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
-           cameraTransform(scene, followOf(scene, index), t);
+           perspectiveTransform(scene, depthOf(scene, index, t)) * cameraTransform(scene, followOf(scene, index), t);
 }
 
 QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, double t) {

@@ -2103,6 +2103,67 @@ private slots:
         QCOMPARE(origin[1].toInt(), 25);
     }
 
+    void depthShrinksTowardTheVanishingPoint() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);  // 200×100.
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QTransform flat = layerTransform(scene, assets, 0, 0);
+        scene.layers[0].base["x"] = 160;  // To the right of the vanishing point, the canvas centre.
+        const QTransform placed = layerTransform(scene, assets, 0, 0);
+        QCOMPARE(placed.map(QPointF(0, 0)), flat.map(QPointF(0, 0)) + QPointF(60, 0));
+        // As far back as the focal distance (the canvas width), it's half
+        // size, halfway to the vanishing point.
+        scene.layers[0].base["z"] = 200;
+        const QTransform far = layerTransform(scene, assets, 0, 0);
+        QCOMPARE(std::hypot(far.m11(), far.m12()), std::hypot(placed.m11(), placed.m12()) / 2);
+        const QPointF pivot(100, 50);  // The image centre, its anchor.
+        QCOMPARE(placed.map(pivot), QPointF(160, 50));
+        QCOMPARE(far.map(pivot), QPointF(130, 50));
+        // Children are as far back as their parent.
+        Layer child;
+        child.name = "child";
+        child.source = scene.layers[0].source;
+        child.parent = scene.layers[0].name;
+        scene.layers.append(child);
+        QCOMPARE(depthOf(scene, 1, 0), 200.0);
+        // Perspective goes through scene.json; z is left out until it's used.
+        scene.vanish = QPointF(150, 30);
+        scene.distance = 900;
+        const QJsonObject json = scene.toJson();
+        QCOMPARE(json["perspective"].toObject()["distance"].toDouble(), 900.0);
+        QString error;
+        const Scene again = Scene::fromJson(json, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(again.vanishPoint(), QPointF(150, 30));
+        QCOMPARE(again.focalDistance(), 900.0);
+        QVERIFY(!json["layers"].toArray()[1].toObject().contains("z"));
+        QVERIFY(!Scene().toJson().contains("perspective"));
+        Scene keyed = again;
+        keyed.keyAll(1, 0);
+        QVERIFY(!keyed.layers[1].keys.contains("z"));
+        keyed.keyAll(0, 0);  // Set back, so it's in use.
+        QVERIFY(keyed.layers[0].keys.contains("z"));
+    }
+
+    void backendDragsLayersSetBack() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));  // 200×100, centred.
+        backend.select(0);
+        backend.setProperty("z", 200);  // Half size.
+        const double x = backend.values()["x"].toDouble();
+        backend.beginDrag(100, 50);
+        backend.dragTo(110, 50);
+        backend.endDrag();
+        // It stays under the hand: 10 canvas pixels are 20 that far back.
+        QCOMPARE(backend.values()["x"].toDouble(), x + 20);
+        backend.setSceneValue("distance", 400);
+        QCOMPARE(backend.sceneInfo()["distance"].toDouble(), 400.0);
+        backend.setSceneValue("vanishY", 10);
+        QCOMPARE(backend.scene().vanishPoint(), QPointF(100, 10));
+    }
+
     void backendDragsInTheParentsPixels() {
         QTemporaryDir dir;
         Backend backend;

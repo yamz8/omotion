@@ -115,6 +115,9 @@ QVariantMap Backend::sceneInfo() const {
             {"duration", m_scene.duration},
             {"frames", m_scene.frameCount()},
             {"background", m_scene.background.name(QColor::HexArgb)},
+            {"vanishX", m_scene.vanishPoint().x()},
+            {"vanishY", m_scene.vanishPoint().y()},
+            {"distance", m_scene.focalDistance()},
             {"cameraKeys", [this] {
                  QVariantList times;
                  for (double t : m_scene.keyTimes(Scene::CameraIndex))
@@ -726,6 +729,16 @@ void Backend::setSceneValue(const QString &name, const QVariant &value) {
         if (!color.isValid())
             return setError(QString("\"%1\" isn't a color.").arg(value.toString()));
         scene.background = color;
+    } else if (name == "vanishX" || name == "vanishY") {
+        const double v = value.toDouble();
+        QPointF point = scene.vanishPoint();
+        (name == "vanishX" ? point.rx() : point.ry()) = v;
+        scene.vanish = point;
+    } else if (name == "distance") {
+        const double v = value.toDouble();
+        if (!(v > 0))
+            return setError("The perspective distance must be more than 0 pixels.");
+        scene.distance = v;
     } else {
         return;
     }

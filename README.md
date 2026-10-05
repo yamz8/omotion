@@ -57,18 +57,21 @@ layer it stands in, so it rides the camera move with its surroundings, and
    lands like a dropped ball, `arc(300)` jumps 300 px high on the way to
    the next key. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
-6. Press **V** for the camera, and animate it like a layer: pan, zoom and
+6. To bring something from the distance, key its **Depth z** in the
+   inspector from far (1500) to 0: it shrinks toward the vanishing point,
+   which you set under Scene where the road meets the horizon.
+7. Press **V** for the camera, and animate it like a layer: pan, zoom and
    turn the whole scene. Each layer's **Follow camera** sets how much the
    camera moves it, for depth.
-7. Tie one thing to another with the ⛓ beside a property in the inspector:
+8. Tie one thing to another with the ⛓ beside a property in the inspector:
    `car.x × 0.8` turns a wheel as its car drives, `speed of car.x × 0.002`
    thickens dust as it speeds up, `time × 90` spins forever. The link adds
    to the property's own value, which still keyframes as usual.
-8. Give a layer a look in the inspector: brightness, contrast, saturation,
+9. Give a layer a look in the inspector: brightness, contrast, saturation,
    blur, glow, and a blend (**B**). They animate like everything else. A
    glowing light is a soft copy-cut of it (**Shift+Enter**), set to *add*,
    with the contrast up, the brightness down and some glow.
-9. **Ctrl+E** exports into `renders/` in the project folder, at full size or
+10. **Ctrl+E** exports into `renders/` in the project folder, at full size or
    half (**H** in the export menu). GIFs play at 15 fps to stay small.
 
 ## Shortcuts
@@ -195,7 +198,7 @@ photo.omotion/
 ```
 
 - **Layers** are drawn in order, first at the back. Names must be unique.
-- **Properties** are `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`
+- **Properties** are `x`, `y`, `z`, `scale`, `scaleX`, `scaleY`, `rotation`
   (degrees, clockwise) and `opacity` (0–1), and for the layer's look
   `brightness` (−1 to 1, default 0), `contrast` and `saturation` (1 is
   unchanged), `blur` and `glow` (in canvas pixels, default 0). A property is
@@ -216,6 +219,16 @@ photo.omotion/
   glow and follow.
 - **`blend`** is how a layer mixes with the ones below: `normal`, `add`,
   `screen`, `multiply`, `overlay`, `lighten` or `darken`.
+- **`z`** sets a layer back from where it's placed, in pixels (0, the
+  default, changes nothing; less than 0 brings it closer). Things further
+  back shrink toward the vanishing point by `distance / (distance + z)`, as
+  a camera sees them, so a car keyed from far to near comes down the road
+  and grows the way a real one does, with no scale keys. Children are as far
+  back as their parent, plus their own `z`. **`perspective`** at the top of
+  the file sets the `vanish`ing point, `[x, y]` on the canvas where the road
+  meets the horizon (the canvas centre if left out), and the focal
+  `distance` in pixels (the canvas width if left out; a layer that far back
+  is half size).
 - **`camera`** is what part of the world the canvas shows: `x`, `y` (the
   world point at the canvas centre), `zoom` and `rotation`, constant or
   under `keys` like a layer's. A layer's **`follow`** says how much the
