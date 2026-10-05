@@ -118,6 +118,165 @@ private slots:
         QCOMPARE(scene.value(layer, "scale", 2), 1.0);
     }
 
+    void linksAddTheirSourceToTheirOwnValue() {
+        QString error;
+        const Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({
+            "duration": 3,
+            "layers": [
+                {"name": "car", "source": "car.png",
+                 "keys": {"x": [{"t": 0, "v": 0}, {"t": 3, "v": 300}]}},
+                {"name": "reversing", "source": "car.png",
+                 "keys": {"x": [{"t": 0, "v": 300}, {"t": 3, "v": 0}]}},
+                {"name": "wheel", "source": "wheel.png", "rotation": 10,
+                 "links": {"rotation": {"from": "car.x", "times": 2},
+                           "x": {"from": "car.x", "of": "speed"},
+                           "y": {"from": "car.x", "of": "acceleration"},
+                           "scale": {"from": "car.x", "lag": 1, "times": 0.01},
+                           "opacity": {"from": "reversing.x", "of": "speed", "abs": true, "max": 50},
+                           "blur": {"from": "time", "times": 90}}}
+            ],
+            "camera": {"links": {"x": {"from": "car.x"}}}
+        })").object(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const Layer &wheel = scene.layers[2];
+        QCOMPARE(scene.value(wheel, "rotation", 1.5), 10.0 + 300);
+        QCOMPARE(scene.ownValue(wheel, "rotation", 1.5), 10.0);
+        // 100 px a second all the way, the first and last frames included.
+        QCOMPARE(scene.value(wheel, "x", 1.5), 100.0);
+        QCOMPARE(scene.value(wheel, "x", 0), 100.0);
+        QCOMPARE(scene.value(wheel, "x", 3), 100.0);
+        QVERIFY(std::abs(scene.value(wheel, "y", 1.5)) < 1e-6);
+        // A second behind: at 2 s it reads where the car was at 1 s.
+        QCOMPARE(scene.value(wheel, "scale", 2), 1.0 + 1);
+        // Backwards at 100 px a second counts as 100, held to the max.
+        QCOMPARE(scene.value(wheel, "opacity", 1.5), 1.0 + 50);
+        QCOMPARE(scene.value(wheel, "blur", 2), 180.0);
+        // The camera starts at the canvas centre and is carried along.
+        QCOMPARE(scene.value(scene.camera, "x", 1.5), 640.0 + 150);
+    }
+
+    void linksGoThroughJsonAndKeepUnknownFields() {
+        QString error;
+        const QJsonObject json = QJsonDocument::fromJson(R"({
+            "layers": [
+                {"name": "car", "source": "car.png"},
+                {"name": "wheel", "source": "wheel.png",
+                 "links": {"rotation": {"from": "car.x", "of": "speed", "times": 0.5, "note": "spins"}}}
+            ]
+        })").object();
+        Scene scene = Scene::fromJson(json, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const QJsonObject link =
+            scene.toJson()["layers"].toArray()[1].toObject()["links"].toObject()["rotation"].toObject();
+        QCOMPARE(link["from"].toString(), QString("car.x"));
+        QCOMPARE(link["of"].toString(), QString("speed"));
+        QCOMPARE(link["times"].toDouble(), .5);
+        QCOMPARE(link["note"].toString(), QString("spins"));
+        QVERIFY(!link.contains("lag") && !link.contains("abs") && !link.contains("min"));
+        // Unlinked layers don't grow an empty "links".
+        QVERIFY(!scene.toJson()["layers"].toArray()[0].toObject().contains("links"));
+        QVERIFY(!scene.toJson().contains("camera"));
+    }
+
+    void brokenLinksAreRefused() {
+        auto load = [](const QByteArray &links) {
+            QString error;
+            Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "a", "source": "a.png", "links": )" + links +
+                                                    R"(}, {"name": "b", "source": "b.png", "links": {"x": {"from": "a.y"}}}]})")
+                                .object(),
+                            &error);
+            return error;
+        };
+        QVERIFY(load(R"({"x": {"from": "car.x"}})").contains("isn't there"));
+        QVERIFY(load(R"({"x": {"from": "b.nonsense"}})").contains("isn't there"));
+        QVERIFY(load(R"({"nonsense": {"from": "b.x"}})").contains("isn't one of its properties"));
+        QVERIFY(load(R"({"x": {"from": "b.x", "of": "jerk"}})").contains("\"of\""));
+        QVERIFY(load(R"({"x": {"from": "b.x", "min": 2, "max": 1}})").contains("min"));
+        QVERIFY(load(R"({"x": {"times": 2}})").contains("where from"));
+        // a.y is read by b.x; a.y reading b.x closes the loop.
+        QVERIFY(load(R"({"y": {"from": "b.x"}})").contains("loop"));
+        QVERIFY(load(R"({"x": {"from": "a.x"}})").contains("loop"));
+        QVERIFY(load(R"({"x": {"from": "b.x"}})").isEmpty());
+
+        // Made one at a time, a loop is refused and leaves the scene as it was.
+        QString error;
+        Scene scene = Scene::fromJson(QJsonDocument::fromJson(
+            R"({"layers": [{"name": "a", "source": "a.png"}, {"name": "b", "source": "b.png"}]})").object(), &error);
+        QVERIFY(scene.setLink(1, "x", Link{"a.x"}, &error));
+        QVERIFY(!scene.setLink(0, "x", Link{"b.x"}, &error));
+        QVERIFY(error.contains("loop"));
+        QVERIFY(scene.layers[0].links.isEmpty());
+        QVERIFY(!scene.setLink(0, "x", Link{"c.x"}, &error));
+        QVERIFY(scene.setLink(1, "x", Link{}, &error));
+        QVERIFY(scene.layers[1].links.isEmpty());
+    }
+
+    void linksReadAndWriteAsText() {
+        Link link;
+        QString error;
+        const QString text = "acceleration of car body.x × -0.5, lag 0.1, smooth 0.2, abs, min -3, max 3";
+        QVERIFY2(Scene::parseLink(text, &link, &error), qPrintable(error));
+        QCOMPARE(link.from, QString("car body.x"));
+        QCOMPARE(link.of, QString("acceleration"));
+        QCOMPARE(link.times, -.5);
+        QCOMPARE(link.lag, .1);
+        QCOMPARE(link.smooth, .2);
+        QVERIFY(link.abs);
+        QCOMPARE(link.min, -3.0);
+        QCOMPARE(link.max, 3.0);
+        QCOMPARE(Scene::linkText(link), text);
+        // * works as well as ×, and a plain source multiplies by 1.
+        QVERIFY(Scene::parseLink("time * 90", &link, &error));
+        QCOMPARE(link.from, QString("time"));
+        QCOMPARE(link.times, 90.0);
+        QVERIFY(Scene::parseLink("car.x", &link, &error));
+        QCOMPARE(link.times, 1.0);
+        QCOMPARE(Scene::linkText(link), QString("car.x"));
+        QVERIFY(!Scene::parseLink("car.x, wobble 3", &link, &error));
+        QVERIFY(error.contains("wobble"));
+        QVERIFY(!Scene::parseLink("car.x, min 2, max 1", &link, &error));
+    }
+
+    void backendLinksWithoutAJump() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        const QString source = backend.scene().layers[0].name;
+        backend.select(0);
+        backend.duplicateLayer();
+        QCOMPARE(backend.selected(), 1);
+        backend.setProperty("rotation", 5);
+        // Linking leaves the property where it was; the source moving moves it.
+        QVERIFY(backend.setLink("rotation", source + ".x × 0.1"));
+        QCOMPARE(backend.values()["rotation"].toDouble(), 5.0);
+        QCOMPARE(backend.values()["links"].toMap()["rotation"].toString(), source + ".x × 0.1");
+        backend.select(0);
+        backend.adjust("x", 50);
+        backend.select(1);
+        QCOMPARE(backend.values()["rotation"].toDouble(), 10.0);
+        // Typing a value shows that value, link and all.
+        backend.setProperty("rotation", 30);
+        QCOMPARE(backend.values()["rotation"].toDouble(), 30.0);
+        // Bad links are refused with a reason.
+        QVERIFY(!backend.setLink("rotation", "nobody.x"));
+        QVERIFY(backend.error().contains("nobody.x"));
+        // Renaming the source keeps the link; deleting it lets go.
+        QVERIFY(backend.renameLayer(0, "car"));
+        QCOMPARE(backend.scene().layers[1].links["rotation"].from, QString("car.x"));
+        backend.select(0);
+        backend.deleteLayer();
+        QVERIFY(backend.scene().layers[0].links.isEmpty());
+        QVERIFY(backend.notice().contains("unlinked"));
+        backend.undo();
+        QCOMPARE(backend.scene().layers[1].links["rotation"].from, QString("car.x"));
+        // An empty link unlinks, again without a jump.
+        backend.select(1);
+        const double before = backend.values()["rotation"].toDouble();
+        QVERIFY(backend.setLink("rotation", ""));
+        QVERIFY(backend.scene().layers[1].links.isEmpty());
+        QCOMPARE(backend.values()["rotation"].toDouble(), before);
+    }
+
     void setValueKeysOnlyAnimatedProperties() {
         Scene scene;
         scene.layers.append(Layer{});

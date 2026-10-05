@@ -197,6 +197,44 @@ QList<double> Scene::curveOf(const QString &ease) {
     return {0, 0, 1, 1};
 }
 
+namespace {
+// A layer's (or the camera's) "links", checked for what can be told without
+// the rest of the scene; where they point is checked once it's all read.
+bool readLinks(const QJsonObject &object, Layer &layer, const QStringList &properties, const QString &who,
+               QString *error) {
+    const QJsonObject links = object.value("links").toObject();
+    for (auto it = links.begin(); it != links.end(); ++it) {
+        if (!properties.contains(it.key())) {
+            *error = QString("%1 links \"%2\", which isn't one of its properties (%3).")
+                         .arg(who, it.key(), properties.join(", "));
+            return false;
+        }
+        if (!it.value().isObject() || it.value().toObject().value("from").toString().isEmpty()) {
+            *error = QString("%1 links \"%2\" without saying where from, as in {\"from\": \"car.x\"}.")
+                         .arg(who, it.key());
+            return false;
+        }
+        const Link link = Scene::linkFromJson(it.value().toObject());
+        if (!Scene::linkMeasures().contains(link.of)) {
+            *error = QString("%1 links \"%2\" by \"%3\"; \"of\" is one of %4.")
+                         .arg(who, it.key(), link.of, Scene::linkMeasures().join(", "));
+            return false;
+        }
+        if (!std::isfinite(link.times) || !std::isfinite(link.lag) || !std::isfinite(link.smooth) ||
+            link.smooth < 0 || std::isnan(link.min) || std::isnan(link.max) || link.min > link.max) {
+            *error = QString("%1 links \"%2\" with numbers that don't work: times and lag are any number, "
+                             "smooth from 0, and min no more than max.")
+                         .arg(who, it.key());
+            return false;
+        }
+        layer.links.insert(it.key(), link);
+    }
+    return true;
+}
+
+QString formatNumber(double v) { return QString::number(v, 'g', 6); }
+}
+
 Scene Scene::fromJson(const QJsonObject &json, QString *error) {
     auto fail = [error](const QString &message) {
         if (error)
@@ -279,6 +317,9 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             if (!list.isEmpty())
                 layer.keys.insert(it.key(), list);
         }
+        QString linkError;
+        if (!readLinks(object, layer, propertiesOf(layer), QString("Layer \"%1\"").arg(layer.name), &linkError))
+            return fail(linkError);
         scene.layers.append(layer);
     }
 
@@ -310,6 +351,9 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             if (!list.isEmpty())
                 scene.camera.keys.insert(it.key(), list);
         }
+        QString linkError;
+        if (!readLinks(camera, scene.camera, cameraProperties(), "The camera", &linkError))
+            return fail(linkError);
     }
 
     for (const Layer &layer : scene.layers) {
@@ -326,6 +370,9 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             parent = scene.layers.at(index).parent;
         }
     }
+    const QString linkProblem = scene.checkLinks();
+    if (!linkProblem.isEmpty())
+        return fail(linkProblem);
     if (error)
         error->clear();
     return scene;
@@ -407,6 +454,13 @@ QJsonObject Scene::toJson() const {
             object.remove("keys");
         else
             object.insert("keys", keys);
+        QJsonObject links;
+        for (auto it = layer.links.begin(); it != layer.links.end(); ++it)
+            links.insert(it.key(), linkToJson(it.value()));
+        if (links.isEmpty())
+            object.remove("links");
+        else
+            object.insert("links", links);
         array.append(object);
     }
     json.insert("layers", array);
@@ -422,7 +476,11 @@ QJsonObject Scene::toJson() const {
             list.append(QJsonObject{{"t", key.t}, {"v", key.v}, {"ease", key.ease}});
         cameraKeys.insert(it.key(), list);
     }
-    if (cameraKeys.isEmpty() && cx == width / 2.0 && cy == height / 2.0 && zoom == 1 && turn == 0 && cam.isEmpty()) {
+    QJsonObject cameraLinks;
+    for (auto it = camera.links.begin(); it != camera.links.end(); ++it)
+        cameraLinks.insert(it.key(), linkToJson(it.value()));
+    if (cameraKeys.isEmpty() && cameraLinks.isEmpty() && cx == width / 2.0 && cy == height / 2.0 && zoom == 1 &&
+        turn == 0 && cam.isEmpty()) {
         json.remove("camera");
     } else {
         cam.insert("x", cx);
@@ -433,6 +491,10 @@ QJsonObject Scene::toJson() const {
             cam.remove("keys");
         else
             cam.insert("keys", cameraKeys);
+        if (cameraLinks.isEmpty())
+            cam.remove("links");
+        else
+            cam.insert("links", cameraLinks);
         json.insert("camera", cam);
     }
     return json;
@@ -458,9 +520,18 @@ int Scene::frameCount() const { return std::max(1, int(std::lround(duration * fp
 double Scene::frameTime(int frame) const { return frame / fps; }
 
 double Scene::value(const Layer &layer, const QString &property, double t) const {
+    const double own = ownValue(layer, property, t);
+    return layer.links.isEmpty() ? own : own + linkValue(layer, property, t);
+}
+
+double Scene::ownValue(const Layer &layer, const QString &property, double t) const {
     const auto it = layer.keys.constFind(property);
-    if (it == layer.keys.constEnd() || it->isEmpty())
+    if (it == layer.keys.constEnd() || it->isEmpty()) {
+        // The camera looks at the canvas centre until it's told otherwise.
+        if (&layer == &camera && (property == "x" || property == "y"))
+            return layer.base.value(property, property == "x" ? width / 2.0 : height / 2.0);
         return layer.base.value(property, defaultValue(property));
+    }
 
     const QList<Key> &keys = *it;
     if (t <= keys.first().t)
@@ -478,10 +549,288 @@ double Scene::value(const Layer &layer, const QString &property, double t) const
     return keys.last().v;
 }
 
+double Scene::linkValue(const Layer &layer, const QString &property, double t) const {
+    const auto it = layer.links.constFind(property);
+    if (it == layer.links.constEnd())
+        return 0;
+    const Link &link = *it;
+    int index = -1;
+    QString source;
+    if (!linkSource(link.from, &index, &source))
+        return 0;
+    // Loops are refused when links are made; this only keeps one that got
+    // through some other way from recursing until the stack runs out.
+    thread_local int depth = 0;
+    if (depth > 32)
+        return 0;
+    ++depth;
+    auto read = [&](double when) { return index == -1 ? when : value(*at(index), source, when); };
+    const double h = link.smooth > 0 ? link.smooth : 1 / fps;
+    const double when = t - link.lag;
+    double measure = 0;
+    if (link.of == "speed") {
+        // Measured inside the scene, so a car already moving at the first
+        // frame isn't taken to be half as fast there.
+        double lo = when - h, hi = when + h;
+        if (lo < 0)
+            hi -= lo, lo = 0;
+        if (hi > duration)
+            lo -= hi - duration, hi = duration;
+        lo = std::max(0.0, lo);
+        measure = hi > lo ? (read(hi) - read(lo)) / (hi - lo) : 0;
+    } else if (link.of == "acceleration") {
+        measure = (read(when + h) - 2 * read(when) + read(when - h)) / (h * h);
+    } else {
+        measure = read(when);
+    }
+    --depth;
+    if (link.abs)
+        measure = std::abs(measure);
+    const double v = std::clamp(measure * link.times, link.min, link.max);
+    return std::isfinite(v) ? v : 0;
+}
+
+const QStringList &Scene::linkMeasures() {
+    static const QStringList list{"value", "speed", "acceleration"};
+    return list;
+}
+
+bool Scene::linkSource(const QString &from, int *index, QString *property) const {
+    if (from == "time") {
+        *index = -1;
+        property->clear();
+        return true;
+    }
+    // Split at the last dot: layer names may have dots, properties don't.
+    const int dot = from.lastIndexOf('.');
+    if (dot <= 0)
+        return false;
+    const QString name = from.left(dot), wanted = from.mid(dot + 1);
+    const int i = name == "camera" ? CameraIndex : indexOf(name);
+    if (!at(i) || !(i == CameraIndex ? cameraProperties() : propertiesOf(*at(i))).contains(wanted))
+        return false;
+    *index = i;
+    *property = wanted;
+    return true;
+}
+
+QString Scene::checkLinks() const {
+    auto who = [this](int index, const QString &property) {
+        return index == CameraIndex ? QString("The camera's %1").arg(property)
+                                    : QString("Layer \"%1\"'s %2").arg(layers.at(index).name, property);
+    };
+    QList<int> all{CameraIndex};
+    for (int i = 0; i < layers.size(); ++i)
+        all.append(i);
+    for (int index : all)
+        for (auto it = at(index)->links.begin(); it != at(index)->links.end(); ++it) {
+            int source = -1;
+            QString property;
+            if (!linkSource(it->from, &source, &property))
+                return QString("%1 is linked to \"%2\", which isn't there; link to layer.property, "
+                               "camera.property or time.")
+                    .arg(who(index, it.key()), it->from);
+        }
+    // Follow each link to its source, and the source's link to its own, and
+    // so on: arriving back where it started is a loop with no answer.
+    for (int start : all)
+        for (auto it = at(start)->links.begin(); it != at(start)->links.end(); ++it) {
+            int index = start;
+            QString property = it.key();
+            for (int steps = 0; steps <= 64; ++steps) {
+                const auto link = at(index)->links.constFind(property);
+                if (link == at(index)->links.constEnd())
+                    break;
+                int next = -1;
+                QString nextProperty;
+                linkSource(link->from, &next, &nextProperty);
+                if (next == -1)
+                    break;
+                if (next == start && nextProperty == it.key())
+                    return QString("%1 is linked in a loop that comes back to itself.").arg(who(start, it.key()));
+                index = next;
+                property = nextProperty;
+            }
+        }
+    return {};
+}
+
+bool Scene::setLink(int index, const QString &property, const Link &link, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    Layer *layer = at(index);
+    if (!layer)
+        return fail("There's no such layer.");
+    if (!(index == CameraIndex ? cameraProperties() : propertiesOf(*layer)).contains(property))
+        return fail(QString("\"%1\" isn't a property that can be linked.").arg(property));
+    if (link.from.isEmpty()) {
+        layer->links.remove(property);
+        return true;
+    }
+    int source = -1;
+    QString sourceProperty;
+    if (!linkSource(link.from, &source, &sourceProperty))
+        return fail(QString("There's nothing called \"%1\" to link to; use layer.property, camera.property or time.")
+                        .arg(link.from));
+    const bool had = layer->links.contains(property);
+    const Link old = layer->links.value(property);
+    layer->links.insert(property, link);
+    const QString problem = checkLinks();
+    if (problem.isEmpty())
+        return true;
+    if (had)
+        layer->links.insert(property, old);
+    else
+        layer->links.remove(property);
+    return fail(problem);
+}
+
+void Scene::renameLinkSource(const QString &from, const QString &to) {
+    auto rename = [&](Layer &layer) {
+        for (Link &link : layer.links)
+            if (link.from.startsWith(from + ".") && link.from.lastIndexOf('.') == from.size())
+                link.from = to + link.from.mid(from.size());
+    };
+    rename(camera);
+    for (Layer &layer : layers)
+        rename(layer);
+}
+
+int Scene::dropLinksTo(const QString &name) {
+    int dropped = 0;
+    auto drop = [&](Layer &layer) {
+        for (auto it = layer.links.begin(); it != layer.links.end();) {
+            const bool gone = it->from.left(it->from.lastIndexOf('.')) == name;
+            dropped += gone;
+            it = gone ? layer.links.erase(it) : std::next(it);
+        }
+    };
+    drop(camera);
+    for (Layer &layer : layers)
+        drop(layer);
+    return dropped;
+}
+
+QString Scene::linkText(const Link &link) {
+    QString text = (link.of == "value" ? QString() : link.of + " of ") + link.from;
+    if (link.times != 1)
+        text += " × " + formatNumber(link.times);
+    if (link.lag != 0)
+        text += ", lag " + formatNumber(link.lag);
+    if (link.smooth != 0)
+        text += ", smooth " + formatNumber(link.smooth);
+    if (link.abs)
+        text += ", abs";
+    if (std::isfinite(link.min))
+        text += ", min " + formatNumber(link.min);
+    if (std::isfinite(link.max))
+        text += ", max " + formatNumber(link.max);
+    return text;
+}
+
+bool Scene::parseLink(const QString &text, Link *link, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    static const QRegularExpression measured("^(value|speed|acceleration)\\s+of\\s+(.+)$");
+    static const QRegularExpression scaled("^(.+?)\\s*[*×]\\s*([-+]?[\\d.]+(?:[eE][-+]?\\d+)?)$");
+    Link parsed;
+    const QStringList parts = text.split(',');
+    QString main = parts.first().trimmed();
+    if (const auto match = measured.match(main); match.hasMatch()) {
+        parsed.of = match.captured(1);
+        main = match.captured(2).trimmed();
+    }
+    if (const auto match = scaled.match(main); match.hasMatch()) {
+        bool ok = false;
+        parsed.times = match.captured(2).toDouble(&ok);
+        if (!ok)
+            return fail(QString("\"%1\" isn't a number to multiply by.").arg(match.captured(2)));
+        main = match.captured(1).trimmed();
+    }
+    parsed.from = main;
+    if (parsed.from.isEmpty())
+        return fail("Say what to link to, like car.x × 0.8, speed of car.x, or time × 90.");
+    for (int i = 1; i < parts.size(); ++i) {
+        const QStringList words = parts.at(i).trimmed().split(' ', Qt::SkipEmptyParts);
+        if (words.size() == 1 && words.first() == "abs") {
+            parsed.abs = true;
+            continue;
+        }
+        bool ok = false;
+        const double v = words.size() == 2 ? words.at(1).toDouble(&ok) : 0;
+        const QString name = words.value(0);
+        if (!ok || !QStringList{"lag", "smooth", "min", "max"}.contains(name))
+            return fail(QString("\"%1\" isn't something a link takes: lag, smooth, min or max with a number, or abs.")
+                            .arg(parts.at(i).trimmed()));
+        if (name == "lag")
+            parsed.lag = v;
+        else if (name == "smooth")
+            parsed.smooth = v;
+        else if (name == "min")
+            parsed.min = v;
+        else
+            parsed.max = v;
+    }
+    if (!std::isfinite(parsed.times) || !std::isfinite(parsed.lag) || parsed.smooth < 0 || parsed.min > parsed.max)
+        return fail("Smooth can't be below 0, and min can't be over max.");
+    *link = parsed;
+    return true;
+}
+
+Link Scene::linkFromJson(const QJsonObject &json) {
+    Link link;
+    link.raw = json;
+    link.from = json.value("from").toString();
+    link.of = json.value("of").toString("value");
+    link.times = json.value("times").toDouble(1);
+    link.lag = json.value("lag").toDouble(0);
+    link.smooth = json.value("smooth").toDouble(0);
+    link.abs = json.value("abs").toBool(false);
+    if (json.contains("min"))
+        link.min = json.value("min").toDouble(std::numeric_limits<double>::quiet_NaN());
+    if (json.contains("max"))
+        link.max = json.value("max").toDouble(std::numeric_limits<double>::quiet_NaN());
+    return link;
+}
+
+QJsonObject Scene::linkToJson(const Link &link) {
+    // Only what differs from the defaults, so a link stays one short line.
+    QJsonObject json = link.raw;
+    json.insert("from", link.from);
+    auto put = [&json](const char *name, double v, bool shown) {
+        if (shown)
+            json.insert(name, v);
+        else
+            json.remove(name);
+    };
+    if (link.of == "value")
+        json.remove("of");
+    else
+        json.insert("of", link.of);
+    put("times", link.times, link.times != 1);
+    put("lag", link.lag, link.lag != 0);
+    put("smooth", link.smooth, link.smooth != 0);
+    if (link.abs)
+        json.insert("abs", true);
+    else
+        json.remove("abs");
+    put("min", link.min, std::isfinite(link.min));
+    put("max", link.max, std::isfinite(link.max));
+    return json;
+}
+
 void Scene::setValue(int index, const QString &property, double t, double v) {
     if (!at(index))
         return;
     Layer &layer = (*at(index));
+    // What's set is what's seen: the link's share comes off before it's stored.
+    v -= linkValue(layer, property, t);
     auto it = layer.keys.find(property);
     if (it == layer.keys.end() || it->isEmpty()) {
         layer.base.insert(property, v);
@@ -509,7 +858,7 @@ void Scene::setValue(int index, const QString &property, double t, double v) {
 void Scene::keyProperty(int index, const QString &property, double t) {
     if (!at(index) || !(index == CameraIndex ? cameraProperties() : propertiesOf(*at(index))).contains(property))
         return;
-    const double v = value((*at(index)), property, t);
+    const double v = ownValue((*at(index)), property, t);
     Layer &layer = (*at(index));
     if (layer.keys.value(property).isEmpty())
         layer.keys.insert(property, {Key{t, v, "inOut"}});
@@ -898,9 +1247,7 @@ QTransform cameraTransform(const Scene &scene, double follow, double t) {
     const QPointF centre(scene.width / 2.0, scene.height / 2.0);
     // A layer that follows the camera partly sees a camera moved, zoomed and
     // turned partly: far things drift less than near ones.
-    const double cx = camera.keys.contains("x") ? scene.value(camera, "x", t) : camera.base.value("x", centre.x());
-    const double cy = camera.keys.contains("y") ? scene.value(camera, "y", t) : camera.base.value("y", centre.y());
-    const QPointF pan = (QPointF(cx, cy) - centre) * follow;
+    const QPointF pan = (QPointF(scene.value(camera, "x", t), scene.value(camera, "y", t)) - centre) * follow;
     const double zoom = 1 + (scene.value(camera, "zoom", t) - 1) * follow;
     QTransform transform;
     transform.translate(centre.x(), centre.y());

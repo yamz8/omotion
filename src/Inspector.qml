@@ -56,33 +56,82 @@ Rectangle {
         }
     }
 
-    component PropertyRow: RowLayout {
+    // A property, and under it the link that drives it when it has one: ⛓
+    // opens the link for editing.
+    component PropertyRow: ColumnLayout {
         id: row
         property string name
         property string label
         property real factor: 1
         property int decimals: 2
         readonly property bool animated: (inspector.v.animated || []).indexOf(name) >= 0
+        readonly property string link: (inspector.v.links || {})[name] || ""
+        property bool editingLink: false
         Layout.fillWidth: true
-        spacing: 8
+        spacing: 2
 
-        Label {
-            text: row.animated ? "◆" : "◇"
-            color: row.animated ? theme.accent : win.muted
-            font.pixelSize: 14
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -4
-                cursorShape: Qt.PointingHandCursor
-                onClicked: backend.keyProperty(row.name)
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Label {
+                text: row.animated ? "◆" : "◇"
+                color: row.animated ? theme.accent : win.muted
+                font.pixelSize: 14
+                MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: backend.keyProperty(row.name)
+                }
+            }
+            Label { text: row.label; color: win.text; Layout.preferredWidth: 90; elide: Text.ElideRight }
+            NumberField {
+                Layout.fillWidth: true
+                decimals: row.decimals
+                value: (inspector.v[row.name] || 0) * row.factor
+                onCommitted: function (n) { backend.setProperty(row.name, n / row.factor) }
+            }
+            Label {
+                text: "⛓"
+                font.family: "Noto Sans Symbols 2"
+                font.pixelSize: 13
+                color: row.link ? theme.accent : win.muted
+                opacity: row.link || linkMouse.containsMouse ? 1 : .45
+                ToolTip.visible: linkMouse.containsMouse
+                ToolTip.text: row.link ? "Linked to " + row.link : "Link to another property"
+                MouseArea {
+                    id: linkMouse
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        row.editingLink = !row.editingLink;
+                        if (row.editingLink) linkField.forceActiveFocus();
+                    }
+                }
             }
         }
-        Label { text: row.label; color: win.text; Layout.preferredWidth: 90; elide: Text.ElideRight }
-        NumberField {
+        SmallField {
+            id: linkField
+            visible: row.editingLink || row.link !== ""
             Layout.fillWidth: true
-            decimals: row.decimals
-            value: (inspector.v[row.name] || 0) * row.factor
-            onCommitted: function (n) { backend.setProperty(row.name, n / row.factor) }
+            Layout.leftMargin: 22
+            font.pixelSize: 12
+            color: theme.accent
+            placeholderText: "car.x × 0.8 · speed of car.x · time × 90"
+            onActiveFocusChanged: if (!activeFocus) { text = row.link; row.editingLink = false }
+            Component.onCompleted: text = row.link
+            Connections {
+                target: row
+                function onLinkChanged() { if (!linkField.activeFocus) linkField.text = row.link }
+            }
+            Keys.onEscapePressed: inspector.done()
+            onAccepted: {
+                if (backend.setLink(row.name, text)) row.editingLink = false;
+                inspector.done();
+            }
         }
     }
 

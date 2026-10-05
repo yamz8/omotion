@@ -51,6 +51,11 @@ const char *Usage = R"(Usage:
                                          Give a layer a ready-made motion, looping with the scene
   omotion pivot <project> <layer> <x,y> [--at <seconds>]
                                          Move where a layer turns, without moving it, as P does
+  omotion link <project> <layer|camera> <property> <link | --none>
+                                         Drive a property from another, on top of its own
+                                         value: "car.x * 0.8", "speed of car.x * 0.05",
+                                         "acceleration of car.x * -0.002, smooth 0.2",
+                                         "time * 90"; extras: lag, smooth, min, max, abs
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
@@ -212,9 +217,15 @@ int command(const QStringList &args) {
             const QRectF bounds = toCanvas.mapRect(QRectF(QPointF(0, 0), size));
             const QPointF pivot = toCanvas.map(QPointF(layer.anchor.x() * size.width(), layer.anchor.y() * size.height()));
             auto round = [](double v) { return std::round(v * 10) / 10; };
+            QJsonObject links;
+            for (auto it = layer.links.begin(); it != layer.links.end(); ++it)
+                links.insert(it.key(), Scene::linkText(it.value()));
             if (!layer.particles.isEmpty()) {
-                layers.append(QJsonObject{{"name", layer.name}, {"visible", layer.visible}, {"particles", layer.particles},
-                                          {"blend", layer.blend}, {"follow", followOf(scene, i)}});
+                QJsonObject entry{{"name", layer.name}, {"visible", layer.visible}, {"particles", layer.particles},
+                                  {"blend", layer.blend}, {"follow", followOf(scene, i)}};
+                if (!links.isEmpty())
+                    entry["links"] = links;
+                layers.append(entry);
                 continue;
             }
             QJsonObject entry{{"name", layer.name},
@@ -229,6 +240,8 @@ int command(const QStringList &args) {
             for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
                 animated.append(it.key());
             entry["animated"] = animated;
+            if (!links.isEmpty())
+                entry["links"] = links;
             entry["follow"] = followOf(scene, i);
             const QJsonObject cut = layer.raw.value("cut").toObject();
             if (!cut.isEmpty())
@@ -238,11 +251,16 @@ int command(const QStringList &args) {
         QJsonArray cameraAnimated;
         for (auto it = scene.camera.keys.begin(); it != scene.camera.keys.end(); ++it)
             cameraAnimated.append(it.key());
-        const QJsonObject camera{{"x", scene.value(scene.camera, "x", t)},
-                                 {"y", scene.value(scene.camera, "y", t)},
-                                 {"zoom", scene.value(scene.camera, "zoom", t)},
-                                 {"rotation", scene.value(scene.camera, "rotation", t)},
-                                 {"animated", cameraAnimated}};
+        QJsonObject camera{{"x", scene.value(scene.camera, "x", t)},
+                           {"y", scene.value(scene.camera, "y", t)},
+                           {"zoom", scene.value(scene.camera, "zoom", t)},
+                           {"rotation", scene.value(scene.camera, "rotation", t)},
+                           {"animated", cameraAnimated}};
+        QJsonObject cameraLinks;
+        for (auto it = scene.camera.links.begin(); it != scene.camera.links.end(); ++it)
+            cameraLinks.insert(it.key(), Scene::linkText(it.value()));
+        if (!cameraLinks.isEmpty())
+            camera["links"] = cameraLinks;
         const QJsonObject info{{"directory", directory},
                                {"camera", camera},
                                {"width", scene.width},
@@ -252,6 +270,21 @@ int command(const QStringList &args) {
                                {"at", t},
                                {"layers", layers}};
         QTextStream(stdout) << QJsonDocument(info).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+
+    if (args.at(1) == "link") {
+        if (args.size() != 6)
+            return fail("link takes a project, a layer (or camera), a property, and a link or --none.");
+        Scene edited = scene;
+        const int layer = args.at(3) == "camera" ? Scene::CameraIndex : edited.indexOf(args.at(3));
+        if (!edited.at(layer))
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        Link link;
+        if (args.at(5) != "--none" && !Scene::parseLink(args.at(5), &link, &error))
+            return fail(error);
+        if (!edited.setLink(layer, args.at(4), link, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
         return 0;
     }
 
@@ -481,7 +514,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
-                                       !std::strcmp(argv[1], "motion") ||
+                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");

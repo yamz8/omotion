@@ -57,11 +57,15 @@ layer it stands in, so it rides the camera move with its surroundings, and
 6. Press **V** for the camera, and animate it like a layer: pan, zoom and
    turn the whole scene. Each layer's **Follow camera** sets how much the
    camera moves it, for depth.
-7. Give a layer a look in the inspector: brightness, contrast, saturation,
+7. Tie one thing to another with the ⛓ beside a property in the inspector:
+   `car.x × 0.8` turns a wheel as its car drives, `speed of car.x × 0.002`
+   thickens dust as it speeds up, `time × 90` spins forever. The link adds
+   to the property's own value, which still keyframes as usual.
+8. Give a layer a look in the inspector: brightness, contrast, saturation,
    blur, glow, and a blend (**B**). They animate like everything else. A
    glowing light is a soft copy-cut of it (**Shift+Enter**), set to *add*,
    with the contrast up, the brightness down and some glow.
-8. **Ctrl+E** exports into `renders/` in the project folder, at full size or
+9. **Ctrl+E** exports into `renders/` in the project folder, at full size or
    half (**H** in the export menu). GIFs play at 15 fps to stay small.
 
 ## Shortcuts
@@ -225,6 +229,25 @@ photo.omotion/
   your own, `cubic(x1,y1,x2,y2)`, as in CSS (y past 0–1 overshoots).
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
+- **`links`** drive a property from another, so a scene says how things
+  relate instead of keyframing each one. Under the property's name: `from`
+  (`"layer.property"`, `"camera.property"`, or `"time"` in seconds), `of`
+  (`value`, the default; `speed`, its change a second; or `acceleration`),
+  `times` (1 if left out), and optionally `lag` (seconds behind the
+  source), `smooth` (seconds `speed` and `acceleration` are measured over,
+  a frame if left out), `abs` (`true` counts backwards as forwards), and
+  `min`/`max` to hold it within. What the link gives is added to the
+  property's own value or keys. One link per property; links that loop
+  back on themselves are refused. The camera takes them too.
+
+  ```json
+  "links": {
+    "rotation": { "from": "car.x", "times": 0.8 },
+    "opacity":  { "from": "car.x", "of": "speed", "times": 0.002, "abs": true, "max": 1 }
+  }
+  ```
+  Properties are read as stored: a parented layer's `x` is in its parent's
+  pixels.
 - **`cut`** on a piece remembers how it was made: the layer it came `from`,
   its `polygon` (or for depth layers, a `mask` image placed at
   `maskOrigin`) and `feather` in that layer's image pixels, whether it
@@ -261,6 +284,10 @@ omotion models --download                 # fetch the AI models
 omotion info photo.omotion                # every layer's place on the canvas, as JSON
 omotion pivot photo.omotion pine 1460,780 # P: where it turns, here the foot of the tree
 omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
+omotion link photo.omotion wheel rotation "car.x * 0.8"
+                                          # ⛓: drive a property from another; extras
+                                          # after commas: lag, smooth, min, max, abs;
+                                          # --none unlinks
 omotion particles photo.omotion snow --count 400
                                           # Shift+I: a particle layer (any setting as --name value)
 omotion audio photo.omotion song.mp3 --offset 12

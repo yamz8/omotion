@@ -6,10 +6,9 @@ The Quattro demo (a car flying into the wallpaper) looked like a sticker
 moving over a photo: the wheels didn't turn, the dust didn't react, the
 motion had no weight. These make a scene react to what moves in it, in order:
 
-1. **Property links.** Drive any property from another: wheel spin from
-   distance travelled, dust amount from speed, body tilt from acceleration.
-   Stored in `scene.json` so an agent writes relationships, not hundreds of
-   keys.
+1. ~~**Property links.**~~ Done in 0.3.0: `links` in `scene.json`, ⛓ in
+   the inspector, `omotion link`. Particle settings (count, speed) aren't
+   properties yet, so dust can only thicken through opacity.
 2. **Physics motion.** Springs that overshoot and settle, gravity arcs for
    jumps, impacts on landing. Set the start and landing; the path follows.
 3. **Layer-attached emitters.** Particles from a point on a layer (a rear
@@ -39,6 +38,7 @@ the open video models.
 - Adding a pin to a bent layer can shift the rest of the bend slightly.
 - Sound playback has only been tested silently; mouse interactions only in
   code.
+- The link field in the inspector hasn't been clicked through by hand.
 
 ## To discuss with the user
 

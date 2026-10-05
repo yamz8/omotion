@@ -145,6 +145,15 @@ QVariantList Backend::layers() const {
     return list;
 }
 
+namespace {
+QVariantMap linkTexts(const Layer &layer) {
+    QVariantMap map;
+    for (auto it = layer.links.begin(); it != layer.links.end(); ++it)
+        map.insert(it.key(), Scene::linkText(it.value()));
+    return map;
+}
+}
+
 QVariantMap Backend::values() const {
     auto easeHere = [this](const Layer &layer) {
         QString ease;
@@ -164,6 +173,7 @@ QVariantMap Backend::values() const {
                 animated.append(property);
         }
         map.insert("animated", animated);
+        map.insert("links", linkTexts(camera));
         map.insert("keyEase", easeHere(camera));
         map.insert("keyCurve", QVariant::fromValue(Scene::curveOf(easeHere(camera))));
         return map;
@@ -184,6 +194,7 @@ QVariantMap Backend::values() const {
             animated.append(property);
     }
     map.insert("animated", animated);
+    map.insert("links", linkTexts(layer));
     map.insert("follow", followOf(m_scene, m_selected));
     if (!layer.particles.isEmpty()) {
         QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
@@ -441,7 +452,7 @@ void Backend::deleteLayer() {
     checkpoint();
     const QString name = m_scene.layers.at(m_selected).name;
     m_scene.layers.removeAt(m_selected);
-    bool unlinked = false;
+    bool unlinked = m_scene.dropLinksTo(name) > 0;
     for (Layer &layer : m_scene.layers) {
         if (layer.parent == name) {
             layer.parent.clear();
@@ -458,7 +469,7 @@ void Backend::deleteLayer() {
     m_selected = std::min(m_selected, int(m_scene.layers.size()) - 1);
     emit selectedChanged();
     changed();
-    setNotice(unlinked ? QString("Deleted %1 and unlinked its pieces. Ctrl+Z brings it back.").arg(name)
+    setNotice(unlinked ? QString("Deleted %1 and unlinked what was tied to it. Ctrl+Z brings it back.").arg(name)
                        : QString("Deleted %1. Ctrl+Z brings it back.").arg(name));
 }
 
@@ -479,6 +490,7 @@ bool Backend::renameLayer(int index, const QString &wanted) {
         if (layer.parent == old)
             layer.parent = name;
     Project::renameCutSource(m_scene, old, name);
+    m_scene.renameLinkSource(old, name);
     changed();
     return true;
 }
@@ -577,6 +589,41 @@ void Backend::keyProperty(const QString &name) {
     checkpoint();
     m_scene.keyProperty(target(), property, m_time);
     changed();
+}
+
+bool Backend::setLink(const QString &name, const QString &text) {
+    const QString property = propertyFor(name);
+    const Layer *layer = targetLayer();
+    if (!layer)
+        return false;
+    Link link;
+    QString error;
+    if (!text.trimmed().isEmpty() && !Scene::parseLink(text.trimmed(), &link, &error)) {
+        setError(error);
+        return false;
+    }
+    const Link old = layer->links.value(property);
+    if (link.from == old.from && Scene::linkText(link) == Scene::linkText(old))
+        return true;
+    // Fields the text doesn't cover, an agent's notes say, stay with the link.
+    if (!link.from.isEmpty())
+        link.raw = old.raw;
+    // The property keeps looking as it did at the playhead: its own value
+    // gives up what the new link adds, so linking doesn't make it jump.
+    const double before = m_scene.value(*layer, property, m_time);
+    Scene edited = m_scene;
+    if (!edited.setLink(target(), property, link, &error)) {
+        setError(error);
+        return false;
+    }
+    checkpoint();
+    m_scene = edited;
+    if (!m_scene.at(target())->keys.contains(property))
+        m_scene.setValue(target(), property, m_time, before);
+    changed();
+    setNotice(link.from.isEmpty() ? QString("Unlinked %1").arg(name)
+                                  : QString("%1 follows %2").arg(name, Scene::linkText(link)));
+    return true;
 }
 
 void Backend::keyAll() {

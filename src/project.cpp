@@ -1440,16 +1440,18 @@ bool applyPreset(Scene &scene, AssetCache &assets, int index, const QString &pre
         return keys;
     };
 
+    // Keys hold a property's own value: a link adds to them, so reading the
+    // linked total here would count the link twice.
     if (preset == "sway") {
-        layer.keys["rotation"] = swing(scene.value(layer, "rotation", t), 4 * amount, 3);
+        layer.keys["rotation"] = swing(scene.ownValue(layer, "rotation", t), 4 * amount, 3);
     } else if (preset == "float") {
-        layer.keys["y"] = swing(scene.value(layer, "y", t), 10 * amount * perPixel, 4);
+        layer.keys["y"] = swing(scene.ownValue(layer, "y", t), 10 * amount * perPixel, 4);
     } else if (preset == "pulse") {
-        const double scale = scene.value(layer, "scale", t);
+        const double scale = scene.ownValue(layer, "scale", t);
         layer.keys["scale"] = swing(scale, scale * .04 * amount, 2);
     } else if (preset == "bounce") {
         // Up quickly and slowing, down slowly and speeding up, like a ball.
-        const double y = scene.value(layer, "y", t), height = 30 * amount * perPixel;
+        const double y = scene.ownValue(layer, "y", t), height = 30 * amount * perPixel;
         const int n = cycles(1.2);
         const double T = d / n;
         QList<Key> keys;
@@ -1460,14 +1462,14 @@ bool applyPreset(Scene &scene, AssetCache &assets, int index, const QString &pre
         keys.append(Key{d, y, "linear"});
         layer.keys["y"] = keys;
     } else if (preset == "spin") {
-        const double rotation = scene.value(layer, "rotation", t);
+        const double rotation = scene.ownValue(layer, "rotation", t);
         // Whole turns, so the end looks like the start and it loops.
         const int turns = std::max(1, int(std::lround(std::abs(amount))));
         layer.keys["rotation"] = {Key{0, rotation, "linear"}, Key{d, rotation + 360.0 * turns * (amount < 0 ? -1 : 1), "linear"}};
     } else {
         // Up to however solid it is now, over a second from t.
         const double start = std::min(t, std::max(0.0, d - 1));
-        const double opacity = scene.value(layer, "opacity", t) > 0 ? scene.value(layer, "opacity", t) : 1;
+        const double opacity = scene.ownValue(layer, "opacity", t) > 0 ? scene.ownValue(layer, "opacity", t) : 1;
         layer.keys["opacity"] = {Key{start, 0, "out"}, Key{std::min(d, start + 1), opacity, "linear"}};
     }
     return true;

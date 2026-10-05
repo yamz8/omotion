@@ -33,6 +33,22 @@ struct KeyRef {
     bool operator==(const KeyRef &other) const;
 };
 
+// A property driven by another, so a scene can say how things relate instead
+// of keyframing each one: a wheel turns as its car travels, dust thickens with
+// speed, a body leans as it speeds up. The source's value (or how fast it
+// changes) times a factor is added to the property's own value.
+struct Link {
+    QString from;             // "layer.property", "camera.property" or "time".
+    QString of = "value";     // value, speed (a second) or acceleration.
+    double times = 1;
+    double lag = 0;           // Seconds behind the source.
+    double smooth = 0;        // Seconds speed is measured over; 0 is a frame.
+    bool abs = false;         // Ignore the direction: backwards counts too.
+    double min = -std::numeric_limits<double>::infinity();
+    double max = std::numeric_limits<double>::infinity();
+    QJsonObject raw;          // As read, so unknown fields survive a save.
+};
+
 // Keyframes lifted off a layer, with times relative to the earliest.
 struct KeyClip {
     QString property;
@@ -57,6 +73,7 @@ struct Layer {
     QList<QPointF> pins;
     QHash<QString, double> base;
     QMap<QString, QList<Key>> keys;
+    QMap<QString, Link> links;  // At most one per property.
     QJsonObject raw;  // Everything as read, so unknown fields survive a save.
 };
 
@@ -109,9 +126,33 @@ struct Scene {
     int frameCount() const;
     double frameTime(int frame) const;
 
-    // A property's value on a layer at a time: the keyframes when it has
-    // any, otherwise its constant value.
+    // A property's value on a layer at a time: its own value (the keyframes
+    // when it has any, otherwise its constant value) plus what a link adds.
     double value(const Layer &layer, const QString &property, double t) const;
+    // The keyframes or constant alone, without the link.
+    double ownValue(const Layer &layer, const QString &property, double t) const;
+    // What a property's link adds at time t; 0 when it has none.
+    double linkValue(const Layer &layer, const QString &property, double t) const;
+
+    static const QStringList &linkMeasures();
+    // Where a link's "from" points: a layer index (or CameraIndex) and its
+    // property. False when it names nothing; "time" gives index -1.
+    bool linkSource(const QString &from, int *index, QString *property) const;
+    // Why the scene's links can't work (a missing source, a loop), or empty.
+    QString checkLinks() const;
+    // Links a layer's property, or unlinks it with an empty from. Refused,
+    // with the reason, when it would loop or names nothing.
+    bool setLink(int index, const QString &property, const Link &link, QString *error = nullptr);
+    // Points links at a renamed layer.
+    void renameLinkSource(const QString &from, const QString &to);
+    // Drops the links reading a deleted layer; returns how many went.
+    int dropLinksTo(const QString &name);
+    // A link as one line, "speed of car.x × 0.05, lag 0.1", and back: the
+    // inspector edits links this way.
+    static QString linkText(const Link &link);
+    static bool parseLink(const QString &text, Link *link, QString *error = nullptr);
+    static Link linkFromJson(const QJsonObject &json);
+    static QJsonObject linkToJson(const Link &link);
 
     // Sets the value at time t: on a keyframe when the property is animated,
     // otherwise as its constant value.

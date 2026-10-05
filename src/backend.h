@@ -172,6 +172,10 @@ public:
     Q_INVOKABLE void adjust(const QString &property, double delta);
     Q_INVOKABLE void multiply(const QString &property, double factor);
     Q_INVOKABLE void keyProperty(const QString &property);
+    // Drives a property from another, written as Scene::parseLink reads it
+    // ("car.x × 0.8"); empty text unlinks it. False, with an error shown,
+    // when the text doesn't make a link.
+    Q_INVOKABLE bool setLink(const QString &property, const QString &text);
     Q_INVOKABLE void keyAll();
     Q_INVOKABLE void removeKeys();
     Q_INVOKABLE void cycleEase();
