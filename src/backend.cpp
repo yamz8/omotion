@@ -988,6 +988,24 @@ void Backend::animateParallax() {
                   .arg(lengthened ? ", over 10 seconds" : ""));
 }
 
+void Backend::applyPreset(const QString &preset) {
+    if (m_selected < 0)
+        return setNotice("Select the layer to move first.");
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::applyPreset(scene, m_assets, m_selected, preset, m_time, 1, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    setKeySelection({});
+    changed();
+    const QString name = m_scene.layers.at(m_selected).name;
+    if (preset == "sway")
+        setNotice(QString("%1 sways. P moves where it turns from, like the foot of a tree.").arg(name));
+    else
+        setNotice(QString("%1: %2. Space plays it; Ctrl+Z takes it back.").arg(name, preset));
+}
+
 void Backend::waitForJobs() {
     while (m_job.isRunning() || !m_busy.isEmpty())
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);

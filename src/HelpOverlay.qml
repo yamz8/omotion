@@ -22,6 +22,7 @@ Rectangle {
                   ["Inspector", "Brightness, contrast, saturation, blur, glow; ◇ keyframes them"]]],
         ["Animate", [["← → ↑ ↓", "Nudge 1px (Shift: 10px)"], ["[ ]", "Rotate 1° ({ }: 15°)"],
                      ["- =", "Scale down / up (or the mouse wheel)"], ["9 0", "Opacity down / up"],
+                     ["N", "A ready-made motion: sway, float, pulse, bounce, spin, fade in"],
                      ["K", "Keyframe everything at the playhead"], ["Drag ◆", "Retime keyframes (Shift+click picks more)"],
                      ["X", "Remove the picked keyframes, or those at the playhead"],
                      ["E", "Change their easing"], ["Ctrl+C Ctrl+V", "Copy them, paste at the playhead on any layer"]]],

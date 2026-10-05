@@ -991,6 +991,73 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
     return true;
 }
 
+const QStringList &presets() {
+    static const QStringList list{"sway", "float", "pulse", "bounce", "spin", "fade"};
+    return list;
+}
+
+bool applyPreset(Scene &scene, AssetCache &assets, int index, const QString &preset, double t, double amount,
+                 QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("Select the layer to move.");
+    if (!presets().contains(preset))
+        return fail(QString("There's no preset \"%1\"; there's %2.").arg(preset, presets().join(", ")));
+    Layer &layer = scene.layers[index];
+    const double d = scene.duration;
+    // Canvas pixels in the layer's parent's pixels, for moves that should
+    // look the same size whatever the parent's scale.
+    const int parent = scene.indexOf(layer.parent);
+    const double perPixel =
+        parent < 0 ? 1 : 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, parent, t)));
+
+    // A whole number of cycles in the scene, near the period wanted.
+    auto cycles = [d](double period) { return std::max(1, int(std::lround(d / period))); };
+    // Swinging either side of a value, smoothly, starting and ending on it.
+    auto swing = [&](double base, double reach, double period) {
+        const int n = cycles(period);
+        const double T = d / n;
+        QList<Key> keys{Key{0, base, "out"}};
+        for (int i = 0; i < 2 * n; ++i)
+            keys.append(Key{T / 4 + i * T / 2, base + (i % 2 ? -reach : reach), "inOut"});
+        keys.last().ease = "in";
+        keys.append(Key{d, base, "linear"});
+        return keys;
+    };
+
+    if (preset == "sway") {
+        layer.keys["rotation"] = swing(scene.value(layer, "rotation", t), 4 * amount, 3);
+    } else if (preset == "float") {
+        layer.keys["y"] = swing(scene.value(layer, "y", t), 10 * amount * perPixel, 4);
+    } else if (preset == "pulse") {
+        const double scale = scene.value(layer, "scale", t);
+        layer.keys["scale"] = swing(scale, scale * .04 * amount, 2);
+    } else if (preset == "bounce") {
+        // Up quickly and slowing, down slowly and speeding up, like a ball.
+        const double y = scene.value(layer, "y", t), height = 30 * amount * perPixel;
+        const int n = cycles(1.2);
+        const double T = d / n;
+        QList<Key> keys;
+        for (int i = 0; i < n; ++i) {
+            keys.append(Key{i * T, y, "out"});
+            keys.append(Key{i * T + T / 2, y - height, "in"});
+        }
+        keys.append(Key{d, y, "linear"});
+        layer.keys["y"] = keys;
+    } else if (preset == "spin") {
+        const double rotation = scene.value(layer, "rotation", t);
+        layer.keys["rotation"] = {Key{0, rotation, "linear"}, Key{d, rotation + 360 * amount, "linear"}};
+    } else {
+        const double start = std::min(t, std::max(0.0, d - 1));
+        layer.keys["opacity"] = {Key{start, 0, "out"}, Key{std::min(d, start + 1), 1, "linear"}};
+    }
+    return true;
+}
+
 namespace {
 // Every "assets/..." string anywhere in some JSON, so fields omotion doesn't
 // know about keep their files too.

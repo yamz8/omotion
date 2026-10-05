@@ -42,6 +42,8 @@ const char *Usage = R"(Usage:
                                          Split a layer (the bottom one unless named) into
                                          layers by depth, with the AI; --animate adds a
                                          looping parallax camera move
+  omotion preset <project> <layer> <sway|float|pulse|bounce|spin|fade> [--amount <n>] [--at <seconds>]
+                                         Give a layer a ready-made motion, looping with the scene
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 145 MB, checked against their hashes)
@@ -154,6 +156,28 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "preset") {
+        if (args.size() < 5)
+            return fail("preset takes a project, a layer, and a preset.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        double amount = 1, t = 0;
+        for (int i = 5; i + 1 < args.size(); i += 2) {
+            if (args.at(i) == "--amount")
+                amount = args.at(i + 1).toDouble();
+            else if (args.at(i) == "--at")
+                t = args.at(i + 1).toDouble();
+            else
+                return fail(QString("preset doesn't know \"%1\".").arg(args.at(i)));
+        }
+        if (!Project::applyPreset(edited, assets, layer, args.at(4), t, amount, &error) ||
+            !Project::save(directory, edited, &error))
+            return fail(error);
+        return 0;
+    }
+
     if (args.at(1) == "clean") {
         const QList<QJsonObject> scenes{scene.toJson()};
         if (args.contains("--dry-run")) {
@@ -246,6 +270,7 @@ int command(const QStringList &args) {
 int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
+                                       !std::strcmp(argv[1], "preset") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");

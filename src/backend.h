@@ -181,6 +181,8 @@ public:
     Q_INVOKABLE void splitByDepth(int count);
     // Animates a depth-split layer as a slow parallax camera move.
     Q_INVOKABLE void animateParallax();
+    // Gives the selected layer a ready-made motion (see Project::presets).
+    Q_INVOKABLE void applyPreset(const QString &preset);
     Q_INVOKABLE void acceptAiPrompt();
     Q_INVOKABLE void dismissAiPrompt();
     Q_INVOKABLE void cancelDownload();

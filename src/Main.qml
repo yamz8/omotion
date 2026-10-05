@@ -25,9 +25,10 @@ ApplicationWindow {
     property bool helpVisible: false
     property bool exportMenuVisible: false
     property bool exportHalf: false
+    property bool presetMenuVisible: false
     property bool quitConfirmVisible: false
     // Editing shortcuts go quiet while an overlay is up.
-    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible
+    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible
                                   && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool hasLayer: ready && backend.selected >= 0
 
@@ -62,6 +63,7 @@ ApplicationWindow {
             else if (backend.downloading) backend.cancelDownload();
             else if (win.helpVisible) win.helpVisible = false;
             else if (win.exportMenuVisible) win.exportMenuVisible = false;
+            else if (win.presetMenuVisible) win.presetMenuVisible = false;
             else if (backend.exporting) backend.cancelExport();
             else if (backend.tool !== "move") backend.setTool("move");
             else if (backend.keySelection.length > 0) backend.clearKeySelection();
@@ -134,6 +136,7 @@ ApplicationWindow {
     Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "wand"; onActivated: backend.toggleWandMode() }
     Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.splitByDepth(4) }
     Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.animateParallax() }
+    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: win.presetMenuVisible = true }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.aiPrompt !== ""; onActivated: backend.acceptAiPrompt() }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
 
@@ -540,6 +543,85 @@ ApplicationWindow {
                 }
                 Item { width: 1; height: 4 }
                 Label { text: "H " + (win.exportHalf ? "full size" : "half size") + "   ·   R opens the renders folder   ·   Esc closes"; color: win.muted }
+            }
+        }
+    }
+
+    Rectangle {
+        id: presetMenu
+        anchors.fill: parent
+        visible: win.presetMenuVisible
+        color: "#b0000000"
+        MouseArea { anchors.fill: parent; onClicked: win.presetMenuVisible = false }
+
+        readonly property var choices: [["1", "Sway", "A gentle rock, for trees, grass and signs", "sway"],
+                                        ["2", "Float", "Drifting up and down", "float"],
+                                        ["3", "Pulse", "Breathing in and out", "pulse"],
+                                        ["4", "Bounce", "Hopping", "bounce"],
+                                        ["5", "Spin", "One turn over the scene", "spin"],
+                                        ["6", "Fade in", "From the playhead, over a second", "fade"]]
+        Repeater {
+            model: 6
+            delegate: Item {
+                required property int index
+                Shortcut {
+                    sequence: String(index + 1)
+                    context: Qt.ApplicationShortcut
+                    enabled: win.presetMenuVisible
+                    onActivated: presetChoice.pick(presetMenu.choices[index][3])
+                }
+            }
+        }
+
+        Rectangle {
+            id: presetChoice
+            anchors.centerIn: parent
+            width: 460
+            height: presetColumn.implicitHeight + 40
+            radius: 10
+            color: win.panel
+            border.color: win.line
+
+            function pick(preset) {
+                win.presetMenuVisible = false;
+                backend.applyPreset(preset);
+            }
+
+            Column {
+                id: presetColumn
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 6
+                Label { text: "Move " + (backend.values.name || ""); font.pixelSize: 20; font.bold: true; color: win.text }
+                Label {
+                    text: "A ready-made motion that loops with the scene. It replaces that property's keyframes; Ctrl+Z takes it back."
+                    color: win.muted
+                    wrapMode: Text.Wrap
+                    width: parent.width
+                }
+                Item { width: 1; height: 6 }
+                Repeater {
+                    model: presetMenu.choices
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: presetColumn.width
+                        height: 40
+                        radius: 6
+                        color: presetMouse.containsMouse ? "#1f1f24" : "transparent"
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            spacing: 14
+                            Label { text: modelData[0]; color: theme.accent; font.bold: true; width: 14 }
+                            Label { text: modelData[1]; color: win.text; font.bold: true; width: 80 }
+                            Label { text: modelData[2]; color: win.muted }
+                        }
+                        MouseArea { id: presetMouse; anchors.fill: parent; hoverEnabled: true; onClicked: presetChoice.pick(modelData[3]) }
+                    }
+                }
+                Item { width: 1; height: 4 }
+                Label { text: "Esc closes"; color: win.muted }
             }
         }
     }

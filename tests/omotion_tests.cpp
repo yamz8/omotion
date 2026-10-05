@@ -1045,6 +1045,40 @@ private slots:
         QVERIFY(backend.cutPoints().isEmpty());
     }
 
+    void presetsLoopWithTheScene() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        scene.duration = 10;
+        QString error;
+        for (const QString &preset : Project::presets()) {
+            Scene moved = scene;
+            QVERIFY2(Project::applyPreset(moved, assets, 0, preset, 2, 1, &error), qPrintable(error));
+            const Layer &layer = moved.layers[0];
+            QVERIFY(!layer.keys.isEmpty());
+            // The looping ones end where they start.
+            if (preset != "fade" && preset != "spin")
+                for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
+                    QCOMPARE(moved.value(layer, it.key(), 10), moved.value(layer, it.key(), 0));
+        }
+        Scene swaying = scene;
+        Project::applyPreset(swaying, assets, 0, "sway", 0, 1, &error);
+        double most = 0;
+        for (double t = 0; t <= 10; t += .05)
+            most = std::max(most, std::abs(swaying.value(swaying.layers[0], "rotation", t)));
+        QVERIFY(qAbs(most - 4) < .01);
+        Scene spinning = scene;
+        Project::applyPreset(spinning, assets, 0, "spin", 0, 1, &error);
+        QCOMPARE(spinning.value(spinning.layers[0], "rotation", 10), 360.0);
+        Scene fading = scene;
+        Project::applyPreset(fading, assets, 0, "fade", 3, 1, &error);
+        QCOMPARE(fading.value(fading.layers[0], "opacity", 3), 0.0);
+        QCOMPARE(fading.value(fading.layers[0], "opacity", 4), 1.0);
+        QVERIFY(!Project::applyPreset(scene, assets, 0, "wobble", 0, 1, &error));
+        QVERIFY(error.contains("sway"));
+    }
+
     void cuttingNothingFails() {
         QTemporaryDir dir;
         const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);

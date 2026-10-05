@@ -38,7 +38,9 @@ past far ones. **Space** plays it, **Ctrl+E** exports it. (D and A use the
    from the colours around it, so it can move away without leaving a gap
    (**G** leaves the hole empty; **Shift+Enter** copies the part out
    instead). **R** reshapes a piece later, keeping its animation.
-3. Press **P** and click where the new layer should turn, like a shoulder.
+3. Press **P** and click where the new layer should turn, like a shoulder,
+   or the foot of a tree. **N** gives it a ready-made motion (sway, float,
+   pulse, bounce, spin, fade in) that loops with the scene.
 4. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
 5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
@@ -71,6 +73,7 @@ past far ones. **Space** plays it, **Ctrl+E** exports it. (D and A use the
 | `[` `]` | Rotate 1° (`{` `}`: 15°) |
 | `-` `=` | Scale down / up |
 | `9` `0` | Opacity down / up |
+| `N` | A ready-made motion for the layer: sway, float, pulse, bounce, spin, or fade in |
 | `K` | Keyframe every property at the playhead |
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
 | `X` | Remove the picked keyframes, or those at the playhead |
@@ -208,6 +211,7 @@ omotion cut photo.omotion photo --ai-pick 316,703 --name deer
 omotion split photo.omotion --layers 4 --animate
                                           # D then A: depth layers, moving
 omotion models --download                 # fetch the AI models
+omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
 omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```
 

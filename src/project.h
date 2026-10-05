@@ -80,6 +80,14 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImag
 // nearest, as a loop over the scene's duration (made at least 10 seconds).
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
 
+// The motion presets, by name: sway, float, pulse, bounce, spin, fade.
+const QStringList &presets();
+// Gives a layer a ready-made motion, replacing that property's animation.
+// The looping ones fit a whole number of cycles into the scene, so they loop
+// with it; fade starts at t. amount scales the motion (1 is the default).
+bool applyPreset(Scene &scene, AssetCache &assets, int layer, const QString &preset, double t, double amount,
+                 QString *error);
+
 // Image files in the project's assets folder that none of the given scenes
 // (say, the scene and its undo history) mentions anywhere.
 QStringList unusedAssets(const QString &directory, const QList<QJsonObject> &scenes);
