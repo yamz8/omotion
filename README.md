@@ -25,6 +25,11 @@ then **A** to give it a slow, looping camera move where near things slide
 past far ones. **Space** plays it, **Ctrl+E** exports it. (D and A use the
 [AI](#ai); omotion offers to set it up the first time.)
 
+Things that should move on their own, like a tree that sways, are best cut
+out first (**W**, click, **Enter**), before **D**: each goes with the depth
+layer it stands in, so it rides the camera move with its surroundings, and
+**N** can still give it its own motion on top.
+
 **By hand:**
 
 1. Press **W** and click a part of the picture (an arm, a cloud, a logo);
