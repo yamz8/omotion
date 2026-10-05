@@ -117,6 +117,8 @@ ApplicationWindow {
     Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.showMotion = !backend.showMotion }
     Shortcut { sequence: "Ctrl+Shift+K"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.cleanUp() }
     Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
+    Shortcut { sequence: "Shift+D"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.busy === ""; onActivated: backend.makeWorld() }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.busy === ""; onActivated: backend.shapeSelected() }
 
     Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", -1) }
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", 1) }
@@ -362,7 +364,7 @@ ApplicationWindow {
                         if (!backend.cameraSelected && !(mouse.modifiers & Qt.ShiftModifier))
                             backend.selectAt(p.x, p.y);
                         if ((backend.selected >= 0 || backend.cameraSelected) && mouse.button === Qt.LeftButton) {
-                            backend.beginDrag(p.x, p.y);
+                            backend.beginDrag(p.x, p.y, (mouse.modifiers & Qt.ShiftModifier) !== 0);
                             dragging = true;
                         }
                     }

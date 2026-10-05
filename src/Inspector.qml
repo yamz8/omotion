@@ -120,7 +120,8 @@ Rectangle {
             Layout.leftMargin: 22
             font.pixelSize: 12
             color: theme.accent
-            placeholderText: "car.x × 0.8 · speed of car.x · time × 90"
+            // Only while empty: Material floats a placeholder above the text.
+            placeholderText: text.length ? "" : "car.x × 0.8 · speed of car.x · time × 90"
             onActiveFocusChanged: if (!activeFocus) { text = row.link; row.editingLink = false }
             Component.onCompleted: text = row.link
             Connections {
@@ -316,7 +317,63 @@ Rectangle {
                     wrapMode: Text.Wrap
                     color: win.muted
                     font.pixelSize: 12
-                    text: "From where it is in the picture. Its X, Y and Scale above are flat and don't move it in the world."
+                    text: "From where it is in the picture. Drag it to move it, Shift+drag for nearer and farther. Its X, Y and Scale above are flat and don't move it in the world."
+                }
+
+                // Real size, and a drive over the ground.
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    spacing: 8
+                    Item { width: 14; height: 1 }
+                    Label { text: "Really tall m"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField {
+                        id: tallField
+                        Layout.fillWidth: true
+                        decimals: 2
+                        value: 1.4
+                        onCommitted: function (n) { value = n; backend.setRealSize(n) }
+                    }
+                }
+                Label { text: "Drive"; color: win.text; font.bold: true; Layout.topMargin: 6 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Item { width: 14; height: 1 }
+                    Label { text: "From"; color: win.text; Layout.preferredWidth: 40 }
+                    NumberField { id: fromX; onCommitted: function (n) { value = n }; Layout.fillWidth: true; value: 8; decimals: 1; ToolTip.text: "meters right"; ToolTip.visible: hovered }
+                    NumberField { id: fromAhead; onCommitted: function (n) { value = n }; Layout.fillWidth: true; value: 22; decimals: 1; ToolTip.text: "meters ahead"; ToolTip.visible: hovered }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Item { width: 14; height: 1 }
+                    Label { text: "To"; color: win.text; Layout.preferredWidth: 40 }
+                    NumberField { id: toX; onCommitted: function (n) { value = n }; Layout.fillWidth: true; value: -5; decimals: 1; ToolTip.text: "meters right"; ToolTip.visible: hovered }
+                    NumberField { id: toAhead; onCommitted: function (n) { value = n }; Layout.fillWidth: true; value: -1; decimals: 1; ToolTip.text: "meters ahead"; ToolTip.visible: hovered }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Item { width: 14; height: 1 }
+                    Label { text: "km/h"; color: win.text; Layout.preferredWidth: 40 }
+                    NumberField { id: kmh; onCommitted: function (n) { value = n }; Layout.fillWidth: true; value: 50; decimals: 0 }
+                    CheckBox { id: faceWay; text: "Face the way"; font.pixelSize: 12 }
+                }
+                Button {
+                    Layout.fillWidth: true
+                    text: "Drive it from the playhead"
+                    onClicked: {
+                        backend.driveSelected(fromX.value, fromAhead.value, toX.value, toAhead.value, kmh.value, faceWay.checked);
+                        inspector.done();
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "Places in meters, right of the camera and ahead of it. It keeps to the ground, flies off crests and lands, with dust and a shadow. S gives it a 3D shape first."
                 }
             }
 

@@ -89,6 +89,9 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `<` `>` | Previous / next keyframe |
 | `Home` `End` | Start / end |
 | `L` | Show the selected layer's path through the scene, and faint ghosts of it at the keyframes either side |
+| `Shift+D` | Make the picture a 3D world: the AI reads its distances, lens and ground (see [Worlds](#worlds)) |
+| `S` | Give the selected piece of the world a 3D shape |
+| Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click, drag | Select the layer under the mouse and move it (Shift+drag keeps the selection) |
 | Mouse wheel | Scale the selected layer (Shift+wheel turns it) |
 | Ctrl+wheel, middle-drag | Look closer about the mouse, and move the view; `Ctrl+=` `Ctrl+-` zoom, `Ctrl+0` fits it again |
@@ -201,8 +204,12 @@ omotion link photo.omotion camera yaw "car.worldX * 1.2, spring 1.2"
 - **ground** tells the ground's height at places; **info** gives each
   world piece's pivot, the box it fills and its heading, in meters.
 
-In the window the world is shown in 3D under the canvas; the inspector has
-the world properties of the camera and of each piece.
+In the window: `Shift+D` makes the world and `S` gives the selected piece
+a shape (both in the background). The world is shown in 3D under the
+canvas. With the camera selected (`V`), dragging turns it and Shift+drag
+moves it; dragging a piece moves it in 3D, Shift+drag nearer and farther.
+The inspector has the world properties of the camera and of each piece,
+its real height, and a drive over the ground from the playhead.
 
 A world can't show what the picture never did: turned far, a shape's
 unseen side is the AI's guess; the camera can turn a little past the

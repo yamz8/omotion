@@ -413,7 +413,8 @@ void Backend::selectCamera() {
     m_cameraSelected = true;
     emit selectedChanged();
     emit valuesChanged();
-    setNotice("Camera: drag the canvas to pan, the wheel zooms, [ ] turns, K keyframes it.");
+    setNotice(World::info(m_scene).valid ? "Camera: drag to turn it, Shift+drag to move it, K keyframes it."
+                                         : "Camera: drag the canvas to pan, the wheel zooms, [ ] turns, K keyframes it.");
 }
 
 void Backend::setFollow(double follow) {
@@ -882,7 +883,7 @@ void Backend::endGesture() {
     emit historyChanged();
 }
 
-void Backend::beginDrag(double x, double y) {
+void Backend::beginDrag(double x, double y, bool along) {
     if (!targetLayer())
         return;
     beginGesture();
@@ -890,11 +891,57 @@ void Backend::beginDrag(double x, double y) {
     m_dragStart = QPointF(x, y);
     m_dragOrigin = QPointF(m_scene.value(layer, "x", m_time), m_scene.value(layer, "y", m_time));
     m_dragging = true;
+    // In a world, the camera and the world's pieces move in 3D.
+    m_worldDrag = World::info(m_scene).valid && (m_cameraSelected || World::layers(m_scene).contains(m_selected));
+    m_dragAlong = along;
+    if (m_worldDrag) {
+        for (const QString &property : Scene::worldProperties())
+            m_worldOrigin[property] = m_scene.value(layer, property, m_time);
+        const World::Frame frame = World::frame(m_scene, m_assets, m_time);
+        m_dragFocal = m_scene.height / 2.0 / std::tan(frame.fov / 2 * M_PI / 180);
+        m_dragDistance = 1;
+        if (!m_cameraSelected) {
+            const QVector3D at = World::pivot(m_scene, m_assets, m_selected) +
+                                 QVector3D(m_worldOrigin["worldX"], m_worldOrigin["worldY"], -m_worldOrigin["worldZ"]);
+            m_dragDistance = std::max(.1f, (at - frame.cameraPosition).length());
+        }
+    }
 }
 
 void Backend::dragTo(double x, double y) {
     if (!m_dragging || !targetLayer())
         return;
+    if (m_worldDrag) {
+        const QPointF moved = QPointF(x, y) - m_dragStart;
+        const int target = this->target();
+        auto set = [&](const QString &property, double v) { m_scene.setValue(target, property, m_time, v); };
+        const World::Frame frame = World::frame(m_scene, m_assets, m_time);
+        QVector3D right = frame.cameraRotation.rotatedVector(QVector3D(1, 0, 0)), ahead = frame.cameraRotation.rotatedVector(QVector3D(0, 0, -1));
+        right.setY(0), ahead.setY(0);
+        right.normalize(), ahead.normalize();
+        if (m_cameraSelected && !m_dragAlong) {
+            // Turning: the picture follows the hand, so the camera turns the
+            // other way, a pixel's worth of view for every pixel.
+            const double perPixel = std::atan(1 / m_dragFocal) * 180 / M_PI;
+            set("yaw", m_worldOrigin["yaw"] - moved.x() * perPixel);
+            set("pitch", m_worldOrigin["pitch"] + moved.y() * perPixel);
+        } else {
+            // Moving: across and up at its distance, or with Shift, up and
+            // down the screen is nearer and farther. The camera moves the
+            // other way to what's in sight, as the picture follows the hand.
+            const double meters = m_cameraSelected ? -1 / 200.0 : m_dragDistance / m_dragFocal;
+            QVector3D shift;
+            if (m_dragAlong)
+                shift = right * float(moved.x() * meters) + ahead * float(-moved.y() * meters * 3);
+            else
+                shift = right * float(moved.x() * meters) + QVector3D(0, float(-moved.y() * meters), 0);
+            set("worldX", m_worldOrigin["worldX"] + shift.x());
+            set("worldY", m_worldOrigin["worldY"] + shift.y());
+            set("worldZ", m_worldOrigin["worldZ"] - shift.z());
+        }
+        changed();
+        return;
+    }
     if (m_cameraSelected) {
         // Dragging the view: the picture follows the hand, so the camera goes
         // the other way, by the distance in world pixels.
@@ -1552,6 +1599,91 @@ void Backend::splitByDepth(int count) {
         }
         result->first = edited;
     }));
+}
+
+void Backend::worldJob(const QString &busy, const QString &done, std::function<bool(Scene &, AssetCache &, QString *)> work) {
+    if (!hasProject() || m_job.isRunning())
+        return;
+    if (!needAi())
+        return;
+    if (m_playing)
+        togglePlay();
+    const Scene scene = m_scene;
+    const QString directory = m_directory;
+    const QByteArray started = Project::serialize(m_scene);
+    auto result = std::make_shared<std::pair<Scene, QString>>();
+    setBusy(busy);
+    m_job.disconnect(this);
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, done] {
+        setBusy({});
+        m_workAssets.clear();
+        const auto &[edited, error] = *result;
+        if (!error.isEmpty())
+            return setError(error);
+        if (Project::serialize(m_scene) != started)
+            return setError("The scene changed meanwhile, so that wasn't kept; try again.");
+        checkpoint();
+        m_scene = edited;
+        changed();
+        rearmWatcher();
+        setNotice(done);
+    });
+    m_job.setFuture(QtConcurrent::run([this, scene, directory, result, work] {
+        m_workAssets.setDirectory(directory);
+        Scene edited = scene;
+        QString error;
+        if (!work(edited, m_workAssets, &error)) {
+            result->second = error.isEmpty() ? QString("That didn't work.") : error;
+            return;
+        }
+        result->first = edited;
+    }));
+}
+
+void Backend::makeWorld(double horizon) {
+    const int layer = m_selected >= 0 && m_scene.layers.at(m_selected).particles.isEmpty() ? m_selected : 0;
+    worldJob("Reading the picture in 3D… (a minute or two the first time)",
+             "The picture is a world now. V and drag turns the camera; Shift+drag moves it. S gives a piece a shape.",
+             [layer, horizon](Scene &scene, AssetCache &assets, QString *error) {
+                 return World::build(scene, assets, layer, error, horizon);
+             });
+}
+
+void Backend::shapeSelected() {
+    if (!World::info(m_scene).valid)
+        return setNotice("Make the world first (Shift+D).");
+    const int layer = m_selected;
+    if (layer < 0 || !World::layers(m_scene).contains(layer) || layer == m_scene.indexOf(World::info(m_scene).picture))
+        return setNotice("Select a piece cut out of the world's picture to give it a shape.");
+    worldJob("Giving it a 3D shape… (about 20 seconds)", "It has a shape: it can turn, and casts a shadow.",
+             [layer](Scene &scene, AssetCache &assets, QString *error) { return World::shapeObject(scene, assets, layer, error); });
+}
+
+void Backend::setRealSize(double meters) {
+    Scene scene = m_scene;
+    QString error;
+    if (!World::setSize(scene, m_assets, m_selected, meters, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice(QString("The world is to scale: %1 is %2 m tall.").arg(m_scene.layers.at(m_selected).name).arg(meters));
+}
+
+void Backend::driveSelected(double fromX, double fromAhead, double toX, double toAhead, double kmh, bool face) {
+    Scene scene = m_scene;
+    QString error;
+    QList<double> landings;
+    if (!World::drive(scene, m_assets, m_selected, QPointF(fromX, fromAhead), QPointF(toX, toAhead), kmh / 3.6, m_time,
+                      &landings, &error, face))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    QStringList times;
+    for (const double at : landings)
+        times << QString::number(at, 'f', 2);
+    setNotice(QString("Driven at %1 km/h%2. Space plays it.").arg(kmh).arg(times.isEmpty() ? QString() : ", landing at " + times.join(", ") + " s"));
 }
 
 void Backend::animateParallax() {

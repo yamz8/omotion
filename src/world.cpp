@@ -8,6 +8,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMutex>
+#include <QRecursiveMutex>
 #include <QPainter>
 #include <QSaveFile>
 #include <QImageWriter>
@@ -21,6 +23,12 @@
 #include "ai.h"
 
 namespace World {
+
+namespace {
+// The caches below are shared by the window and work done in the
+// background; one lock keeps them whole.
+QRecursiveMutex cacheLock;
+}
 
 quint16 encodeDepth(double meters) {
     if (!(meters < Far))
@@ -153,6 +161,7 @@ struct DepthMap {
 // Depth images are read once per file and kept, as meshes ask often.
 DepthMap depthMap(AssetCache &assets, const QString &file, const QSize &picture, double focal, double scale = 1) {
     static QHash<QString, QImage> cache;
+    QMutexLocker lock(&cacheLock);
     const QString path = QDir(assets.directory()).filePath(file);
     const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
     if (!cache.contains(key))
@@ -225,6 +234,7 @@ struct StoredShape {
 
 StoredShape readShape(const QString &path) {
     static QHash<QString, StoredShape> cache;
+    QMutexLocker lock(&cacheLock);
     const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
     if (cache.contains(key))
         return cache.value(key);
@@ -668,6 +678,7 @@ struct Heightfield {
 
 const Heightfield &heightfield(const Scene &scene, AssetCache &assets) {
     static QHash<QByteArray, Heightfield> cache;
+    QMutexLocker lock(&cacheLock);
     const QByteArray key = QJsonDocument(scene.raw.value("world").toObject()).toJson(QJsonDocument::Compact) +
                            assets.directory().toUtf8();
     if (cache.contains(key))

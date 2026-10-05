@@ -5,6 +5,7 @@
 #include <QFileSystemWatcher>
 #include <QJsonObject>
 #include <QObject>
+#include <functional>
 #include <QPointF>
 #include <QTimer>
 #include <QVariantList>
@@ -203,7 +204,8 @@ public:
     Q_INVOKABLE void pasteKeys();
 
     // Dragging a layer around the canvas, as one undo step.
-    Q_INVOKABLE void beginDrag(double x, double y);
+    // In a world, along means Shift: nearer and farther rather than across.
+    Q_INVOKABLE void beginDrag(double x, double y, bool along = false);
     Q_INVOKABLE void dragTo(double x, double y);
     Q_INVOKABLE void endDrag();
     Q_INVOKABLE void beginGesture();
@@ -252,6 +254,12 @@ public:
     Q_INVOKABLE void splitByDepth(int count);
     // Animates a depth-split layer as a slow parallax camera move.
     Q_INVOKABLE void animateParallax();
+    // The world: the picture read in 3D (the AI, in the background), a
+    // selected piece given a shape, the world sized by it, and driven.
+    Q_INVOKABLE void makeWorld(double horizon = -1);
+    Q_INVOKABLE void shapeSelected();
+    Q_INVOKABLE void setRealSize(double meters);
+    Q_INVOKABLE void driveSelected(double fromX, double fromAhead, double toX, double toAhead, double kmh, bool face);
     // Gives the selected layer a ready-made motion (see Project::presets).
     Q_INVOKABLE void applyPreset(const QString &preset);
     // Saves the selected layer's animation (or the picked keyframes) as a
@@ -416,8 +424,16 @@ private:
     QFutureWatcher<void> m_job;
     ModelDownload m_download;
     double m_downloadProgress = 0;
+    void worldJob(const QString &busy, const QString &done, std::function<bool(Scene &, AssetCache &, QString *)> work);
     QPointF m_dragStart;
     QPointF m_dragOrigin;
+    // A drag in a world: what's dragged's world properties when it started,
+    // how far away it is, and the lens in canvas pixels.
+    bool m_worldDrag = false;
+    bool m_dragAlong = false;
+    QHash<QString, double> m_worldOrigin;
+    double m_dragDistance = 1;
+    double m_dragFocal = 1;
     bool m_dragging = false;
     QList<KeyRef> m_keySelection;
     QList<KeyRef> m_keyDragFrom;
