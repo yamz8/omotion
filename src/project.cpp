@@ -972,25 +972,49 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImag
                 band = k;
         if (band < 0)
             continue;  // As far as the background: it stays with the source.
-        const int b = edited.indexOf(bandNames.at(band));
-        const Layer &holder = edited.layers.at(b);
-        // A depth layer sits on its source with no turn or scale, so going
-        // from one's pixels to the other's is a shift.
-        const QSizeF bandSize = assets.size(holder.source);
-        const QPointF shift(holder.base.value("x") - holder.anchor.x() * bandSize.width(),
+        const QString holderName = bandNames.at(band);
+        QPointF shift;
+        {
+            // A depth layer sits on its source with no turn or scale, so going
+            // from one's pixels to the other's is a shift.
+            const Layer &holder = edited.layers.at(edited.indexOf(holderName));
+            const QSizeF bandSize = assets.size(holder.source);
+            shift = QPointF(holder.base.value("x") - holder.anchor.x() * bandSize.width(),
                             holder.base.value("y") - holder.anchor.y() * bandSize.height());
-        Layer piece = edited.layers.takeAt(i);
-        piece.parent = holder.name;
-        piece.base["x"] -= shift.x();
-        piece.base["y"] -= shift.y();
-        for (const QString &property : {QString("x"), QString("y")})
-            for (Key &key : piece.keys[property])
-                key.v -= property == "x" ? shift.x() : shift.y();
-        if (piece.keys.value("x").isEmpty())
-            piece.keys.remove("x");
-        if (piece.keys.value("y").isEmpty())
-            piece.keys.remove("y");
-        edited.layers.insert(edited.indexOf(holder.name) + 1, piece);
+        }
+        // The piece and everything that hangs off it move together, in order.
+        QSet<QString> family{name};
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const Layer &layer : edited.layers)
+                if (!family.contains(layer.name) && family.contains(layer.parent)) {
+                    family.insert(layer.name);
+                    grew = true;
+                }
+        }
+        QList<Layer> moving;
+        for (int k = 0; k < edited.layers.size();)
+            if (family.contains(edited.layers.at(k).name))
+                moving.append(edited.layers.takeAt(k));
+            else
+                ++k;
+        for (Layer &piece : moving) {
+            if (piece.name != name)
+                continue;
+            piece.parent = holderName;
+            piece.base["x"] -= shift.x();
+            piece.base["y"] -= shift.y();
+            for (const QString &property : {QString("x"), QString("y")})
+                for (Key &key : piece.keys[property])
+                    key.v -= property == "x" ? shift.x() : shift.y();
+            if (piece.keys.value("x").isEmpty())
+                piece.keys.remove("x");
+            if (piece.keys.value("y").isEmpty())
+                piece.keys.remove("y");
+        }
+        int place = edited.indexOf(holderName) + 1;
+        for (const Layer &layer : moving)
+            edited.layers.insert(place++, layer);
     }
     // The layers moved about; say where the new ones ended up.
     created.clear();
@@ -1023,8 +1047,16 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
         return fail(QString("%1 hasn't been split by depth (D), so there's no depth to move by.").arg(source.name));
 
     const double far = source.raw.value("depth").toDouble(0);
-    // A camera move this slow wants room; a short scene gets longer.
-    scene.duration = std::max(scene.duration, 10.0);
+    // A camera move this slow wants room; a short scene gets longer, and
+    // what's animated already stretches with it, so its loops still loop.
+    if (scene.duration < 10) {
+        const double stretch = 10 / scene.duration;
+        for (Layer &layer : scene.layers)
+            for (auto &keys : layer.keys)
+                for (Key &key : keys)
+                    key.t *= stretch;
+        scene.duration = 10;
+    }
     const double d = scene.duration;
     auto loop = [d](double a, double b) {
         return QList<Key>{Key{0, a, "inOut"}, Key{d / 2, b, "inOut"}, Key{d, a, "inOut"}};
@@ -1107,10 +1139,14 @@ bool applyPreset(Scene &scene, AssetCache &assets, int index, const QString &pre
         layer.keys["y"] = keys;
     } else if (preset == "spin") {
         const double rotation = scene.value(layer, "rotation", t);
-        layer.keys["rotation"] = {Key{0, rotation, "linear"}, Key{d, rotation + 360 * amount, "linear"}};
+        // Whole turns, so the end looks like the start and it loops.
+        const int turns = std::max(1, int(std::lround(std::abs(amount))));
+        layer.keys["rotation"] = {Key{0, rotation, "linear"}, Key{d, rotation + 360.0 * turns * (amount < 0 ? -1 : 1), "linear"}};
     } else {
+        // Up to however solid it is now, over a second from t.
         const double start = std::min(t, std::max(0.0, d - 1));
-        layer.keys["opacity"] = {Key{start, 0, "out"}, Key{std::min(d, start + 1), 1, "linear"}};
+        const double opacity = scene.value(layer, "opacity", t) > 0 ? scene.value(layer, "opacity", t) : 1;
+        layer.keys["opacity"] = {Key{start, 0, "out"}, Key{std::min(d, start + 1), opacity, "linear"}};
     }
     return true;
 }

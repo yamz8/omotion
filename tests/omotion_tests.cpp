@@ -761,6 +761,50 @@ private slots:
         QVERIFY(!scene.layers[post].keys.value("x").isEmpty());
     }
 
+    void splittingKeepsPieceFamiliesTogether() {
+        QTemporaryDir dir;
+        QImage depth;
+        const QString project = Project::open(bandedPicture(dir, &depth), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{138, 58}, {162, 58}, {162, 92}, {138, 92}}, 0, true, &error, "post", 0, true), 1);
+        QVERIFY(Project::cutOut(scene, assets, 1, {{140, 60}, {150, 60}, {150, 70}, {140, 70}}, 0, true, &error, "sign", 0, true) > 0);
+        // The post sits below its source in the stack, under something else too.
+        Layer post = scene.layers.takeAt(scene.indexOf("post"));
+        scene.layers.prepend(post);
+        Layer other = scene.layers.at(scene.indexOf("bands"));
+        other.name = "other";
+        other.raw = QJsonObject();
+        other.source = "assets/bands.png";
+        scene.layers.append(other);
+        const QImage before = renderFrame(scene, assets, 0);
+        QVERIFY2(!Project::splitByDepth(scene, assets, scene.indexOf("bands"), depth, 3, 0, &error).isEmpty(), qPrintable(error));
+        QCOMPARE(scene.layers[scene.indexOf("post")].parent, QString("middle ground"));
+        QCOMPARE(scene.indexOf("post"), scene.indexOf("middle ground") + 1);
+        QCOMPARE(scene.indexOf("sign"), scene.indexOf("post") + 1);  // Its own piece came along.
+        QVERIFY(scene.indexOf("other") > scene.indexOf("foreground"));
+        QVERIFY(differences(renderFrame(scene, assets, 0), before) < 300 * 8);
+    }
+
+    void lengtheningForParallaxStretchesLoops() {
+        QTemporaryDir dir;
+        QImage depth;
+        const QString project = Project::open(bandedPicture(dir, &depth), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        Project::cutOut(scene, assets, 0, {{138, 58}, {162, 58}, {162, 92}, {138, 92}}, 0, true, &error, "post", 0, true);
+        QCOMPARE(scene.duration, 4.0);
+        QVERIFY(Project::applyPreset(scene, assets, 1, "sway", 0, 1, &error));
+        Project::splitByDepth(scene, assets, 0, depth, 3, 0, &error);
+        QVERIFY(Project::animateParallax(scene, assets, 0, 30, &error));
+        QCOMPARE(scene.duration, 10.0);
+        const Layer &swaying = scene.layers[scene.indexOf("post")];
+        QCOMPARE(swaying.keys["rotation"].last().t, 10.0);  // Still swaying to the end...
+        QVERIFY(qAbs(scene.value(swaying, "rotation", 2.5)) > 3);  // ...at the stretched quarter.
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;
@@ -936,6 +980,26 @@ private slots:
         splitter.undo();
         splitter.undo();
         QCOMPARE(splitter.scene().layers.size(), 1);
+    }
+
+    void splittingAPieceMeansItsPicture() {
+        if (!Ai::instance().problem().isEmpty())
+            QSKIP(qPrintable("The AI isn't set up here: " + Ai::instance().problem()));
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(ballPicture(dir));
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(150, 150), QPointF(250, 150), QPointF(250, 250), QPointF(150, 250)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        QCOMPARE(backend.selected(), 1);  // The new piece.
+        backend.splitByDepth(3);
+        backend.waitForJobs();
+        QCOMPARE(backend.error(), QString());
+        QVERIFY(backend.scene().layers.size() >= 3);
+        QCOMPARE(backend.scene().layers[0].name, QString("ball"));
+        QVERIFY(backend.scene().layers[0].raw.contains("depth"));  // The picture was split, not the piece.
     }
 
     void backendDropsASplitIfTheSceneChanged() {

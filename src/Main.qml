@@ -42,6 +42,8 @@ ApplicationWindow {
         Qt.quit();
     }
     function focusCanvas() { canvasArea.forceActiveFocus(); }
+    // Exports have even sides (H.264 needs them); show the size they'll be.
+    function evenSize(v) { const n = Math.max(2, Math.round(v)); return n - n % 2; }
 
     onClosing: function (close) {
         if (backend.exporting && !quitConfirmVisible) {
@@ -52,7 +54,7 @@ ApplicationWindow {
 
     // ---- Shortcuts -------------------------------------------------------
 
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.exportMenuVisible = false; win.helpVisible = !win.helpVisible } }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.exportMenuVisible = false; win.presetMenuVisible = false; win.helpVisible = !win.helpVisible } }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: win.quit() }
     Shortcut {
         sequence: "Escape"
@@ -511,7 +513,7 @@ ApplicationWindow {
                 Label {
                     readonly property real factor: win.exportHalf ? 0.5 : 1
                     text: "Into renders/ in the project folder. "
-                          + Math.round(backend.sceneInfo.width * factor) + "×" + Math.round(backend.sceneInfo.height * factor)
+                          + win.evenSize(backend.sceneInfo.width * factor) + "×" + win.evenSize(backend.sceneInfo.height * factor)
                           + (win.exportHalf ? " (half size)" : "") + ", " + backend.sceneInfo.fps + " fps, " + backend.sceneInfo.frames + " frames."
                     color: win.muted
                     wrapMode: Text.Wrap
@@ -594,7 +596,7 @@ ApplicationWindow {
                 spacing: 6
                 Label { text: "Move " + (backend.values.name || ""); font.pixelSize: 20; font.bold: true; color: win.text }
                 Label {
-                    text: "A ready-made motion that loops with the scene. It replaces that property's keyframes; Ctrl+Z takes it back."
+                    text: "A ready-made motion; all but the fade loop with the scene. It replaces that property's keyframes; Ctrl+Z takes it back."
                     color: win.muted
                     wrapMode: Text.Wrap
                     width: parent.width

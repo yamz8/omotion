@@ -77,14 +77,15 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImag
 
 // Animates a depth-split layer as a slow camera move: it drifts sideways and
 // pushes in, and nearer layers slide further, strength canvas pixels for the
-// nearest, as a loop over the scene's duration (made at least 10 seconds).
+// nearest, as a loop over the scene's duration. A scene shorter than 10
+// seconds is made 10, stretching any animation it already has to match.
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
 
 // The motion presets, by name: sway, float, pulse, bounce, spin, fade.
 const QStringList &presets();
 // Gives a layer a ready-made motion, replacing that property's animation.
-// The looping ones fit a whole number of cycles into the scene, so they loop
-// with it; fade starts at t. amount scales the motion (1 is the default).
+// All but fade fit whole cycles (spin, whole turns) into the scene, so they
+// loop with it; fade starts at t. amount scales the motion (1 is the default).
 bool applyPreset(Scene &scene, AssetCache &assets, int layer, const QString &preset, double t, double amount,
                  QString *error);
 

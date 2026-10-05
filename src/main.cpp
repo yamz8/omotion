@@ -65,6 +65,19 @@ int fail(const QString &message) {
     return 1;
 }
 
+// The number after a flag, or false (with a message) when it's missing or isn't one.
+bool numberAfter(const QStringList &args, int &i, double *value) {
+    bool ok = false;
+    if (i + 1 < args.size())
+        *value = args.at(i + 1).toDouble(&ok);
+    if (!ok) {
+        fail(QString("%1 needs a number after it.").arg(args.at(i)));
+        return false;
+    }
+    ++i;
+    return true;
+}
+
 // The command-line renderer, for scripts and agents: no window, same output.
 int command(const QStringList &args) {
     QString error;
@@ -165,8 +178,12 @@ int command(const QStringList &args) {
 
     if (args.at(1) == "info") {
         double t = 0;
-        if (args.size() == 5 && args.at(3) == "--at")
-            t = args.at(4).toDouble();
+        for (int i = 3; i < args.size(); ++i) {
+            if (args.at(i) != "--at")
+                return fail(QString("info doesn't know \"%1\".").arg(args.at(i)));
+            if (!numberAfter(args, i, &t))
+                return 1;
+        }
         // What an agent needs to work on the picture: where each layer is.
         QJsonArray layers;
         for (int i = 0; i < scene.layers.size(); ++i) {
@@ -216,7 +233,17 @@ int command(const QStringList &args) {
         const QPointF point = xy.size() == 2 ? QPointF(xy.at(0).toDouble(&okX), xy.at(1).toDouble(&okY)) : QPointF();
         if (!okX || !okY)
             return fail(QString("\"%1\" isn't a point like 120,340.").arg(args.at(4)));
-        const double t = args.size() == 7 && args.at(5) == "--at" ? args.at(6).toDouble() : 0;
+        double t = 0;
+        for (int i = 5; i < args.size(); ++i) {
+            if (args.at(i) != "--at")
+                return fail(QString("pivot doesn't know \"%1\".").arg(args.at(i)));
+            if (!numberAfter(args, i, &t))
+                return 1;
+        }
+        bool invertible = false;
+        layerTransform(edited, assets, layer, t).inverted(&invertible);
+        if (!invertible)
+            return fail(QString("\"%1\" is scaled to nothing at %2 s, so it has no pivot to move.").arg(args.at(3)).arg(t));
         Project::setPivot(edited, assets, layer, point, t);
         if (!Project::save(directory, edited, &error))
             return fail(error);
@@ -231,13 +258,16 @@ int command(const QStringList &args) {
         if (layer < 0)
             return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
         double amount = 1, t = 0;
-        for (int i = 5; i + 1 < args.size(); i += 2) {
-            if (args.at(i) == "--amount")
-                amount = args.at(i + 1).toDouble();
-            else if (args.at(i) == "--at")
-                t = args.at(i + 1).toDouble();
-            else
+        for (int i = 5; i < args.size(); ++i) {
+            if (args.at(i) == "--amount") {
+                if (!numberAfter(args, i, &amount))
+                    return 1;
+            } else if (args.at(i) == "--at") {
+                if (!numberAfter(args, i, &t))
+                    return 1;
+            } else {
                 return fail(QString("preset doesn't know \"%1\".").arg(args.at(i)));
+            }
         }
         if (!Project::applyPreset(edited, assets, layer, args.at(4), t, amount, &error) ||
             !Project::save(directory, edited, &error))

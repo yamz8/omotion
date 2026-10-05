@@ -928,6 +928,15 @@ void Backend::splitByDepth(int count) {
     int layer = m_selected >= 0 ? m_selected : (m_scene.layers.isEmpty() ? -1 : 0);
     if (layer < 0)
         return setNotice("Add an image to split first.");
+    // A piece just cut out is selected; splitting means the picture it came
+    // from, which the piece then goes with.
+    for (int guard = 0; guard < 16 && layer >= 0; ++guard) {
+        const QJsonObject cut = m_scene.layers.at(layer).raw.value("cut").toObject();
+        const int from = m_scene.indexOf(cut.value("from").toString());
+        if (cut.isEmpty() || cut.contains("depth") || from < 0)
+            break;
+        layer = from;
+    }
     if (!needAi())
         return;
     if (m_playing)
