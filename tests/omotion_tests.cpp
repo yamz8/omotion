@@ -720,6 +720,47 @@ private slots:
         QVERIFY(Project::splitByDepth(fresh, assets, 0, flat, 3, 0, &error).isEmpty());
     }
 
+    void piecesCutBeforeASplitGoWithTheirDepth() {
+        QTemporaryDir dir;
+        QImage depth;
+        const QString path = bandedPicture(dir, &depth);
+        // Something standing in the middle band.
+        QImage picture(path);
+        QPainter painter(&picture);
+        painter.fillRect(140, 60, 20, 30, QColor(250, 250, 80));
+        painter.end();
+        picture.save(path);
+        const QString project = Project::open(path, nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{138, 58}, {162, 58}, {162, 92}, {138, 92}}, 0, true, &error, "post", 0, true), 1);
+        scene.keyAll(1, 0);  // It has its own animation, which should survive.
+        const QList<int> created = Project::splitByDepth(scene, assets, 0, depth, 3, 0, &error);
+        QVERIFY2(created.size() == 2, qPrintable(error));
+        const int post = scene.indexOf("post");
+        QCOMPARE(scene.layers[post].parent, QString("middle ground"));
+        QCOMPARE(post, scene.indexOf("middle ground") + 1);  // Right above its layer.
+        QVERIFY(scene.indexOf("foreground") > post);
+        QVERIFY(differences(renderFrame(scene, assets, 0), before) < 300 * 8);
+        // Still where it was, and it moves with its layer.
+        const QPointF at = layerTransform(scene, assets, post, 0).map(QPointF(0, 0));
+        QVERIFY2(QLineF(at, QPointF(138, 58)).length() < 2, qPrintable(QString("%1,%2").arg(at.x()).arg(at.y())));
+        QVERIFY(Project::animateParallax(scene, assets, 0, 30, &error));
+        // Seen from its layer, it doesn't move: the camera carries both.
+        auto onLayer = [&](double t) {
+            return layerTransform(scene, assets, scene.indexOf("middle ground"), t).inverted()
+                .map(layerTransform(scene, assets, post, t).map(QPointF(0, 0)));
+        };
+        QVERIFY(QLineF(onLayer(0), onLayer(scene.duration / 2)).length() < .01);
+        // While the layers in front move further than it does.
+        auto canvasX = [&](int layer, double t) { return layerTransform(scene, assets, layer, t).map(QPointF(150, 0)).x(); };
+        const int near = scene.indexOf("foreground");
+        QVERIFY(canvasX(near, scene.duration / 2) - canvasX(near, 0) < canvasX(post, scene.duration / 2) - canvasX(post, 0));
+        QVERIFY(!scene.layers[post].keys.value("x").isEmpty());
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;

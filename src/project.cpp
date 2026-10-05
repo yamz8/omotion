@@ -793,8 +793,17 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImag
     const QSize full = assets.size(source.source).toSize();
     if (full.isEmpty())
         return fail(QString("Couldn't read %1.").arg(source.source));
-    if (!piecesOf(scene, source.name).isEmpty())
-        return fail(QString("%1 already has pieces cut from it; split a layer that hasn't been cut yet.").arg(source.name));
+    // Pieces already cut from it stay pieces, drawn out before the depth
+    // layers are, and each goes with the depth layer it stands in.
+    QStringList existing;
+    int firstOrder = 0;
+    for (const int i : piecesOf(scene, source.name)) {
+        const QJsonObject cut = scene.layers.at(i).raw.value("cut").toObject();
+        if (cut.contains("depth"))
+            return fail(QString("%1 is split by depth already.").arg(source.name));
+        existing.append(scene.layers.at(i).name);
+        firstOrder = std::max(firstOrder, cut.value("order").toInt() + 1);
+    }
     const QImage depth = depthMap.convertToFormat(QImage::Format_Grayscale16);
     const int w = depth.width(), h = depth.height();
     if (depth.isNull())
@@ -842,6 +851,8 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImag
     const double sourceScale = std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)));
     Scene edited = scene;
     QList<int> created;
+    QStringList bandNames;  // The new layers, nearest first, with the depth each starts at.
+    QList<double> thresholds;
     // Nearest first: each nearer layer is lifted out and its place filled
     // before the next is cut, and each layer's shape takes in everything in
     // front of it too, so it carries a filled-in background behind the nearer
@@ -928,17 +939,63 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImag
                                        {"feather", std::round(feather / sourceScale * 100) / 100},
                                        {"punch", true},
                                        {"fill", true},
-                                       {"order", order},
+                                       {"order", firstOrder + order},
                                        {"depth", std::round(centres[band] / 1023 * 1000) / 1000}};
         edited.layers.insert(index + 1, layer);
         // Each new layer goes in just above the source, under the nearer ones.
         created.append(index + 1 + int(created.size()));
+        bandNames.append(name);
+        thresholds.append(threshold);
     }
     if (created.isEmpty())
         return fail("The picture is all one depth; there's nothing to split.");
     edited.layers[index].raw["depth"] = std::round(centres[0] / 1023 * 1000) / 1000;
     if (!rebuildCuts(edited, assets, index, error))
         return {};
+
+    // Each piece cut before goes with the depth layer it stands in: the depth
+    // just under its foot, where it meets the ground (the depth map was made
+    // with the piece already lifted out, so there it sees what's behind).
+    for (const QString &name : existing) {
+        const int i = edited.indexOf(name);
+        if (i < 0 || edited.layers.at(i).parent != source.name)
+            continue;
+        const QJsonArray origin = edited.layers.at(i).raw.value("cut").toObject().value("origin").toArray();
+        const QSizeF size = assets.size(edited.layers.at(i).source);
+        const QPointF foot(origin.at(0).toDouble() + size.width() / 2, origin.at(1).toDouble() + size.height() + 2);
+        const int dx = std::clamp(int(foot.x() * w / full.width()), 0, w - 1);
+        const int dy = std::clamp(int(foot.y() * h / full.height()), 0, h - 1);
+        const double at = reinterpret_cast<const quint16 *>(depth.constScanLine(dy))[dx];
+        int band = -1;
+        for (int k = 0; k < thresholds.size() && band < 0; ++k)
+            if (at >= thresholds.at(k))
+                band = k;
+        if (band < 0)
+            continue;  // As far as the background: it stays with the source.
+        const int b = edited.indexOf(bandNames.at(band));
+        const Layer &holder = edited.layers.at(b);
+        // A depth layer sits on its source with no turn or scale, so going
+        // from one's pixels to the other's is a shift.
+        const QSizeF bandSize = assets.size(holder.source);
+        const QPointF shift(holder.base.value("x") - holder.anchor.x() * bandSize.width(),
+                            holder.base.value("y") - holder.anchor.y() * bandSize.height());
+        Layer piece = edited.layers.takeAt(i);
+        piece.parent = holder.name;
+        piece.base["x"] -= shift.x();
+        piece.base["y"] -= shift.y();
+        for (const QString &property : {QString("x"), QString("y")})
+            for (Key &key : piece.keys[property])
+                key.v -= property == "x" ? shift.x() : shift.y();
+        if (piece.keys.value("x").isEmpty())
+            piece.keys.remove("x");
+        if (piece.keys.value("y").isEmpty())
+            piece.keys.remove("y");
+        edited.layers.insert(edited.indexOf(holder.name) + 1, piece);
+    }
+    // The layers moved about; say where the new ones ended up.
+    created.clear();
+    for (const QString &name : bandNames)
+        created.prepend(edited.indexOf(name));
     scene = edited;
     if (error)
         error->clear();
