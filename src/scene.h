@@ -113,6 +113,10 @@ public:
     QString directory() const { return m_directory; }
     QImage image(const QString &source);
     QSizeF size(const QString &source);
+    // Whether to keep full pictures once their smaller copies are made. A
+    // window that only shows them small can let them go and save memory.
+    void setKeepFull(bool keep) { m_keepFull = keep; }
+    void clear();
     // The image shrunk by halves to the smallest copy still at least scale of
     // full size, so drawing it smaller is quick and doesn't shimmer. factor is
     // that copy's size relative to the full image.
@@ -131,10 +135,14 @@ public:
 
 private:
     struct Entry {
-        QImage image;
+        QImage image;  // The full picture, read when it's wanted.
+        QSize size;
         QDateTime modified;
         QList<QImage> mips;  // Half, quarter, eighth... made as they're needed.
     };
+    // The cache entry for a file, current with the file on disk, or null.
+    Entry *entry(const QString &source);
+    bool m_keepFull = true;
 
     QString m_directory;
     QHash<QString, Entry> m_entries;

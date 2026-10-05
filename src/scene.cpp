@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QJsonArray>
 #include <QPainter>
 #include <QSet>
@@ -450,49 +451,88 @@ void AssetCache::setDirectory(const QString &directory) {
     m_missing.clear();
 }
 
-QImage AssetCache::image(const QString &source) {
+AssetCache::Entry *AssetCache::entry(const QString &source) {
     const QString path = QDir(m_directory).absoluteFilePath(source);
     const QFileInfo info(path);
-    if (!info.exists()) {
+    auto missing = [&]() -> Entry * {
         if (!m_missing.contains(source))
             m_missing.append(source);
         m_entries.remove(source);
-        return {};
-    }
+        return nullptr;
+    };
+    if (!info.exists())
+        return missing();
     auto it = m_entries.find(source);
     if (it != m_entries.end() && it->modified == info.lastModified())
-        return it->image;
-
-    QImage image(path);
-    if (image.isNull()) {
-        if (!m_missing.contains(source))
-            m_missing.append(source);
-        return {};
-    }
-    image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    m_entries.insert(source, Entry{image, info.lastModified()});
+        return &*it;
+    // Only the header to begin with: the size is enough to place a layer,
+    // and the pixels may only ever be wanted smaller.
+    const QSize size = QImageReader(path).size();
+    if (!size.isValid())
+        return missing();
     m_missing.removeAll(source);
-    return image;
+    return &*m_entries.insert(source, Entry{QImage(), size, info.lastModified(), {}});
 }
 
-QSizeF AssetCache::size(const QString &source) { return image(source).size(); }
+QImage AssetCache::image(const QString &source) {
+    Entry *e = entry(source);
+    if (!e)
+        return {};
+    if (e->image.isNull()) {
+        QImage image(QDir(m_directory).absoluteFilePath(source));
+        if (image.isNull()) {
+            if (!m_missing.contains(source))
+                m_missing.append(source);
+            m_entries.remove(source);
+            return {};
+        }
+        e->image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        e->size = e->image.size();
+    }
+    return e->image;
+}
+
+QSizeF AssetCache::size(const QString &source) {
+    const Entry *e = entry(source);
+    return e ? QSizeF(e->size) : QSizeF();
+}
 
 QImage AssetCache::mip(const QString &source, double scale, double *factor) {
-    QImage full = image(source);
     *factor = 1;
-    if (full.isNull())
-        return full;
-    Entry &entry = m_entries[source];
-    QImage current = full;
-    for (int level = 0; *factor / 2 >= scale && current.width() > 16 && current.height() > 16; ++level) {
-        if (level >= entry.mips.size())
-            entry.mips.append(current.scaled(current.size() / 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
-        current = entry.mips.at(level);
-        *factor /= 2;
+    Entry *e = entry(source);
+    if (!e)
+        return {};
+    // How many halvings fit: down while half is still at least scale.
+    int levels = 0;
+    for (QSize next = e->size; double(next.width() / 2) / e->size.width() >= scale && next.width() > 16 &&
+                               next.height() > 16;
+         next /= 2)
+        ++levels;
+    if (levels == 0)
+        return image(source);
+    if (e->mips.size() < levels) {
+        QImage current = e->mips.isEmpty() ? image(source) : e->mips.last();
+        e = entry(source);  // image() may have reloaded it.
+        if (!e || current.isNull())
+            return {};
+        while (e->mips.size() < levels) {
+            current = current.scaled(current.size() / 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            e->mips.append(current);
+        }
+        // Drawn small, the full picture isn't needed; it's read again if
+        // anyone zooms in that far.
+        if (!m_keepFull)
+            e->image = QImage();
     }
-    // The halves are rounded down, so the real factor is the size ratio.
-    *factor = double(current.width()) / full.width();
-    return current;
+    const QImage &chosen = e->mips.at(levels - 1);
+    *factor = double(chosen.width()) / e->size.width();
+    return chosen;
+}
+
+void AssetCache::clear() {
+    m_entries.clear();
+    m_looks.clear();
+    m_lookOrder.clear();
 }
 
 namespace {
@@ -704,12 +744,14 @@ int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &poi
         const Layer &layer = scene.layers.at(i);
         if (!layer.visible || scene.value(layer, "opacity", t) <= 0)
             continue;
-        const QImage image = assets.image(layer.source);
+        // A quarter-size copy is plenty to tell what's under the mouse.
+        double factor = 1;
+        const QImage image = assets.mip(layer.source, .25, &factor);
         bool invertible = false;
         const QTransform inverse = layerTransform(scene, assets, i, t).inverted(&invertible);
         if (image.isNull() || !invertible)
             continue;
-        const QPoint local = inverse.map(point).toPoint();
+        const QPoint local = (inverse.map(point) * factor).toPoint();
         if (image.rect().contains(local) && qAlpha(image.pixel(local)) > 16)
             return i;
     }

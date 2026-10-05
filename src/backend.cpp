@@ -25,6 +25,9 @@ QString localPath(const QString &pathOrUrl) {
 }
 
 Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picker(picker) {
+    // The window draws big pictures small; keep just the smaller copies.
+    m_assets.setKeepFull(false);
+    m_workAssets.setKeepFull(false);
     m_playTimer.setInterval(16);
     connect(&m_playTimer, &QTimer::timeout, this, &Backend::tick);
 
@@ -951,6 +954,7 @@ void Backend::splitByDepth(int count) {
     m_job.disconnect(this);
     connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, count] {
         setBusy({});
+        m_workAssets.clear();
         const auto &[split, error] = *result;
         if (!error.isEmpty())
             return setError(error);
@@ -1198,6 +1202,7 @@ void Backend::finishCut(bool punch) {
     m_job.disconnect(this);
     connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, apply] {
         setBusy({});
+        m_workAssets.clear();
         const auto &[scene, index, error] = *result;
         if (index >= 0 && Project::serialize(m_scene) != started)
             return setError("The scene changed while cutting, so the cut wasn't kept. Press Enter to cut again.");
