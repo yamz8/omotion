@@ -84,7 +84,7 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
 
 Backend::~Backend() {
     // The AI's job uses this backend's cache; let it finish first.
-    m_aiJob.waitForFinished();
+    m_job.waitForFinished();
     flush();
 }
 
@@ -839,7 +839,7 @@ void Backend::excludeAt(double x, double y) {
 }
 
 void Backend::runAiSelect() {
-    if (m_aiJob.isRunning()) {
+    if (m_job.isRunning()) {
         // One at a time; the latest clicks run when this one's done.
         m_aiAgain = true;
         return;
@@ -853,8 +853,8 @@ void Backend::runAiSelect() {
     const QString directory = m_directory;
     auto result = std::make_shared<std::tuple<QPolygonF, int, QString>>();
     setBusy(m_aiChoices == 0 && m_aiTake.size() == 1 ? "Looking at the picture…" : "Selecting…");
-    m_aiJob.disconnect(this);
-    connect(&m_aiJob, &QFutureWatcher<void>::finished, this, [this, result] {
+    m_job.disconnect(this);
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result] {
         setBusy({});
         if (m_aiAgain)
             return runAiSelect();
@@ -867,15 +867,15 @@ void Backend::runAiSelect() {
         if (outline.isEmpty())
             setNotice(error.isEmpty() ? "The AI didn't find anything there." : error);
     });
-    m_aiJob.setFuture(QtConcurrent::run([this, scene, layer, take, leave, t, choice, directory, result] {
-        m_aiAssets.setDirectory(directory);
+    m_job.setFuture(QtConcurrent::run([this, scene, layer, take, leave, t, choice, directory, result] {
+        m_workAssets.setDirectory(directory);
         auto &[outline, choices, error] = *result;
-        outline = Project::aiOutline(scene, m_aiAssets, layer, take, leave, t, choice, &choices, &error);
+        outline = Project::aiOutline(scene, m_workAssets, layer, take, leave, t, choice, &choices, &error);
     }));
 }
 
 void Backend::splitByDepth(int count) {
-    if (!hasProject() || m_aiJob.isRunning())
+    if (!hasProject() || m_job.isRunning())
         return;
     int layer = m_selected >= 0 ? m_selected : (m_scene.layers.isEmpty() ? -1 : 0);
     if (layer < 0)
@@ -891,8 +891,8 @@ void Backend::splitByDepth(int count) {
     const QByteArray started = Project::serialize(m_scene);
     auto result = std::make_shared<std::pair<Scene, QString>>();
     setBusy("Finding the depth…");
-    m_aiJob.disconnect(this);
-    connect(&m_aiJob, &QFutureWatcher<void>::finished, this, [this, result, started, count] {
+    m_job.disconnect(this);
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, count] {
         setBusy({});
         const auto &[split, error] = *result;
         if (!error.isEmpty())
@@ -907,17 +907,17 @@ void Backend::splitByDepth(int count) {
         rearmWatcher();
         setNotice(QString("Split into %1 layers by depth. Press A to make it move.").arg(count));
     });
-    m_aiJob.setFuture(QtConcurrent::run([this, scene, layer, count, directory, result] {
-        m_aiAssets.setDirectory(directory);
+    m_job.setFuture(QtConcurrent::run([this, scene, layer, count, directory, result] {
+        m_workAssets.setDirectory(directory);
         Scene edited = scene;
         QString error;
-        const QImage depth = Project::depthOf(edited, m_aiAssets, layer, &error);
+        const QImage depth = Project::depthOf(edited, m_workAssets, layer, &error);
         if (depth.isNull()) {
             result->second = error;
             return;
         }
         QMetaObject::invokeMethod(this, [this] { setBusy("Splitting into layers…"); }, Qt::QueuedConnection);
-        if (Project::splitByDepth(edited, m_aiAssets, layer, depth, count, 2, &error).isEmpty()) {
+        if (Project::splitByDepth(edited, m_workAssets, layer, depth, count, 2, &error).isEmpty()) {
             result->second = error;
             return;
         }
@@ -943,8 +943,8 @@ void Backend::animateParallax() {
                   .arg(lengthened ? ", over 10 seconds" : ""));
 }
 
-void Backend::waitForAi() {
-    while (m_aiJob.isRunning() || !m_busy.isEmpty())
+void Backend::waitForJobs() {
+    while (m_job.isRunning() || !m_busy.isEmpty())
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 }
 
@@ -1051,35 +1051,71 @@ void Backend::removeCutPoint() {
 }
 
 void Backend::finishCut(bool punch) {
-    if (m_tool != "cut" && m_tool != "wand")
+    if ((m_tool != "cut" && m_tool != "wand") || m_job.isRunning())
         return;
-    Scene scene = m_scene;
-    QString error;
-    int index = -1;
-    if (!m_reshaping.isEmpty()) {
-        index = scene.indexOf(m_reshaping);
-        if (!Project::reshapeCut(scene, m_assets, index, QPolygonF(m_cut), m_time, m_feather, &error, m_fill ? 1 : 0))
-            return setError(error);
-    } else {
-        index = Project::cutOut(scene, m_assets, m_selected, QPolygonF(m_cut), m_time, punch, &error, {}, m_feather,
-                                m_fill);
+    const QString reshaping = m_reshaping;
+    const QPolygonF shape(m_cut);
+    const double t = m_time, feather = m_feather;
+    const bool fill = m_fill;
+    const int selected = m_selected;
+    // The cut itself: a new piece, or a piece given a new shape. Returns the
+    // piece's index, or -1 with the reason in error.
+    auto cut = [reshaping, shape, t, feather, fill, selected, punch](Scene &scene, AssetCache &assets, QString &error) {
+        if (reshaping.isEmpty())
+            return Project::cutOut(scene, assets, selected, shape, t, punch, &error, {}, feather, fill);
+        const int index = scene.indexOf(reshaping);
+        return Project::reshapeCut(scene, assets, index, shape, t, feather, &error, fill ? 1 : 0) ? index : -1;
+    };
+    auto apply = [this, reshaping](const Scene &scene, int index, const QString &error) {
         if (index < 0)
             return setError(error);
+        checkpoint();
+        m_scene = scene;
+        m_selected = index;
+        m_tool = "move";
+        m_cut.clear();
+        m_reshaping.clear();
+        emit toolChanged();
+        emit selectedChanged();
+        changed();
+        rearmWatcher();
+        setNotice(!reshaping.isEmpty()
+                      ? QString("Reshaped %1.").arg(m_scene.layers.at(index).name)
+                      : QString("Cut out %1. Press P to set where it pivots, then K to start animating it.")
+                            .arg(m_scene.layers.at(index).name));
+    };
+
+    // Small pictures cut in a blink; big ones take seconds, which the window
+    // shouldn't freeze for.
+    const int from = reshaping.isEmpty()
+                         ? selected
+                         : m_scene.indexOf(m_scene.layers.value(m_scene.indexOf(reshaping)).raw.value("cut").toObject()
+                                               .value("from").toString());
+    const QSizeF size = from >= 0 ? m_assets.size(m_scene.layers.at(from).source) : QSizeF();
+    if (size.width() * size.height() <= 4e6) {
+        Scene scene = m_scene;
+        QString error;
+        const int index = cut(scene, m_assets, error);
+        return apply(scene, index, error);
     }
-    const bool reshaped = !m_reshaping.isEmpty();
-    checkpoint();
-    m_scene = scene;
-    m_selected = index;
-    m_tool = "move";
-    m_cut.clear();
-    m_reshaping.clear();
-    emit toolChanged();
-    emit selectedChanged();
-    changed();
-    rearmWatcher();
-    setNotice(reshaped ? QString("Reshaped %1.").arg(m_scene.layers.at(index).name)
-                       : QString("Cut out %1. Press P to set where it pivots, then K to start animating it.")
-                             .arg(m_scene.layers.at(index).name));
+
+    const QByteArray started = Project::serialize(m_scene);
+    auto result = std::make_shared<std::tuple<Scene, int, QString>>(m_scene, -1, QString());
+    const QString directory = m_directory;
+    setBusy(reshaping.isEmpty() ? "Cutting…" : "Reshaping…");
+    m_job.disconnect(this);
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, apply] {
+        setBusy({});
+        const auto &[scene, index, error] = *result;
+        if (index >= 0 && Project::serialize(m_scene) != started)
+            return setError("The scene changed while cutting, so the cut wasn't kept. Press Enter to cut again.");
+        apply(scene, index, error);
+    });
+    m_job.setFuture(QtConcurrent::run([this, result, directory, cut] {
+        m_workAssets.setDirectory(directory);
+        auto &[scene, index, error] = *result;
+        index = cut(scene, m_workAssets, error);
+    }));
 }
 
 void Backend::setPivotAt(double x, double y) {

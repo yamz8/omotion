@@ -184,8 +184,8 @@ public:
     Q_INVOKABLE void acceptAiPrompt();
     Q_INVOKABLE void dismissAiPrompt();
     Q_INVOKABLE void cancelDownload();
-    // Waits for any AI work to finish; for tests.
-    void waitForAi();
+    // Waits for any background work (the AI, big cuts) to finish; for tests.
+    void waitForJobs();
     // Smart select (the "wand" tool): the area of similar colour around a
     // canvas point on the selected layer becomes the cut shape; add joins it
     // to what's selected. The tolerance is picked for each click until it's
@@ -274,8 +274,8 @@ private:
     QList<QImage> m_seedLevels;
     void reselect();
 
-    // The AI's work runs one job at a time off the window's thread, with its
-    // own image cache, so the window stays responsive.
+    // Slow work (the AI, cutting big pictures) runs one job at a time off the
+    // window's thread, with its own image cache, so the window stays responsive.
     bool needAi();
     void runAiSelect();
     void setBusy(const QString &busy);
@@ -287,8 +287,8 @@ private:
     int m_aiChoice = 0;
     int m_aiChoices = 0;
     bool m_aiAgain = false;
-    AssetCache m_aiAssets;
-    QFutureWatcher<void> m_aiJob;
+    AssetCache m_workAssets;
+    QFutureWatcher<void> m_job;
     ModelDownload m_download;
     double m_downloadProgress = 0;
     QPointF m_dragStart;

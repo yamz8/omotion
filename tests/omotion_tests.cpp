@@ -863,19 +863,19 @@ private slots:
         QCOMPARE(backend.wandMode(), QString("ai"));
         backend.smartSelect(200, 200, false);
         QVERIFY(!backend.busy().isEmpty());  // It works in the background...
-        backend.waitForAi();
+        backend.waitForJobs();
         QVERIFY(backend.cutPoints().size() >= 4);  // ...and hands its outline to the cut.
         QVERIFY(backend.aiChoices() >= 2);
         const QRectF ball = QPolygonF(backend.cutPolygon()).boundingRect();
         QVERIFY2(qAbs(ball.width() - 100) < 20, qPrintable(QString::number(ball.width())));
         backend.cycleTolerance();  // T: the next guess.
-        backend.waitForAi();
+        backend.waitForJobs();
         QCOMPARE(backend.aiChoice(), 1);
         backend.toggleWandMode();
         QCOMPARE(backend.wandMode(), QString("colour"));
         backend.toggleWandMode();
         backend.smartSelect(200, 200, false);
-        backend.waitForAi();
+        backend.waitForJobs();
         backend.finishCut(true);
         QCOMPARE(backend.error(), QString());
         QCOMPARE(backend.scene().layers.size(), 2);
@@ -887,7 +887,7 @@ private slots:
         splitter.splitByDepth(3);
         // The view refreshes as new images land; that's not an edit.
         QTimer::singleShot(200, &splitter, [&] { splitter.dismissError(); });
-        splitter.waitForAi();
+        splitter.waitForJobs();
         QCOMPARE(splitter.error(), QString());
         QVERIFY(splitter.scene().layers.size() >= 2);
         splitter.animateParallax();
@@ -906,10 +906,32 @@ private slots:
         backend.select(0);
         backend.splitByDepth(3);
         backend.setProperty("x", 10);  // While it works.
-        backend.waitForAi();
+        backend.waitForJobs();
         QVERIFY(backend.error().contains("changed"));
         QCOMPARE(backend.scene().layers.size(), 1);
         QCOMPARE(backend.values()["x"].toDouble(), 10.0);
+    }
+
+    void bigCutsRunInTheBackground() {
+        QTemporaryDir dir;
+        QImage picture(3000, 2000, QImage::Format_RGB32);
+        picture.fill(QColor(30, 90, 160));
+        picture.save(dir.filePath("big.png"));
+        Backend backend;
+        backend.open(dir.filePath("big.png"));
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(100, 100), QPointF(500, 100), QPointF(500, 400), QPointF(100, 400)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        QCOMPARE(backend.busy(), QString("Cutting…"));
+        QCOMPARE(backend.scene().layers.size(), 1);  // Not yet.
+        backend.waitForJobs();
+        QCOMPARE(backend.error(), QString());
+        QCOMPARE(backend.scene().layers.size(), 2);
+        QCOMPARE(backend.tool(), QString("move"));
+        backend.undo();
+        QCOMPARE(backend.scene().layers.size(), 1);
     }
 
     void cuttingNothingFails() {
