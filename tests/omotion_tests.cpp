@@ -625,6 +625,8 @@ private slots:
         backend.setProperty("rotation", 90);
         backend.setTool("wand");
         QCOMPARE(backend.tool(), QString("wand"));
+        if (backend.wandMode() == "ai")
+            backend.toggleWandMode();  // Colour select, which works without the AI.
         // Turned 90° clockwise about the centre (100, 50): image (40, 30) is canvas (120, -10).
         backend.smartSelect(120, -10, false);
         const QRectF red = QPolygonF(backend.cutPolygon()).boundingRect();
@@ -650,6 +652,8 @@ private slots:
         backend.open(writePicture(dir.filePath("p.png")));
         backend.select(0);
         backend.setTool("wand");
+        if (backend.wandMode() == "ai")
+            backend.toggleWandMode();
         backend.smartSelect(40, 30, false);
         const int points = backend.cutPoints().size();
         QVERIFY(points >= 4);
@@ -812,6 +816,100 @@ private slots:
         const QRectF bounds = Select::outline(masks.first()).boundingRect();
         QVERIFY2(qAbs(bounds.center().x() - 200) < 10 && qAbs(bounds.width() - 100) < 16,
                  qPrintable(QString("%1,%2 %3x%4").arg(bounds.x()).arg(bounds.y()).arg(bounds.width()).arg(bounds.height())));
+    }
+
+    static QString ballPicture(QTemporaryDir &dir) {
+        QImage picture(400, 300, QImage::Format_RGB32);
+        QPainter painter(&picture);
+        QLinearGradient floor(0, 0, 0, 300);
+        floor.setColorAt(0, QColor(200, 220, 255));
+        floor.setColorAt(1, QColor(120, 110, 100));
+        painter.fillRect(picture.rect(), floor);
+        painter.setBrush(QColor(200, 30, 30));
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(200, 200), 50, 50);
+        painter.end();
+        picture.save(dir.filePath("ball.png"));
+        return dir.filePath("ball.png");
+    }
+
+    void backendAsksForMissingModels() {
+        if (Ai::instance().runtimeMissing())
+            QSKIP("ONNX Runtime isn't installed here.");
+        QTemporaryDir dir, empty;
+        Backend backend;
+        backend.open(ballPicture(dir));
+        backend.select(0);
+        Ai::setPaths({}, empty.path());
+        backend.setTool("wand");
+        backend.smartSelect(200, 200, false);
+        QCOMPARE(backend.aiPrompt(), QString("download"));
+        QCOMPARE(backend.busy(), QString());
+        backend.dismissAiPrompt();
+        QCOMPARE(backend.aiPrompt(), QString());
+        backend.splitByDepth(3);
+        QCOMPARE(backend.aiPrompt(), QString("download"));
+        Ai::setPaths({}, {});
+    }
+
+    void backendSelectsAndSplitsWithAi() {
+        if (!Ai::instance().problem().isEmpty())
+            QSKIP(qPrintable("The AI isn't set up here: " + Ai::instance().problem()));
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(ballPicture(dir));
+        backend.select(0);
+        backend.setTool("wand");
+        QCOMPARE(backend.wandMode(), QString("ai"));
+        backend.smartSelect(200, 200, false);
+        QVERIFY(!backend.busy().isEmpty());  // It works in the background...
+        backend.waitForAi();
+        QVERIFY(backend.cutPoints().size() >= 4);  // ...and hands its outline to the cut.
+        QVERIFY(backend.aiChoices() >= 2);
+        const QRectF ball = QPolygonF(backend.cutPolygon()).boundingRect();
+        QVERIFY2(qAbs(ball.width() - 100) < 20, qPrintable(QString::number(ball.width())));
+        backend.cycleTolerance();  // T: the next guess.
+        backend.waitForAi();
+        QCOMPARE(backend.aiChoice(), 1);
+        backend.toggleWandMode();
+        QCOMPARE(backend.wandMode(), QString("colour"));
+        backend.toggleWandMode();
+        backend.smartSelect(200, 200, false);
+        backend.waitForAi();
+        backend.finishCut(true);
+        QCOMPARE(backend.error(), QString());
+        QCOMPARE(backend.scene().layers.size(), 2);
+
+        // Depth: a fresh picture, split into layers, and undone in one step.
+        QTemporaryDir other;
+        Backend splitter;
+        splitter.open(ballPicture(other));
+        splitter.splitByDepth(3);
+        // The view refreshes as new images land; that's not an edit.
+        QTimer::singleShot(200, &splitter, [&] { splitter.dismissError(); });
+        splitter.waitForAi();
+        QCOMPARE(splitter.error(), QString());
+        QVERIFY(splitter.scene().layers.size() >= 2);
+        splitter.animateParallax();
+        QVERIFY(splitter.scene().layers[0].keys.contains("x"));
+        splitter.undo();
+        splitter.undo();
+        QCOMPARE(splitter.scene().layers.size(), 1);
+    }
+
+    void backendDropsASplitIfTheSceneChanged() {
+        if (!Ai::instance().problem().isEmpty())
+            QSKIP(qPrintable("The AI isn't set up here: " + Ai::instance().problem()));
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(ballPicture(dir));
+        backend.select(0);
+        backend.splitByDepth(3);
+        backend.setProperty("x", 10);  // While it works.
+        backend.waitForAi();
+        QVERIFY(backend.error().contains("changed"));
+        QCOMPARE(backend.scene().layers.size(), 1);
+        QCOMPARE(backend.values()["x"].toDouble(), 10.0);
     }
 
     void cuttingNothingFails() {

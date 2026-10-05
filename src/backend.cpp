@@ -1,10 +1,14 @@
 #include "backend.h"
 
 #include <QDesktopServices>
+#include <QStandardPaths>
+#include <QtConcurrent>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QLineF>
+#include <QProcess>
+#include <QCoreApplication>
 #include <QUrl>
 #include <algorithm>
 #include <cmath>
@@ -43,6 +47,19 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
         m_exportProgress = fraction;
         emit exportChanged();
     });
+    connect(&m_download, &ModelDownload::progress, this, [this](qint64 received, qint64 total) {
+        m_downloadProgress = total > 0 ? double(received) / total : 0;
+        emit downloadChanged();
+    });
+    connect(&m_download, &ModelDownload::finished, this, [this](bool ok, const QString &message) {
+        m_downloadProgress = 0;
+        emit downloadChanged();
+        if (ok)
+            setNotice("The AI is ready: D splits a picture by depth, and W selects things.");
+        else
+            setError(message);
+    });
+
     connect(&m_exporter, &Exporter::finished, this, [this](bool ok, const QString &message) {
         m_exportProgress = 0;
         emit exportChanged();
@@ -65,7 +82,11 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     }
 }
 
-Backend::~Backend() { flush(); }
+Backend::~Backend() {
+    // The AI's job uses this backend's cache; let it finish first.
+    m_aiJob.waitForFinished();
+    flush();
+}
 
 QString Backend::projectName() const {
     QString name = QFileInfo(m_directory).fileName();
@@ -165,6 +186,8 @@ bool Backend::open(const QString &pathOrUrl) {
     m_redo.clear();
     m_cut.clear();
     m_reshaping.clear();
+    m_aiTake.clear();
+    m_aiLeave.clear();
     m_keySelection.clear();
     m_clipboard.clear();
     m_tool = "move";
@@ -668,6 +691,10 @@ void Backend::setTool(const QString &tool) {
     m_seeds.clear();
     m_seedLevels.clear();
     m_tolerance = -1;
+    m_aiTake.clear();
+    m_aiLeave.clear();
+    m_aiChoice = 0;
+    m_aiChoices = 0;
     if (!keepShape) {
         m_cut.clear();
         m_reshaping.clear();
@@ -679,6 +706,17 @@ void Backend::setTool(const QString &tool) {
 void Backend::smartSelect(double x, double y, bool add) {
     if (m_tool != "wand" || m_selected < 0)
         return;
+    if (m_wandMode == "ai") {
+        if (!needAi())
+            return;
+        if (!add) {
+            m_aiTake.clear();
+            m_aiLeave.clear();
+            m_aiChoice = 0;
+        }
+        m_aiTake.append(QPointF(x, y));
+        return runAiSelect();
+    }
     if (!add) {
         m_seeds.clear();
         m_seedLevels.clear();
@@ -689,13 +727,20 @@ void Backend::smartSelect(double x, double y, bool add) {
 }
 
 void Backend::adjustTolerance(int delta) {
-    if (m_seeds.isEmpty())
+    if (m_wandMode == "ai" || m_seeds.isEmpty())
         return;
     m_tolerance = std::clamp((m_tolerance < 0 ? m_usedTolerance : m_tolerance) + delta, 1, 160);
     reselect();
 }
 
 void Backend::cycleTolerance() {
+    // In AI select, T steps through its guesses instead: part, thing, whole.
+    if (m_wandMode == "ai") {
+        if (m_aiChoices < 2 || m_aiTake.isEmpty())
+            return;
+        m_aiChoice = (m_aiChoice + 1) % m_aiChoices;
+        return runAiSelect();
+    }
     // Automatic, then by hand from tight to loose, then back to automatic.
     static const QList<int> steps{8, 16, 24, 32, 48, 64};
     if (m_tolerance < 0) {
@@ -724,6 +769,183 @@ void Backend::reselect() {
         return setNotice(QString("That's not on %1. Click a part of it.").arg(layer.name));
     if (regions > 1)
         setNotice("Only areas that touch make one shape; this is the biggest.");
+}
+
+void Backend::setBusy(const QString &busy) {
+    if (busy == m_busy)
+        return;
+    m_busy = busy;
+    emit busyChanged();
+}
+
+bool Backend::needAi() {
+    Ai::instance().retry();
+    const QString problem = Ai::instance().problem();
+    if (problem.isEmpty())
+        return true;
+    if (Ai::instance().runtimeMissing()) {
+        // Omarchy can install it in a terminal; elsewhere, say how.
+        m_aiPrompt = QStandardPaths::findExecutable("omarchy-launch-floating-terminal-with-presentation").isEmpty()
+                         ? QString()
+                         : QString("install");
+        setError(problem);
+    } else {
+        m_aiPrompt = "download";
+    }
+    emit aiPromptChanged();
+    return false;
+}
+
+void Backend::acceptAiPrompt() {
+    const QString prompt = m_aiPrompt;
+    dismissAiPrompt();
+    if (prompt == "download") {
+        m_download.start();
+        emit downloadChanged();
+    } else if (prompt == "install") {
+        // The Omarchy way: a terminal where sudo can ask, and Done at the end.
+        QProcess::startDetached("omarchy-launch-floating-terminal-with-presentation",
+                                {"echo 'Installing ONNX Runtime for omotion...'; omarchy-pkg-add onnxruntime-cpu"});
+        setError({});
+        setNotice("Once it's installed, try again.");
+    }
+}
+
+void Backend::dismissAiPrompt() {
+    if (m_aiPrompt.isEmpty())
+        return;
+    m_aiPrompt.clear();
+    emit aiPromptChanged();
+}
+
+void Backend::cancelDownload() { m_download.cancel(); }
+
+void Backend::toggleWandMode() {
+    m_wandMode = m_wandMode == "ai" ? "colour" : "ai";
+    m_seeds.clear();
+    m_seedLevels.clear();
+    m_aiTake.clear();
+    m_aiLeave.clear();
+    m_cut.clear();
+    emit toolChanged();
+    setNotice(m_wandMode == "ai" ? "AI select: click a thing." : "Colour select: click an area of colour.");
+}
+
+void Backend::excludeAt(double x, double y) {
+    if (m_tool != "wand" || m_wandMode != "ai" || m_aiTake.isEmpty())
+        return;
+    m_aiLeave.append(QPointF(x, y));
+    runAiSelect();
+}
+
+void Backend::runAiSelect() {
+    if (m_aiJob.isRunning()) {
+        // One at a time; the latest clicks run when this one's done.
+        m_aiAgain = true;
+        return;
+    }
+    m_aiAgain = false;
+    const Scene scene = m_scene;
+    const int layer = m_selected;
+    const QList<QPointF> take = m_aiTake, leave = m_aiLeave;
+    const double t = m_time;
+    const int choice = m_aiChoice;
+    const QString directory = m_directory;
+    auto result = std::make_shared<std::tuple<QPolygonF, int, QString>>();
+    setBusy(m_aiChoices == 0 && m_aiTake.size() == 1 ? "Looking at the picture…" : "Selecting…");
+    m_aiJob.disconnect(this);
+    connect(&m_aiJob, &QFutureWatcher<void>::finished, this, [this, result] {
+        setBusy({});
+        if (m_aiAgain)
+            return runAiSelect();
+        if (m_tool != "wand")
+            return;
+        const auto &[outline, choices, error] = *result;
+        m_aiChoices = choices;
+        m_cut = outline;
+        emit toolChanged();
+        if (outline.isEmpty())
+            setNotice(error.isEmpty() ? "The AI didn't find anything there." : error);
+    });
+    m_aiJob.setFuture(QtConcurrent::run([this, scene, layer, take, leave, t, choice, directory, result] {
+        m_aiAssets.setDirectory(directory);
+        auto &[outline, choices, error] = *result;
+        outline = Project::aiOutline(scene, m_aiAssets, layer, take, leave, t, choice, &choices, &error);
+    }));
+}
+
+void Backend::splitByDepth(int count) {
+    if (!hasProject() || m_aiJob.isRunning())
+        return;
+    int layer = m_selected >= 0 ? m_selected : (m_scene.layers.isEmpty() ? -1 : 0);
+    if (layer < 0)
+        return setNotice("Add an image to split first.");
+    if (!needAi())
+        return;
+    if (m_playing)
+        togglePlay();
+    const Scene scene = m_scene;
+    const QString directory = m_directory;
+    // What the scene was, to tell if it's edited meanwhile. (Not a repaint
+    // count: the split's own new images refresh the view as they land.)
+    const QByteArray started = Project::serialize(m_scene);
+    auto result = std::make_shared<std::pair<Scene, QString>>();
+    setBusy("Finding the depth…");
+    m_aiJob.disconnect(this);
+    connect(&m_aiJob, &QFutureWatcher<void>::finished, this, [this, result, started, count] {
+        setBusy({});
+        const auto &[split, error] = *result;
+        if (!error.isEmpty())
+            return setError(error);
+        // Something changed while it worked; better to redo than to undo that.
+        if (Project::serialize(m_scene) != started)
+            return setError("The scene changed while splitting it, so the split wasn't kept. Press D to split again.");
+        checkpoint();
+        m_scene = split;
+        setKeySelection({});
+        changed();
+        rearmWatcher();
+        setNotice(QString("Split into %1 layers by depth. Press A to make it move.").arg(count));
+    });
+    m_aiJob.setFuture(QtConcurrent::run([this, scene, layer, count, directory, result] {
+        m_aiAssets.setDirectory(directory);
+        Scene edited = scene;
+        QString error;
+        const QImage depth = Project::depthOf(edited, m_aiAssets, layer, &error);
+        if (depth.isNull()) {
+            result->second = error;
+            return;
+        }
+        QMetaObject::invokeMethod(this, [this] { setBusy("Splitting into layers…"); }, Qt::QueuedConnection);
+        if (Project::splitByDepth(edited, m_aiAssets, layer, depth, count, 2, &error).isEmpty()) {
+            result->second = error;
+            return;
+        }
+        result->first = edited;
+    }));
+}
+
+void Backend::animateParallax() {
+    if (!hasProject() || m_scene.layers.isEmpty())
+        return;
+    Scene scene = m_scene;
+    // A camera move this slow wants room; a short scene gets longer.
+    const bool lengthened = scene.duration < 10;
+    if (lengthened)
+        scene.duration = 10;
+    QString error;
+    if (!Project::animateParallax(scene, m_assets, m_selected >= 0 ? m_selected : 0, 36, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice(QString("Added a parallax camera move%1. Space plays it; Ctrl+Z takes it back.")
+                  .arg(lengthened ? ", over 10 seconds" : ""));
+}
+
+void Backend::waitForAi() {
+    while (m_aiJob.isRunning() || !m_busy.isEmpty())
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
 }
 
 void Backend::startReshape() {

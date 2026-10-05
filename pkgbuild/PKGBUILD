@@ -5,7 +5,8 @@ pkgdesc='Cut a picture into layers and animate it'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'xdg-desktop-portal' 'ffmpeg')
-makedepends=('gcc' 'make')
+makedepends=('gcc' 'make' 'onnxruntime-cpu')
+optdepends=('onnxruntime-cpu: AI depth layers and AI select')
 source=()
 sha256sums=()
 

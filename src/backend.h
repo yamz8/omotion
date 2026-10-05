@@ -10,6 +10,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <QFutureWatcher>
+
+#include "ai.h"
 #include "exporter.h"
 #include "filepicker.h"
 #include "scene.h"
@@ -44,6 +47,13 @@ class Backend : public QObject {
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
+    Q_PROPERTY(QString busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(QString aiPrompt READ aiPrompt NOTIFY aiPromptChanged)
+    Q_PROPERTY(bool downloading READ downloading NOTIFY downloadChanged)
+    Q_PROPERTY(double downloadProgress READ downloadProgress NOTIFY downloadChanged)
+    Q_PROPERTY(QString wandMode READ wandMode NOTIFY toolChanged)
+    Q_PROPERTY(int aiChoice READ aiChoice NOTIFY toolChanged)
+    Q_PROPERTY(int aiChoices READ aiChoices NOTIFY toolChanged)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportChanged)
 
@@ -76,6 +86,15 @@ public:
     QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
     QStringList blends() const { return Scene::blends(); }
+    // What the AI is busy with, in words, or empty.
+    QString busy() const { return m_busy; }
+    // An offer waiting for Enter: "download" the models, or "install" the runtime.
+    QString aiPrompt() const { return m_aiPrompt; }
+    bool downloading() const { return m_download.busy(); }
+    double downloadProgress() const { return m_downloadProgress; }
+    QString wandMode() const { return m_wandMode; }
+    int aiChoice() const { return m_aiChoice; }
+    int aiChoices() const { return m_aiChoices; }
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
 
@@ -153,6 +172,20 @@ public:
     Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
+    // In the wand tool, AI select leaves out what's under a point.
+    Q_INVOKABLE void excludeAt(double x, double y);
+    // Switches the wand between AI select and colour select.
+    Q_INVOKABLE void toggleWandMode();
+    // Splits the selected layer (or the bottom one) into count layers by
+    // depth, with the AI, in the background.
+    Q_INVOKABLE void splitByDepth(int count);
+    // Animates a depth-split layer as a slow parallax camera move.
+    Q_INVOKABLE void animateParallax();
+    Q_INVOKABLE void acceptAiPrompt();
+    Q_INVOKABLE void dismissAiPrompt();
+    Q_INVOKABLE void cancelDownload();
+    // Waits for any AI work to finish; for tests.
+    void waitForAi();
     // Smart select (the "wand" tool): the area of similar colour around a
     // canvas point on the selected layer becomes the cut shape; add joins it
     // to what's selected. The tolerance is picked for each click until it's
@@ -187,6 +220,9 @@ signals:
     void toolChanged();
     void exportChanged();
     void keySelectionChanged();
+    void busyChanged();
+    void aiPromptChanged();
+    void downloadChanged();
 
 private:
     void setError(const QString &error);
@@ -237,6 +273,24 @@ private:
     QList<QPointF> m_seeds;
     QList<QImage> m_seedLevels;
     void reselect();
+
+    // The AI's work runs one job at a time off the window's thread, with its
+    // own image cache, so the window stays responsive.
+    bool needAi();
+    void runAiSelect();
+    void setBusy(const QString &busy);
+    QString m_busy;
+    QString m_aiPrompt;
+    QString m_wandMode = "ai";
+    QList<QPointF> m_aiTake;
+    QList<QPointF> m_aiLeave;
+    int m_aiChoice = 0;
+    int m_aiChoices = 0;
+    bool m_aiAgain = false;
+    AssetCache m_aiAssets;
+    QFutureWatcher<void> m_aiJob;
+    ModelDownload m_download;
+    double m_downloadProgress = 0;
     QPointF m_dragStart;
     QPointF m_dragOrigin;
     bool m_dragging = false;

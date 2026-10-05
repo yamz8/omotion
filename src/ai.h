@@ -35,6 +35,10 @@ public:
     // Empty when the AI is ready; otherwise what's missing, in words.
     QString problem();
     bool runtimeLoaded();
+    // Whether the runtime itself is what's missing (rather than the models).
+    bool runtimeMissing();
+    // Looks for the runtime again next time, say after it's been installed.
+    void retry();
 
     // Relative depth for a picture, larger nearer, as a 16-bit grey image at
     // the size the model worked at (around 518 pixels on the short side).

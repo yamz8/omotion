@@ -196,6 +196,8 @@ bool Ai::load(QString *error) {
     return false;
 }
 bool Ai::runtimeLoaded() { return false; }
+bool Ai::runtimeMissing() { return true; }
+void Ai::retry() {}
 QString Ai::problem() {
     QString error;
     load(&error);
@@ -364,6 +366,14 @@ bool Ai::load(QString *error) {
 bool Ai::runtimeLoaded() {
     QMutexLocker lock(&m_mutex);
     return load(nullptr);
+}
+
+bool Ai::runtimeMissing() { return !runtimeLoaded(); }
+
+void Ai::retry() {
+    QMutexLocker lock(&m_mutex);
+    if (!m_runtime)
+        m_tried = false;
 }
 
 QString Ai::problem() {

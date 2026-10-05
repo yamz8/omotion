@@ -66,8 +66,11 @@ Your original image is copied into the project and never touched.
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
-| `W` | Smart select: click a part to select the area of similar colour around it, Shift+click to add; `C` then fine-tunes its points |
-| Wheel / `T` | Smart select tolerance; it's picked for each click until you change it |
+| `D` | Split the picture into layers by depth (AI) |
+| `A` | Make a depth split move: a looping parallax camera |
+| `W` | Select: click a thing (AI), Shift+click adds, right-click leaves out; `C` then fine-tunes its points |
+| `M` | In `W`: switch between AI select and colour select |
+| `T` | In `W`: the AI's other guesses, or colour select's tolerance (also the mouse wheel) |
 | `C` | Cut tool: drag around a piece or click points, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
 | Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
@@ -86,6 +89,31 @@ Your original image is copied into the project and never touched.
 
 In the inspector, the ◆ beside a property means it's animated. Clicking ◇
 starts animating just that property at the playhead.
+
+## AI
+
+Two things are better with a little AI, which runs on your own computer:
+
+- **D splits a picture into layers by depth**: near, middle, far, and what's
+  left as the background. Each layer carries a filled-in background behind
+  the ones in front of it, so nothing opens up when they move apart. **A**
+  then makes it move: a slow camera drift and push-in, where nearer layers
+  slide further, looping.
+- **W selects things with AI**: click the thing, Shift+click to add more of
+  it, right-click to leave a part out; **T** steps through its guesses (a
+  part, the thing, the whole). **M** switches to colour select.
+
+It needs ONNX Runtime (`omarchy-pkg-add onnxruntime-cpu`) and two models,
+which omotion offers to download the first time (about 145 MB, checked
+against known hashes, kept in `~/.local/share/omotion/models`):
+
+| Model | For | License |
+| --- | --- | --- |
+| [Depth Anything V2 Small](https://huggingface.co/onnx-community/depth-anything-v2-small) | depth | Apache-2.0 |
+| [MobileSAM](https://huggingface.co/Acly/MobileSAM) | selecting | MIT |
+
+Without them, everything else works as before, and omotion says what's
+missing when you ask for an AI feature.
 
 ## The project folder
 
@@ -138,9 +166,11 @@ photo.omotion/
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
 - **`cut`** on a piece remembers how it was made: the layer it came `from`,
-  its `polygon` and `feather` in that layer's image pixels, whether it
-  `punch`ed a hole and whether that hole is `fill`ed, and its `order` among
-  that layer's pieces. **`uncut`**
+  its `polygon` (or for depth layers, a `mask` image placed at
+  `maskOrigin`) and `feather` in that layer's image pixels, whether it
+  `punch`ed a hole and whether that hole is `fill`ed, its `order` among
+  that layer's pieces, and for depth layers its `depth` (0 far, 1 near),
+  which **A** moves it by. **`uncut`**
   on a layer that has holes is its image before any cuts. omotion redraws
   pieces and holes from these when one is reshaped; edit the polygon by
   hand and press `R` then `Enter` to apply it.
@@ -160,7 +190,12 @@ omotion frame photo.omotion 1.5 f.png     # one frame, to check a moment
 omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --soft 3 --name foreground
                                           # what the C tool does, with points in canvas pixels
 omotion cut photo.omotion photo --pick 316,703 --name deer
-                                          # what the W tool does: the thing under the point
+                                          # what colour select does: the area under the point
+omotion cut photo.omotion photo --ai-pick 316,703 --name deer
+                                          # what AI select does
+omotion split photo.omotion --layers 4 --animate
+                                          # D then A: depth layers, moving
+omotion models --download                 # fetch the AI models
 ```
 
 ## Building

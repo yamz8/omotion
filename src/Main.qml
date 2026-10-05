@@ -27,6 +27,7 @@ ApplicationWindow {
     property bool quitConfirmVisible: false
     // Editing shortcuts go quiet while an overlay is up.
     readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible
+                                  && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool hasLayer: ready && backend.selected >= 0
 
     function quit() {
@@ -56,6 +57,8 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: {
             if (win.quitConfirmVisible) win.quitConfirmVisible = false;
+            else if (backend.aiPrompt !== "") backend.dismissAiPrompt();
+            else if (backend.downloading) backend.cancelDownload();
             else if (win.helpVisible) win.helpVisible = false;
             else if (win.exportMenuVisible) win.exportMenuVisible = false;
             else if (backend.exporting) backend.cancelExport();
@@ -126,6 +129,10 @@ ApplicationWindow {
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.finishCut(false) }
     Shortcut { sequence: "W"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "wand" ? "move" : "wand") }
     Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "wand"; onActivated: backend.cycleTolerance() }
+    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "wand"; onActivated: backend.toggleWandMode() }
+    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.splitByDepth(4) }
+    Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.animateParallax() }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.aiPrompt !== ""; onActivated: backend.acceptAiPrompt() }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
 
     // ---- Layout ----------------------------------------------------------
@@ -163,6 +170,16 @@ ApplicationWindow {
                     text: backend.notice
                     color: win.muted
                     elide: Text.ElideRight
+                }
+                ProgressBar {
+                    visible: backend.downloading
+                    value: backend.downloadProgress
+                    Layout.preferredWidth: 140
+                }
+                Label {
+                    visible: backend.downloading
+                    text: "Downloading the AI models " + Math.round(backend.downloadProgress * 100) + "%  ·  Esc cancels"
+                    color: win.muted
                 }
                 ProgressBar {
                     visible: backend.exporting
@@ -236,7 +253,7 @@ ApplicationWindow {
 
                 MouseArea {
                     anchors.fill: parent
-                    enabled: backend.hasProject
+                    enabled: backend.hasProject && backend.busy === ""
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: backend.tool === "move" ? (pressed && backend.selected >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor) : Qt.CrossCursor
                     property bool dragging: false
@@ -266,7 +283,9 @@ ApplicationWindow {
                             return;
                         }
                         if (backend.tool === "wand") {
-                            if (mouse.button === Qt.LeftButton)
+                            if (mouse.button === Qt.RightButton)
+                                backend.excludeAt(p.x, p.y);
+                            else
                                 backend.smartSelect(p.x, p.y, (mouse.modifiers & Qt.ShiftModifier) !== 0);
                             return;
                         }
@@ -323,6 +342,24 @@ ApplicationWindow {
                     }
                 }
 
+                // The AI at work.
+                Rectangle {
+                    anchors.centerIn: parent
+                    visible: backend.busy !== ""
+                    radius: 8
+                    color: "#e0141417"
+                    border.color: theme.accent
+                    width: busyRow.implicitWidth + 32
+                    height: busyRow.implicitHeight + 24
+                    Row {
+                        id: busyRow
+                        anchors.centerIn: parent
+                        spacing: 12
+                        BusyIndicator { running: parent.parent.visible; width: 28; height: 28 }
+                        Label { anchors.verticalCenter: parent.verticalCenter; text: backend.busy; color: win.text; font.pixelSize: 15 }
+                    }
+                }
+
                 // What the current tool wants next.
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -344,8 +381,14 @@ ApplicationWindow {
                         lineHeight: 1.3
                         text: backend.tool === "pivot"
                               ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
+                              : backend.tool === "wand" && backend.wandMode === "ai"
+                              ? "AI select: click a thing on " + (backend.values.name || "the layer") + " (Shift+click adds, right-click leaves out)"
+                                + (backend.aiChoices > 1 ? "   ·   T other guesses (" + (backend.aiChoice + 1) + " of " + backend.aiChoices + ")" : "")
+                                + "   ·   M colour select"
+                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off")
+                                + "   ·   Enter cut out   ·   Shift+Enter copy out   ·   Esc cancel"
                               : backend.tool === "wand"
-                              ? "Smart select: click a part of " + (backend.values.name || "the layer") + " (Shift+click adds)   ·   wheel or T: tolerance "
+                              ? "Colour select: click a part of " + (backend.values.name || "the layer") + " (Shift+click adds)   ·   M AI select   ·   wheel or T: tolerance "
                                 + (backend.tolerance < 0 ? (backend.cutPoints.length ? "auto, " + backend.usedTolerance : "auto") : backend.tolerance)
                                 + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off")
                                 + "   ·   Enter cut out   ·   Shift+Enter copy out   ·   Esc cancel"
@@ -506,6 +549,45 @@ ApplicationWindow {
             spacing: 12
             Label { anchors.horizontalCenter: parent.horizontalCenter; text: "An export is still running."; font.pixelSize: 20; color: win.text }
             Label { anchors.horizontalCenter: parent.horizontalCenter; text: "Q quits and cancels it   ·   Esc keeps going"; color: win.muted }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: backend.aiPrompt !== ""
+        color: "#c0000000"
+        MouseArea { anchors.fill: parent; onClicked: backend.dismissAiPrompt() }
+        Rectangle {
+            anchors.centerIn: parent
+            width: 520
+            height: promptColumn.implicitHeight + 44
+            radius: 10
+            color: win.panel
+            border.color: win.line
+            Column {
+                id: promptColumn
+                anchors.fill: parent
+                anchors.margins: 22
+                spacing: 10
+                Label {
+                    text: backend.aiPrompt === "download" ? "Download the AI models?" : "Install ONNX Runtime?"
+                    font.pixelSize: 20
+                    font.bold: true
+                    color: win.text
+                }
+                Label {
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    text: backend.aiPrompt === "download"
+                          ? "omotion's AI finds depth (Depth Anything V2 Small, Apache-2.0) and selects things (MobileSAM, MIT). "
+                            + "Their models are about 145 MB, from Hugging Face, checked against known hashes, and kept in ~/.local/share/omotion/models. "
+                            + "Everything runs on this computer."
+                          : "omotion's AI runs on ONNX Runtime (onnxruntime-cpu, from the Arch repositories). "
+                            + "It installs in a terminal, where you can enter your password."
+                }
+                Label { text: "Enter " + (backend.aiPrompt === "download" ? "downloads" : "installs") + "   ·   Esc not now"; color: theme.accent }
+            }
         }
     }
 
