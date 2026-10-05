@@ -375,7 +375,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("omotion");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion("0.2.0");
 
     const QStringList args = app.arguments();
     if (args.size() > 1 && (args.at(1) == "--help" || args.at(1) == "-h")) {

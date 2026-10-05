@@ -1,5 +1,5 @@
 pkgname=omotion
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Cut a picture into layers and animate it'
 arch=('x86_64' 'aarch64')
