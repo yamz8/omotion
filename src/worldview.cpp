@@ -77,6 +77,14 @@ void WorldSource::update() {
                                                                      {"opacity", place.opacity},
                                                                      {"visible", place.visible}});
         frame["places"] = places;
+        QVariantList shadows;
+        for (const World::Shadow &shadow : f.shadows)
+            shadows.append(QVariantMap{{"position", QVariant::fromValue(shadow.position)},
+                                       {"width", shadow.width},
+                                       {"length", shadow.length},
+                                       {"yaw", shadow.yaw},
+                                       {"opacity", shadow.opacity}});
+        frame["shadows"] = shadows;
     }
     m_frame = frame;
     emit frameChanged();

@@ -29,6 +29,27 @@ Item {
             clipFar: 5000
         }
 
+        // Shadows on the ground, under the layers (drawn before them).
+        Repeater3D {
+            model: view.frame.shadows || []
+            delegate: Model {
+                required property var modelData
+                source: "#Rectangle"
+                position: modelData.position
+                // The rectangle stands up facing the camera; laid flat on the
+                // ground, then turned as the piece is. It's 100 units square.
+                eulerRotation: Qt.vector3d(-90, -modelData.yaw, 0)
+                scale: Qt.vector3d(modelData.width / 100, modelData.length / 100, 1)
+                opacity: modelData.opacity
+                depthBias: -20
+                materials: DefaultMaterial {
+                    lighting: DefaultMaterial.NoLighting
+                    diffuseColor: "black"
+                    diffuseMap: Texture { source: "qrc:/shadow.png" }
+                }
+            }
+        }
+
         Repeater3D {
             model: view.source ? view.source.layers : []
             delegate: Node {

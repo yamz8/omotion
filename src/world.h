@@ -91,7 +91,17 @@ struct Placement {
     float opacity = 1;
     bool visible = true;
 };
+// A soft shadow on the ground under a shaped piece: darkest when it
+// touches, fainter and wider the higher it is.
+struct Shadow {
+    QVector3D position;  // On the ground, under it.
+    float width = 1;     // Across and along the footprint, in meters.
+    float length = 1;
+    float yaw = 0;       // Degrees, turned as the piece is.
+    float opacity = 0;
+};
 struct Frame {
+    QList<Shadow> shadows;
     QVector3D cameraPosition;
     QQuaternion cameraRotation;
     double fov = 40;  // Vertical, in degrees.

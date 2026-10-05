@@ -573,6 +573,27 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         // Turned and scaled about its pivot, then moved.
         place.position = centre + move - place.rotation.rotatedVector(centre * place.scale);
         frame.layers.append(place);
+
+        // Shaped pieces stand on the ground: a shadow under them.
+        if (layer.raw.value("shape").toObject().isEmpty() || !place.visible || place.opacity <= 0)
+            continue;
+        const Mesh body = mesh(scene, assets, index);
+        if (body.isNull())
+            continue;
+        const QVector3D at = centre + move;
+        const double ground = groundAt(scene, assets, at.x(), at.z());
+        if (std::isnan(ground))
+            continue;
+        const double lowest = at.y() - (centre.y() - body.minimum.y());
+        const double height = std::max(0.0, lowest - ground);
+        Shadow shadow;
+        shadow.position = QVector3D(at.x(), float(ground + .02), at.z());
+        const float spread = float(1 + .35 * height);
+        shadow.width = (body.maximum.x() - body.minimum.x()) * spread;
+        shadow.length = (body.maximum.z() - body.minimum.z()) * spread;
+        shadow.yaw = float(scene.value(layer, "yaw", t));
+        shadow.opacity = float(.75 * place.opacity / (1 + 1.2 * height * height));
+        frame.shadows.append(shadow);
     }
     return frame;
 }
