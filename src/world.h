@@ -70,8 +70,11 @@ QMatrix4x4 pictureToWorld(const Info &info);
 // point pushed out to its distance. Vertices are x, y, z, u, v floats;
 // indices are 32-bit triangles.
 struct Mesh {
+    // x, y, z, u, v; a shape adds its own colour (r, g, b, a) and how much
+    // of the picture it wears (1 where the picture saw it, 0 where not).
     QByteArray vertices;
     QByteArray indices;
+    int stride = 5;  // Floats a vertex.
     QVector3D minimum;
     QVector3D maximum;
     QVector3D pivot;  // Its anchor, in the world, where it turns.

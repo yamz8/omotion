@@ -80,8 +80,32 @@ Item {
                 scale: Qt.vector3d(size, size, size)
                 visible: place.visible !== false
 
+                // A shaped piece is solid: the picture where it was seen,
+                // its own colour elsewhere.
                 Model {
-                    geometry: WorldGeometry { source: view.source; layer: holder.modelData.layer }
+                    visible: !!holder.modelData.shaped
+                    geometry: holder.modelData.shaped ? shapeGeometry : null
+                    WorldGeometry { id: shapeGeometry; source: view.source; layer: holder.modelData.shaped ? holder.modelData.layer : -1 }
+                    materials: CustomMaterial {
+                        shadingMode: CustomMaterial.Unshaded
+                        cullMode: Material.NoCulling
+                        vertexShader: "qrc:/shape.vert"
+                        fragmentShader: "qrc:/shape.frag"
+                        property TextureInput picture: TextureInput {
+                            texture: Texture {
+                                source: holder.modelData.picture
+                                generateMipmaps: true
+                                mipFilter: Texture.Linear
+                                tilingModeHorizontal: Texture.ClampToEdge
+                                tilingModeVertical: Texture.ClampToEdge
+                            }
+                        }
+                    }
+                }
+
+                Model {
+                    visible: !holder.modelData.shaped
+                    geometry: WorldGeometry { source: view.source; layer: holder.modelData.shaped ? -1 : holder.modelData.layer }
                     opacity: holder.place.opacity === undefined ? 1 : holder.place.opacity
                     materials: DefaultMaterial {
                         lighting: DefaultMaterial.NoLighting

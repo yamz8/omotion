@@ -34,7 +34,9 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
             const Layer &layer = scene.layers.at(index);
             const QString path = QDir(directory).filePath(layer.source);
             const QString picture = QDir(directory).filePath(World::texture(scene, *m_assets, index));
-            layers.append(QVariantMap{{"layer", index}, {"picture", QUrl::fromLocalFile(picture)}});
+            layers.append(QVariantMap{{"layer", index},
+                                      {"picture", QUrl::fromLocalFile(picture)},
+                                      {"shaped", !layer.raw.value("shape").toObject().isEmpty()}});
             parts.append(QJsonArray{index, layer.source, layer.anchor.x(), layer.anchor.y(),
                                     QFileInfo(path).lastModified().toMSecsSinceEpoch()});
         }
@@ -157,10 +159,14 @@ void WorldGeometry::rebuild() {
         if (!mesh.isNull()) {
             setVertexData(mesh.vertices);
             setIndexData(mesh.indices);
-            setStride(5 * sizeof(float));
+            setStride(mesh.stride * sizeof(float));
             setPrimitiveType(PrimitiveType::Triangles);
             addAttribute(Attribute::PositionSemantic, 0, Attribute::F32Type);
             addAttribute(Attribute::TexCoord0Semantic, 3 * sizeof(float), Attribute::F32Type);
+            if (mesh.stride >= 11) {
+                addAttribute(Attribute::ColorSemantic, 5 * sizeof(float), Attribute::F32Type);
+                addAttribute(Attribute::TexCoord1Semantic, 9 * sizeof(float), Attribute::F32Type);
+            }
             addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
             setBounds(mesh.minimum, mesh.maximum);
         }

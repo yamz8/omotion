@@ -227,6 +227,7 @@ QVector3D planeNormal(const QList<QVector3D> &points, const QVector3D &centre) {
 // quarter turn about up faces it the way the cut-out shows it.
 struct StoredShape {
     std::vector<float> positions;
+    std::vector<float> colors;  // r, g, b a vertex; empty in old files.
     std::vector<quint32> triangles;
     int quarter = 0;
     bool isNull() const { return positions.empty(); }
@@ -243,15 +244,20 @@ StoredShape readShape(const QString &path) {
     if (!file.open(QIODevice::ReadOnly))
         return shape;
     const QByteArray bytes = file.readAll();
-    if (bytes.size() < 16 || !bytes.startsWith("OMSHAPE1"))
+    // Version 1: positions and triangles; 2 adds a colour for each vertex.
+    const bool coloured = bytes.startsWith("OMSHAPE2");
+    if (bytes.size() < 16 || (!bytes.startsWith("OMSHAPE1") && !coloured))
         return shape;
     const quint32 vertices = *reinterpret_cast<const quint32 *>(bytes.constData() + 8);
     const quint32 indices = *reinterpret_cast<const quint32 *>(bytes.constData() + 12);
-    if (bytes.size() != qsizetype(16 + vertices * 12 + indices * 4))
+    const qsizetype colourBytes = coloured ? qsizetype(vertices) * 12 : 0;
+    if (bytes.size() != qsizetype(16 + vertices * 12 + colourBytes + indices * 4))
         return shape;
     const float *p = reinterpret_cast<const float *>(bytes.constData() + 16);
     shape.positions.assign(p, p + vertices * 3);
-    const quint32 *t = reinterpret_cast<const quint32 *>(bytes.constData() + 16 + vertices * 12);
+    if (coloured)
+        shape.colors.assign(p + vertices * 3, p + vertices * 6);
+    const quint32 *t = reinterpret_cast<const quint32 *>(bytes.constData() + 16 + vertices * 12 + colourBytes);
     shape.triangles.assign(t, t + indices);
     cache.insert(key, shape);
     return shape;
@@ -481,19 +487,88 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     if (fit.valid) {
         const QMatrix4x4 toWorld = pictureToWorld(world);
         const size_t count = fit.model.positions.size() / 3;
+        std::vector<QVector3D> seen(count), normals(count);
+        for (size_t i = 0; i < count; ++i)
+            seen[i] = fit.place(&fit.model.positions[i * 3]);
+        // Held inside the cut-out's outline: from the picture's camera, a
+        // point of the shape that falls outside what the picture shows of it
+        // moves in to the nearest point that's inside, at its own distance,
+        // so at rest it covers just what the picture does.
+        {
+            double mipFactor = 1;
+            const QImage outline = assets.mip(layer.source, std::min(1.0, 512 / fit.size.width()), &mipFactor);
+            const int w = outline.width(), h = outline.height();
+            std::vector<qint32> nearest(size_t(w) * h, -1);
+            QList<qint32> queue;
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    if (qAlpha(outline.pixel(x, y)) > 128)
+                        nearest[size_t(y) * w + x] = y * w + x, queue.append(y * w + x);
+            // Spread outward from the inside: each pixel learns its nearest
+            // inside pixel from a neighbour that already knows one.
+            for (qsizetype q = 0; q < queue.size(); ++q) {
+                const int at = queue.at(q), x = at % w, y = at / w;
+                for (const auto [dx, dy] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h || nearest[size_t(ny) * w + nx] >= 0)
+                        continue;
+                    nearest[size_t(ny) * w + nx] = nearest[size_t(at)];
+                    queue.append(ny * w + nx);
+                }
+            }
+            const double toOutline = w / fit.size.width();
+            if (!queue.isEmpty())
+                for (QVector3D &p : seen) {
+                    const double px = picture.width() / 2.0 + world.focal * p.x() / p.z() - fit.offset.x();
+                    const double py = picture.height() / 2.0 + world.focal * p.y() / p.z() - fit.offset.y();
+                    const int ox = std::clamp(int(px * toOutline), 0, w - 1), oy = std::clamp(int(py * toOutline), 0, h - 1);
+                    const bool outside = px < 0 || py < 0 || px >= fit.size.width() || py >= fit.size.height() ||
+                                         qAlpha(outline.pixel(ox, oy)) <= 128;
+                    const qint32 in = nearest[size_t(oy) * w + ox];
+                    if (!outside || in < 0)
+                        continue;
+                    const double ix = (in % w + .5) / toOutline + fit.offset.x(), iy = (in / w + .5) / toOutline + fit.offset.y();
+                    p = QVector3D(float((ix - picture.width() / 2.0) * p.z() / world.focal),
+                                  float((iy - picture.height() / 2.0) * p.z() / world.focal), p.z());
+                }
+        }
+        for (size_t t = 0; t + 2 < fit.model.triangles.size(); t += 3) {
+            const quint32 a = fit.model.triangles[t], b = fit.model.triangles[t + 1], c = fit.model.triangles[t + 2];
+            const QVector3D n = QVector3D::crossProduct(seen[b] - seen[a], seen[c] - seen[a]);
+            normals[a] += n, normals[b] += n, normals[c] += n;
+        }
+        // What the picture saw of it: the side facing its camera, inside
+        // the cut-out. Sticking out past the cut-out but facing the camera
+        // would show at rest where the picture shows none of it: there it's
+        // see-through. Elsewhere it wears the shape's own colour.
+        double factor = 1;
+        const QImage cut = assets.mip(layer.source, std::min(1.0, 1024 / fit.size.width()), &factor);
+        const float cutScale = float(cut.width() / fit.size.width());
         Mesh mesh;
-        mesh.vertices.resize(qsizetype(count) * 5 * sizeof(float));
+        mesh.stride = 11;  // The last two are a texture coordinate: worn, and nothing.
+        mesh.vertices.resize(qsizetype(count) * mesh.stride * sizeof(float));
         float *v = reinterpret_cast<float *>(mesh.vertices.data());
         mesh.minimum = QVector3D(1e9f, 1e9f, 1e9f);
         mesh.maximum = -mesh.minimum;
         for (size_t i = 0; i < count; ++i) {
-            const QVector3D seen = fit.place(&fit.model.positions[i * 3]);
-            const QVector3D p = toWorld.map(seen);
-            const double px = picture.width() / 2.0 + world.focal * seen.x() / seen.z();
-            const double py = picture.height() / 2.0 + world.focal * seen.y() / seen.z();
+            const QVector3D p = toWorld.map(seen[i]);
+            const double px = picture.width() / 2.0 + world.focal * seen[i].x() / seen[i].z();
+            const double py = picture.height() / 2.0 + world.focal * seen[i].y() / seen[i].z();
+            const double u = (px - fit.offset.x()) / fit.size.width(), w = (py - fit.offset.y()) / fit.size.height();
+            const double facing = -QVector3D::dotProduct(normals[i].normalized(), seen[i].normalized());
+            const int cx = int((px - fit.offset.x()) * cutScale), cy = int((py - fit.offset.y()) * cutScale);
+            const bool inside = cx >= 0 && cy >= 0 && cx < cut.width() && cy < cut.height() && qAlpha(cut.pixel(cx, cy)) > 128;
+            const float worn = float(std::clamp((facing - .1) / .3, 0.0, 1.0)) * (inside ? 1.f : 0.f);
+            const float alpha = facing > .1 && !inside ? 0.f : 1.f;
             *v++ = p.x(), *v++ = p.y(), *v++ = p.z();
-            *v++ = float((px - fit.offset.x()) / fit.size.width());
-            *v++ = float(1 - (py - fit.offset.y()) / fit.size.height());
+            *v++ = float(u), *v++ = float(1 - w);
+            if (fit.model.colors.size() == fit.model.positions.size())
+                *v++ = fit.model.colors[i * 3], *v++ = fit.model.colors[i * 3 + 1], *v++ = fit.model.colors[i * 3 + 2];
+            else
+                *v++ = .5f, *v++ = .5f, *v++ = .5f;
+            *v++ = alpha;
+            *v++ = worn;
+            *v++ = 0;
             mesh.minimum = QVector3D(std::min(mesh.minimum.x(), p.x()), std::min(mesh.minimum.y(), p.y()), std::min(mesh.minimum.z(), p.z()));
             mesh.maximum = QVector3D(std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()), std::max(mesh.maximum.z(), p.z()));
         }
@@ -868,13 +943,14 @@ double heading(const Scene &scene, AssetCache &assets, int index) {
         // The long axis of its footprint: the main direction its points
         // spread in across the ground.
         const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
-        const size_t count = size_t(shape.vertices.size()) / (5 * sizeof(float));
+        const int k = shape.stride;
+        const size_t count = size_t(shape.vertices.size()) / (k * sizeof(float));
         double sxx = 0, szz = 0, sxz = 0, mx = 0, mz = 0;
         for (size_t i = 0; i < count; ++i)
-            mx += v[i * 5], mz += v[i * 5 + 2];
+            mx += v[i * k], mz += v[i * k + 2];
         mx /= count, mz /= count;
         for (size_t i = 0; i < count; ++i) {
-            const double dx = v[i * 5] - mx, dz = v[i * 5 + 2] - mz;
+            const double dx = v[i * k] - mx, dz = v[i * k + 2] - mz;
             sxx += dx * dx, szz += dz * dz, sxz += dx * dz;
         }
         const double angle = .5 * std::atan2(2 * sxz, sxx - szz);
@@ -1109,11 +1185,14 @@ bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
     const QDir dir(assets.directory());
     dir.mkpath("assets/world");
     const QString file = "assets/world/" + QFileInfo(scene.layers.at(index).source).completeBaseName() + "-shape.bin";
-    QByteArray bytes("OMSHAPE1");
+    QByteArray bytes("OMSHAPE2");
     const quint32 vertices = quint32(shape.positions.size() / 3), indices = quint32(shape.triangles.size());
     bytes.append(reinterpret_cast<const char *>(&vertices), 4);
     bytes.append(reinterpret_cast<const char *>(&indices), 4);
     bytes.append(reinterpret_cast<const char *>(shape.positions.data()), qsizetype(shape.positions.size() * 4));
+    std::vector<float> colors = shape.colors;
+    colors.resize(shape.positions.size(), .5f);
+    bytes.append(reinterpret_cast<const char *>(colors.data()), qsizetype(colors.size() * 4));
     bytes.append(reinterpret_cast<const char *>(shape.triangles.data()), qsizetype(shape.triangles.size() * 4));
     QSaveFile out(dir.filePath(file));
     if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit())

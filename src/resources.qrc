@@ -9,5 +9,7 @@
         <file alias="puff.png">puff.png</file>
         <file alias="dust.vert">dust.vert</file>
         <file alias="dust.frag">dust.frag</file>
+        <file alias="shape.vert">shape.vert</file>
+        <file alias="shape.frag">shape.frag</file>
     </qresource>
 </RCC>
