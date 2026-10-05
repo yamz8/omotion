@@ -1020,10 +1020,11 @@ namespace {
 // from where it was in the image to where the pins take it.
 void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double t, const QImage &image,
               double factor, int margin, const QSizeF &size, const QTransform &toOutput) {
-    // Finer for bigger drawings: about a triangle side every 24 output pixels.
+    // Finer for bigger drawings: about a triangle side every 40 output
+    // pixels, which bends smoothly and keeps a frame quick.
     const double drawn = std::max(size.width(), size.height()) *
                          std::max(std::hypot(toOutput.m11(), toOutput.m12()), std::hypot(toOutput.m21(), toOutput.m22()));
-    const int cells = std::clamp(int(drawn / 24), 6, 48);
+    const int cells = std::clamp(int(drawn / 40), 6, 32);
     const double cw = size.width() / cells, ch = size.height() / cells;
     QList<QPointF> to((cells + 1) * (cells + 1));
     for (int y = 0; y <= cells; ++y)
