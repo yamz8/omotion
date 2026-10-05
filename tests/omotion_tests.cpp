@@ -914,6 +914,50 @@ private slots:
         QCOMPARE(layerAt(onlySnow, assets, 0, QPointF(100, 50)), -1);
     }
 
+    void pinsBendRigidly() {
+        Scene scene;
+        Layer layer;
+        layer.pins = {QPointF(0, 0), QPointF(0, 100)};
+        scene.layers.append(layer);
+        // Unmoved pins leave everything where it is.
+        QVERIFY(QLineF(bend(scene, layer, QPointF(30, 40), 0), QPointF(30, 40)).length() < 1e-6);
+        QVERIFY(!isBent(scene, layer, 0));
+        // Both pins moved together carry the image along.
+        layer.base["pin0x"] = 10;
+        layer.base["pin1x"] = 10;
+        QVERIFY(QLineF(bend(scene, layer, QPointF(30, 40), 0), QPointF(40, 40)).length() < 1e-6);
+        // Swing the bottom pin round a quarter turn: the image turns, and
+        // keeps its size (a point 50 below the top stays 50 from it).
+        layer.base["pin0x"] = 0;
+        layer.base["pin1x"] = 100;
+        layer.base["pin1y"] = -100;
+        QVERIFY(isBent(scene, layer, 0));
+        const QPointF middle = bend(scene, layer, QPointF(0, 50), 0);
+        QVERIFY2(qAbs(QLineF(middle, QPointF(0, 0)).length() - 50) < 1, qPrintable(QString("%1,%2").arg(middle.x()).arg(middle.y())));
+        QCOMPARE(bend(scene, layer, QPointF(0, 100), 0), QPointF(100, 0));  // A pin goes exactly where it's put.
+        // One pin just carries it.
+        Layer single;
+        single.pins = {QPointF(5, 5)};
+        single.base["pin0y"] = 7;
+        QCOMPARE(bend(scene, single, QPointF(50, 50), 0), QPointF(50, 57));
+    }
+
+    void pinsGoThroughJson() {
+        QString error;
+        const Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "arm", "source": "a.png",
+            "pins": [[0, 0], [0, 100]], "pin1x": 20, "keys": {"pin1y": [{"t": 0, "v": 0}, {"t": 1, "v": -30}]}}]})").object(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(scene.layers[0].pins.size(), 2);
+        QCOMPARE(scene.value(scene.layers[0], "pin1x", 0), 20.0);
+        QCOMPARE(scene.value(scene.layers[0], "pin1y", 1), -30.0);
+        const QJsonObject out = scene.toJson()["layers"].toArray()[0].toObject();
+        QCOMPARE(out["pin1x"].toDouble(), 20.0);
+        QVERIFY(!out.contains("pin0x"));  // Zero offsets aren't written.
+        Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "arm", "source": "a.png", "pins": [[0, 0]],
+            "keys": {"pin3x": [{"t": 0, "v": 1}]}}]})").object(), &error);
+        QVERIFY(error.contains("pin3x"));
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;
@@ -1611,6 +1655,37 @@ private slots:
         backend.applyMotion("nothing");
         QVERIFY(backend.error().contains("nothing"));
         Project::setMotionDirectory({});
+    }
+
+    void backendPinsAndBends() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));  // 200×100 at the canvas's own size.
+        backend.select(0);
+        backend.setTool("pin");
+        QCOMPARE(backend.addPinAt(20, 50), 0);
+        QCOMPARE(backend.addPinAt(180, 50), 1);
+        QCOMPARE(backend.addPinAt(500, 500), -1);  // Off the layer.
+        QCOMPARE(backend.pinPoints().size(), 2);
+        QCOMPARE(backend.pinNear(181, 51, 5), 1);
+        const QImage flat = renderFrame(backend.scene(), backend.assets(), 0);
+        backend.keyAll();  // Pins keyframe too.
+        QVERIFY(backend.scene().layers[0].keys.contains("pin1y"));
+        backend.seek(1);
+        backend.beginPinDrag(1, 180, 50);
+        backend.pinDragTo(180, 20);
+        backend.endPinDrag();
+        QCOMPARE(backend.scene().value(backend.scene().layers[0], "pin1y", 1), -30.0);
+        QCOMPARE(backend.scene().value(backend.scene().layers[0], "pin1y", 0), 0.0);
+        QVERIFY(differences(renderFrame(backend.scene(), backend.assets(), 1), flat) > 200);
+        QCOMPARE(differences(renderFrame(backend.scene(), backend.assets(), 0), flat), 0);  // Unbent, it's the same.
+        // Take the first pin away: the second becomes pin 0, keys and all.
+        backend.removePin(0);
+        QCOMPARE(backend.scene().layers[0].pins.size(), 1);
+        QCOMPARE(backend.scene().value(backend.scene().layers[0], "pin0y", 1), -30.0);
+        QVERIFY(!backend.scene().layers[0].keys.contains("pin1y"));
+        backend.undo();
+        QCOMPARE(backend.scene().layers[0].pins.size(), 2);
     }
 
     void backendEditsTheCamera() {

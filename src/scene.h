@@ -52,6 +52,9 @@ struct Layer {
     // A particle layer has no image: rain, snow and the like, drawn from
     // these settings (see Scene::particleKinds). Empty for picture layers.
     QJsonObject particles;
+    // Puppet pins: points on the image (in its pixels) that bend it. Pin n's
+    // offset is the properties "pin<n>x" and "pin<n>y", keyframed like any.
+    QList<QPointF> pins;
     QHash<QString, double> base;
     QMap<QString, QList<Key>> keys;
     QJsonObject raw;  // Everything as read, so unknown fields survive a save.
@@ -85,6 +88,10 @@ struct Scene {
     static const QStringList &eases();
     static const QStringList &blends();
     static double defaultValue(const QString &property);
+    // Whether a property names a puppet pin's offset that a layer has.
+    static bool isPinProperty(const Layer &layer, const QString &property);
+    // Every property a layer can animate: the usual ones, and its pins'.
+    static QStringList propertiesOf(const Layer &layer);
     static double ease(const QString &name, double progress);
     // Custom easing: "cubic(x1,y1,x2,y2)", a curve from (0,0) to (1,1) with
     // those two handles, as in CSS. y can go past 0..1, to overshoot.
@@ -192,6 +199,10 @@ QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, dou
 // the canvas, through the camera as this layer sees it.
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t);
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t);
+// Where a point of a pinned layer's image goes, bent by its pins at time t
+// (moving least squares, as rigid as can be); the point itself if unpinned.
+QPointF bend(const Scene &scene, const Layer &layer, const QPointF &point, double t);
+bool isBent(const Scene &scene, const Layer &layer, double t);
 // A particle layer's particles at time t, in world pixels.
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1);
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});

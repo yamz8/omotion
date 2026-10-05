@@ -26,6 +26,7 @@ Rectangle {
                     ["K", "Keyframe the camera"], ["Follow camera %", "In a layer's look: how much the camera moves it"]]],
         ["Animate", [["← → ↑ ↓", "Nudge 1px (Shift: 10px)"], ["[ ]", "Rotate 1° ({ }: 15°)"],
                      ["- =", "Scale down / up (or the mouse wheel; Shift+wheel turns)"], ["9 0", "Opacity down / up"],
+                     ["J", "Pins: click to pin, drag a pin to bend the layer, right-click to unpin"],
                      ["N", "A ready-made motion: sway, float, pulse, bounce, spin, fade in, or one you saved"],
                      ["Ctrl+Shift+S", "Save the animation as a motion, for any project"],
                      ["K", "Keyframe everything at the playhead"], ["Drag ◆", "Retime keyframes (Shift+click picks more)"],

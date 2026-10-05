@@ -113,6 +113,7 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.zoomBy(1.25, view.width / 2, view.height / 2) }
     Shortcut { sequence: "Ctrl+-"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.zoomBy(1 / 1.25, view.width / 2, view.height / 2) }
     Shortcut { sequence: "Ctrl+0"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.fit() }
+    Shortcut { sequence: "J"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setTool(backend.tool === "pin" ? "move" : "pin") }
     Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.showMotion = !backend.showMotion }
     Shortcut { sequence: "Ctrl+Shift+K"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.cleanUp() }
     Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
@@ -285,6 +286,7 @@ ApplicationWindow {
                     // In the cut tool: the point being dragged, or a lasso
                     // being drawn, and where it last dropped a point.
                     property int cutPoint: -1
+                    property int pinDrag: -1
                     hoverEnabled: backend.tool === "brush"
                     property bool lassoing: false
                     property point lassoAt
@@ -317,6 +319,16 @@ ApplicationWindow {
                             backend.beginBrush(p.x, p.y, mouse.button === Qt.RightButton);
                             return;
                         }
+                        if (backend.tool === "pin") {
+                            const near = backend.pinNear(p.x, p.y, 10 / view.zoom());
+                            if (mouse.button === Qt.RightButton) {
+                                if (near >= 0) backend.removePin(near);
+                                return;
+                            }
+                            pinDrag = near >= 0 ? near : backend.addPinAt(p.x, p.y);
+                            if (pinDrag >= 0) backend.beginPinDrag(pinDrag, p.x, p.y);
+                            return;
+                        }
                         if (backend.tool === "wand") {
                             if (mouse.button === Qt.RightButton)
                                 backend.excludeAt(p.x, p.y);
@@ -342,6 +354,11 @@ ApplicationWindow {
                         if (pressedButtons & Qt.MiddleButton) {
                             view.panBy(mouse.x - panFrom.x, mouse.y - panFrom.y);
                             panFrom = Qt.point(mouse.x, mouse.y);
+                            return;
+                        }
+                        if (pinDrag >= 0) {
+                            const q = view.toScene(mouse.x, mouse.y);
+                            backend.pinDragTo(q.x, q.y);
                             return;
                         }
                         if (backend.tool === "brush") {
@@ -371,6 +388,10 @@ ApplicationWindow {
                     onReleased: {
                         if (backend.tool === "brush")
                             backend.endBrush();
+                        if (pinDrag >= 0) {
+                            backend.endPinDrag();
+                            pinDrag = -1;
+                        }
                         if (dragging)
                             backend.endDrag();
                         dragging = false;
@@ -452,7 +473,9 @@ ApplicationWindow {
                         color: win.text
                         horizontalAlignment: Text.AlignHCenter
                         lineHeight: 1.3
-                        text: backend.tool === "brush"
+                        text: backend.tool === "pin"
+                              ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
+                              : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
                               : backend.tool === "pivot"
                               ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"

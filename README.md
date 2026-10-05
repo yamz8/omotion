@@ -47,7 +47,9 @@ layer it stands in, so it rides the camera move with its surroundings, and
    pulse, bounce or spin, which fit the scene so they loop with it, or a
    fade in from the playhead.
 4. Press **K** to set a keyframe, step ahead with **.**, change the layer
-   (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
+   (drag it, **[ ]** to rotate, **- =** to scale), and keep going. To bend
+   it instead, press **J**, click to pin it in a few places, and drag the
+   pins.
 5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
    to change how they ease into the next one, or drag the handles of the
    curve in the inspector to shape it yourself. **Ctrl+C** and **Ctrl+V**
@@ -87,6 +89,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `-` `=` | Scale down / up |
 | `9` `0` | Opacity down / up |
 | `Ctrl+Shift+S` | Save the layer's animation (or the picked keyframes) as a motion, for any layer in any project |
+| `J` | Pins: click the layer to pin it, drag a pin to bend it (an arm at the elbow, a tail), right-click to unpin; `K` keyframes the bend |
 | `N` | A ready-made motion for the layer: sway, float, pulse, bounce or spin (looping with the scene), or fade in |
 | `K` | Keyframe every property at the playhead |
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
@@ -190,6 +193,10 @@ photo.omotion/
   `brightness` (−1 to 1, default 0), `contrast` and `saturation` (1 is
   unchanged), `blur` and `glow` (in canvas pixels, default 0). A property is
   either a number or animated under `keys`; keys win.
+- **`pins`** bend a layer: points on its image (in its pixels), each with
+  an offset `pin<n>x` and `pin<n>y` (constant or keyed, like any property).
+  The image follows them as rigidly as it can, so a pin at the shoulder and
+  one at the hand bend an arm at the elbow.
 - **`audio`** is the scene's sound: its `source`, the `offset` in seconds
   into it where the scene starts, and `volume` (1 as it is).
 - **`particles`** makes a layer of rain, snow and the like instead of an

@@ -848,7 +848,7 @@ void Backend::endDrag() {
 }
 
 void Backend::setTool(const QString &tool) {
-    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush")
+    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin")
         return;
     if (tool != "brush") {
         m_brushPiece.clear();
@@ -860,7 +860,7 @@ void Backend::setTool(const QString &tool) {
         setNotice(tool == "cut" ? "Select the layer to cut a piece out of first." : "Select a layer first.");
         return;
     }
-    if ((tool == "cut" || tool == "wand" || tool == "brush") && !m_scene.layers.at(m_selected).particles.isEmpty()) {
+    if ((tool == "cut" || tool == "wand" || tool == "brush" || tool == "pin") && !m_scene.layers.at(m_selected).particles.isEmpty()) {
         setNotice("A particle layer has no picture to cut; select a picture layer.");
         return;
     }
@@ -1120,6 +1120,106 @@ void Backend::toggleWandMode() {
     m_cut.clear();
     emit toolChanged();
     setNotice(m_wandMode == "ai" ? "AI select: click a thing." : "Colour select: click an area of colour.");
+}
+
+QVariantList Backend::pinPoints() const {
+    QVariantList points;
+    if (m_selected < 0 || m_selected >= m_scene.layers.size())
+        return points;
+    const Layer &layer = m_scene.layers.at(m_selected);
+    if (layer.pins.isEmpty())
+        return points;
+    AssetCache &assets = const_cast<AssetCache &>(m_assets);
+    const QTransform toCanvas = layerTransform(m_scene, assets, m_selected, m_time);
+    for (const QPointF &pin : layer.pins)
+        points.append(toCanvas.map(bend(m_scene, layer, pin, m_time)));
+    return points;
+}
+
+int Backend::pinNear(double x, double y, double radius) const {
+    const QVariantList points = pinPoints();
+    int best = -1;
+    double bestDistance = radius;
+    for (int i = 0; i < points.size(); ++i) {
+        const double d = QLineF(points.at(i).toPointF(), QPointF(x, y)).length();
+        if (d <= bestDistance) {
+            best = i;
+            bestDistance = d;
+        }
+    }
+    return best;
+}
+
+int Backend::addPinAt(double x, double y) {
+    if (m_tool != "pin" || m_selected < 0)
+        return -1;
+    bool invertible = false;
+    const QTransform toImage = layerTransform(m_scene, m_assets, m_selected, m_time).inverted(&invertible);
+    if (!invertible)
+        return -1;
+    // Where on the image, as it is unbent: near enough while it's lightly bent.
+    const QPointF at = toImage.map(QPointF(x, y));
+    const QSizeF size = m_assets.size(m_scene.layers.at(m_selected).source);
+    if (!QRectF(QPointF(0, 0), size).contains(at)) {
+        setNotice("Pins go on the layer; click on it.");
+        return -1;
+    }
+    checkpoint();
+    m_scene.layers[m_selected].pins.append(at);
+    changed();
+    const int count = int(m_scene.layers.at(m_selected).pins.size());
+    setNotice(count == 1 ? "Pinned. Add another, then drag one to bend between them." : QString("%1 pins. Drag one to bend.").arg(count));
+    return count - 1;
+}
+
+void Backend::beginPinDrag(int pin, double x, double y) {
+    if (m_selected < 0 || pin < 0 || pin >= m_scene.layers.at(m_selected).pins.size())
+        return;
+    beginGesture();
+    const Layer &layer = m_scene.layers.at(m_selected);
+    m_pinDragging = pin;
+    m_pinDragStart = QPointF(x, y);
+    m_pinOffsetStart = QPointF(m_scene.value(layer, QString("pin%1x").arg(pin), m_time),
+                               m_scene.value(layer, QString("pin%1y").arg(pin), m_time));
+}
+
+void Backend::pinDragTo(double x, double y) {
+    if (m_pinDragging < 0 || m_selected < 0)
+        return;
+    // The mouse's movement, turned back into the image's own pixels.
+    bool invertible = false;
+    const QTransform toImage = layerTransform(m_scene, m_assets, m_selected, m_time).inverted(&invertible);
+    if (!invertible)
+        return;
+    const QPointF moved = toImage.map(QPointF(x, y)) - toImage.map(m_pinDragStart);
+    m_scene.setValue(m_selected, QString("pin%1x").arg(m_pinDragging), m_time, m_pinOffsetStart.x() + moved.x());
+    m_scene.setValue(m_selected, QString("pin%1y").arg(m_pinDragging), m_time, m_pinOffsetStart.y() + moved.y());
+    changed();
+}
+
+void Backend::endPinDrag() {
+    m_pinDragging = -1;
+    endGesture();
+}
+
+void Backend::removePin(int pin) {
+    if (m_selected < 0 || pin < 0 || pin >= m_scene.layers.at(m_selected).pins.size())
+        return;
+    checkpoint();
+    Layer &layer = m_scene.layers[m_selected];
+    layer.pins.removeAt(pin);
+    // The pins after it move down a number, and their offsets with them.
+    for (int i = pin; i <= layer.pins.size(); ++i)
+        for (const QString &axis : {QString("x"), QString("y")}) {
+            const QString from = QString("pin%1%2").arg(i + 1).arg(axis), to = QString("pin%1%2").arg(i).arg(axis);
+            layer.base.insert(to, layer.base.value(from, 0));
+            if (layer.keys.contains(from))
+                layer.keys.insert(to, layer.keys.take(from));
+            else
+                layer.keys.remove(to);
+            layer.base.remove(from);
+        }
+    changed();
 }
 
 void Backend::startBrush() {

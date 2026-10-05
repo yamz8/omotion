@@ -4,7 +4,9 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QJsonArray>
+#include <QLineF>
 #include <QPainter>
+#include <QPainterPath>
 #include <QRandomGenerator>
 #include <QRadialGradient>
 #include <QtMath>
@@ -12,6 +14,7 @@
 #include <QSet>
 #include <QVarLengthArray>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -69,6 +72,19 @@ QJsonObject Scene::particleDefaults(const QString &kind) {
 
 const QStringList &Scene::cameraProperties() {
     static const QStringList list{"x", "y", "zoom", "rotation"};
+    return list;
+}
+
+bool Scene::isPinProperty(const Layer &layer, const QString &property) {
+    static const QRegularExpression pin("^pin(\\d+)[xy]$");
+    const auto match = pin.match(property);
+    return match.hasMatch() && match.captured(1).toInt() < layer.pins.size();
+}
+
+QStringList Scene::propertiesOf(const Layer &layer) {
+    QStringList list = properties();
+    for (int i = 0; i < layer.pins.size(); ++i)
+        list << QString("pin%1x").arg(i) << QString("pin%1y").arg(i);
     return list;
 }
 
@@ -216,6 +232,11 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         layer.visible = object.value("visible").toBool(true);
         if (object.contains("follow"))
             layer.follow = object.value("follow").toDouble(1);
+        for (const QJsonValue &pin : object.value("pins").toArray()) {
+            const QJsonArray xy = pin.toArray();
+            if (xy.size() == 2)
+                layer.pins.append(QPointF(xy.at(0).toDouble(), xy.at(1).toDouble()));
+        }
         layer.blend = object.value("blend").toString("normal");
         if (!blends().contains(layer.blend))
             return fail(QString("Layer \"%1\" blends as \"%2\"; use one of %3.")
@@ -236,11 +257,14 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
 
         for (const QString &property : properties())
             layer.base.insert(property, object.value(property).toDouble(defaultValue(property)));
+        for (auto it = object.begin(); it != object.end(); ++it)
+            if (it.key().startsWith("pin"))
+                layer.base.insert(it.key(), it.value().toDouble());
 
         const QJsonObject keys = object.value("keys").toObject();
         for (auto it = keys.begin(); it != keys.end(); ++it) {
-            if (!properties().contains(it.key()))
-                return fail(QString("Layer \"%1\" animates \"%2\", which isn't a property (%3).")
+            if (!properties().contains(it.key()) && !isPinProperty(layer, it.key()))
+                return fail(QString("Layer \"%1\" animates \"%2\", which isn't a property (%3, or pin<n>x/y for its pins).")
                                 .arg(layer.name, it.key(), properties().join(", ")));
             QList<Key> list;
             for (const auto &entry : it.value().toArray()) {
@@ -332,6 +356,27 @@ QJsonObject Scene::toJson() const {
             object.remove("blend");
         else
             object.insert("blend", layer.blend);
+        if (layer.pins.isEmpty()) {
+            object.remove("pins");
+        } else {
+            QJsonArray pins;
+            for (const QPointF &pin : layer.pins)
+                pins.append(QJsonArray{std::round(pin.x() * 100) / 100, std::round(pin.y() * 100) / 100});
+            object.insert("pins", pins);
+        }
+        // Pin offsets: written for pins it has, dropped for ones it hasn't.
+        for (const QString &key : object.keys())
+            if (key.startsWith("pin") && key != "pins" && !isPinProperty(layer, key))
+                object.remove(key);
+        for (int i = 0; i < layer.pins.size(); ++i)
+            for (const QString &axis : {QString("x"), QString("y")}) {
+                const QString property = QString("pin%1%2").arg(i).arg(axis);
+                const double v = layer.base.value(property, 0);
+                if (v == 0)
+                    object.remove(property);
+                else
+                    object.insert(property, v);
+            }
         if (layer.particles.isEmpty())
             object.remove("particles");
         else
@@ -462,7 +507,7 @@ void Scene::setValue(int index, const QString &property, double t, double v) {
 }
 
 void Scene::keyProperty(int index, const QString &property, double t) {
-    if (!at(index) || !(index == CameraIndex ? cameraProperties() : properties()).contains(property))
+    if (!at(index) || !(index == CameraIndex ? cameraProperties() : propertiesOf(*at(index))).contains(property))
         return;
     const double v = value((*at(index)), property, t);
     Layer &layer = (*at(index));
@@ -480,7 +525,7 @@ void Scene::keyAll(int index, double t) {
             keyProperty(index, property, t);
         return;
     }
-    for (const QString &property : properties()) {
+    for (const QString &property : propertiesOf(*at(index))) {
         const Layer &layer = (*at(index));
         const bool used = layer.keys.contains(property) ||
                           layer.base.value(property, defaultValue(property)) != defaultValue(property);
@@ -918,6 +963,117 @@ QPainter::CompositionMode compositionFor(const QString &blend) {
 }
 }
 
+bool isBent(const Scene &scene, const Layer &layer, double t) {
+    for (int i = 0; i < layer.pins.size(); ++i)
+        if (scene.value(layer, QString("pin%1x").arg(i), t) != 0 || scene.value(layer, QString("pin%1y").arg(i), t) != 0)
+            return true;
+    return false;
+}
+
+QPointF bend(const Scene &scene, const Layer &layer, const QPointF &v, double t) {
+    const int n = int(layer.pins.size());
+    if (n == 0)
+        return v;
+    QList<QPointF> p, q;
+    for (int i = 0; i < n; ++i) {
+        p.append(layer.pins.at(i));
+        q.append(layer.pins.at(i) + QPointF(scene.value(layer, QString("pin%1x").arg(i), t),
+                                             scene.value(layer, QString("pin%1y").arg(i), t)));
+    }
+    if (n == 1)
+        return v + (q[0] - p[0]);  // One pin just carries the image along.
+    // Moving least squares (Schaefer, McPhail and Warren): each point moves
+    // as rigidly as it can to follow the pins, the nearer ones most.
+    QList<double> w(n);
+    double total = 0;
+    QPointF pStar, qStar;
+    for (int i = 0; i < n; ++i) {
+        const QPointF d = p[i] - v;
+        const double distance = QPointF::dotProduct(d, d);
+        if (distance < 1e-9)
+            return q[i];
+        w[i] = 1 / distance;
+        total += w[i];
+        pStar += w[i] * p[i];
+        qStar += w[i] * q[i];
+    }
+    pStar /= total;
+    qStar /= total;
+    const QPointF d = v - pStar;
+    QPointF bent(0, 0);
+    for (int i = 0; i < n; ++i) {
+        const QPointF a = p[i] - pStar, b = q[i] - qStar;
+        // b · A_i, with A_i = w_i [a; -a⊥] [d; -d⊥]ᵀ and x⊥ = (-y, x).
+        const double m11 = a.x() * d.x() + a.y() * d.y(), m12 = a.x() * d.y() - a.y() * d.x();
+        const double m21 = a.y() * d.x() - a.x() * d.y(), m22 = a.y() * d.y() + a.x() * d.x();
+        bent += w[i] * QPointF(b.x() * m11 + b.y() * m21, b.x() * m12 + b.y() * m22);
+    }
+    const double length = std::hypot(bent.x(), bent.y());
+    if (length < 1e-9)
+        return v + (qStar - pStar);
+    return qStar + bent * (std::hypot(d.x(), d.y()) / length);
+}
+
+namespace {
+
+// Draws a pinned layer's image bent: a mesh of small triangles, each mapped
+// from where it was in the image to where the pins take it.
+void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double t, const QImage &image,
+              double factor, int margin, const QSizeF &size, const QTransform &toOutput) {
+    // Finer for bigger drawings: about a triangle side every 24 output pixels.
+    const double drawn = std::max(size.width(), size.height()) *
+                         std::max(std::hypot(toOutput.m11(), toOutput.m12()), std::hypot(toOutput.m21(), toOutput.m22()));
+    const int cells = std::clamp(int(drawn / 24), 6, 48);
+    const double cw = size.width() / cells, ch = size.height() / cells;
+    QList<QPointF> to((cells + 1) * (cells + 1));
+    for (int y = 0; y <= cells; ++y)
+        for (int x = 0; x <= cells; ++x)
+            to[y * (cells + 1) + x] = bend(scene, layer, QPointF(x * cw, y * ch), t);
+    auto copyAt = [&](const QPointF &p) { return p * factor + QPointF(margin, margin); };
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    for (int y = 0; y < cells; ++y)
+        for (int x = 0; x < cells; ++x) {
+            const int i = y * (cells + 1) + x;
+            const QPointF source[4] = {QPointF(x * cw, y * ch), QPointF((x + 1) * cw, y * ch),
+                                       QPointF((x + 1) * cw, (y + 1) * ch), QPointF(x * cw, (y + 1) * ch)};
+            const QPointF target[4] = {to[i], to[i + 1], to[i + cells + 2], to[i + cells + 1]};
+            for (const auto &tri : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
+                QPolygonF from, into;
+                for (int k : tri) {
+                    from << copyAt(source[k]);
+                    into << target[k];
+                }
+                // Three points fix the map from the image to where it's bent to.
+                const QPointF u = from[1] - from[0], v = from[2] - from[0];
+                const QPointF U = into[1] - into[0], V = into[2] - into[0];
+                const double det = u.x() * v.y() - u.y() * v.x();
+                if (std::abs(det) < 1e-12)
+                    continue;
+                const QTransform linear((U.x() * v.y() - V.x() * u.y()) / det, (U.y() * v.y() - V.y() * u.y()) / det,
+                                        (V.x() * u.x() - U.x() * v.x()) / det, (V.y() * u.x() - U.y() * v.x()) / det, 0, 0);
+                const QTransform map = QTransform::fromTranslate(-from[0].x(), -from[0].y()) * linear *
+                                       QTransform::fromTranslate(into[0].x(), into[0].y());
+                // A hair bigger than the triangle, so neighbours meet without seams.
+                const QPointF middle = (from[0] + from[1] + from[2]) / 3;
+                QPolygonF clip;
+                for (const QPointF &corner : from)
+                    clip << corner + (corner - middle) * (1.2 / std::max(1.0, QLineF(corner, middle).length()));
+                painter.save();
+                painter.setTransform(map * toOutput);
+                QPainterPath path;
+                path.addPolygon(clip);
+                painter.setClipPath(path, Qt::IntersectClip);  // Within the canvas still.
+                const QRectF bounds = clip.boundingRect().adjusted(-1, -1, 1, 1) & QRectF(image.rect());
+                painter.drawImage(bounds, image, bounds);
+                painter.restore();
+            }
+        }
+    painter.restore();
+}
+
+}
+
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow) {
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
@@ -1093,11 +1249,20 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
             margin = look.margin;
         }
 
+        painter.setOpacity(opacity);
+        painter.setCompositionMode(compositionFor(layer.blend));
+        if (!layer.pins.isEmpty() && isBent(scene, layer, t)) {
+            const QSizeF size = assets.size(layer.source);
+            drawBent(painter, scene, layer, t, image, factor, margin, size, toOutput);
+            if (!glow.isNull()) {
+                painter.setCompositionMode(QPainter::CompositionMode_Screen);
+                drawBent(painter, scene, layer, t, glow, factor, margin, size, toOutput);
+            }
+            continue;
+        }
         // The copy is drawn back up to the image's full size, less its padding.
         const QTransform fromCopy(1 / factor, 0, 0, 1 / factor, -margin / factor, -margin / factor);
         painter.setTransform(fromCopy * toOutput);
-        painter.setOpacity(opacity);
-        painter.setCompositionMode(compositionFor(layer.blend));
         painter.drawImage(QPointF(0, 0), image);
         if (!glow.isNull()) {
             painter.setCompositionMode(QPainter::CompositionMode_Screen);

@@ -48,6 +48,8 @@ class Backend : public QObject {
     Q_PROPERTY(int tolerance READ tolerance NOTIFY toolChanged)
     Q_PROPERTY(int usedTolerance READ usedTolerance NOTIFY toolChanged)
     Q_PROPERTY(double brushRadius READ brushRadius NOTIFY toolChanged)
+    // The selected layer's puppet pins where they are now, on the canvas.
+    Q_PROPERTY(QVariantList pinPoints READ pinPoints NOTIFY valuesChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
@@ -95,6 +97,7 @@ public:
     int tolerance() const { return m_tolerance; }
     int usedTolerance() const { return m_usedTolerance; }
     double brushRadius() const { return m_brushRadius; }
+    QVariantList pinPoints() const;
     // The shape being painted, small, for the canvas to show, and where it goes.
     QImage brushPreview() const { return m_brushPreview; }
     QTransform brushPreviewToCanvas() const;
@@ -212,6 +215,15 @@ public:
     Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
+    // Puppet pins (the "pin" tool): add one on the selected layer, find the
+    // one near a canvas point, drag one to bend the layer (keyframed when
+    // its pin is animated), or take one away.
+    Q_INVOKABLE int addPinAt(double x, double y);
+    Q_INVOKABLE int pinNear(double x, double y, double radius) const;
+    Q_INVOKABLE void beginPinDrag(int pin, double x, double y);
+    Q_INVOKABLE void pinDragTo(double x, double y);
+    Q_INVOKABLE void endPinDrag();
+    Q_INVOKABLE void removePin(int pin);
     // The brush: paints the selected piece's shape (drag to add, with erase
     // to take away), applied with finishBrush. Works on outlines and masks.
     Q_INVOKABLE void startBrush();
@@ -349,6 +361,9 @@ private:
     QList<QImage> m_seedLevels;
     void reselect();
 
+    int m_pinDragging = -1;
+    QPointF m_pinDragStart;
+    QPointF m_pinOffsetStart;
     QString m_brushPiece;
     QImage m_brushMask;     // Alpha8, the source image's size.
     QImage m_brushPreview;  // ARGB, small, white where the shape is.

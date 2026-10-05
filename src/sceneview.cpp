@@ -29,6 +29,7 @@ void SceneView::setBackend(Backend *backend) {
         connect(m_backend, &Backend::toolChanged, this, repaint);
         connect(m_backend, &Backend::playingChanged, this, repaint);
         connect(m_backend, &Backend::showMotionChanged, this, repaint);
+        connect(m_backend, &Backend::valuesChanged, this, repaint);
         // A new project starts fitted in the window.
         connect(m_backend, &Backend::projectChanged, this, &SceneView::fit);
     }
@@ -220,6 +221,17 @@ void SceneView::paint(QPainter *painter) {
         painter->setOpacity(.45);
         painter->drawImage(QPointF(0, 0), tinted);
         painter->restore();
+    }
+
+    // Puppet pins, where they've bent to.
+    if (m_backend->tool() == "pin") {
+        painter->setPen(QPen(QColor("#0e0e10"), 2));
+        painter->setBrush(m_accent);
+        for (const QVariant &point : m_backend->pinPoints()) {
+            const QPointF at = view.map(point.toPointF());
+            painter->drawEllipse(at, 6, 6);
+            painter->drawEllipse(at, 2, 2);
+        }
     }
 
     const QList<QPointF> cut = m_backend->cutPolygon();
