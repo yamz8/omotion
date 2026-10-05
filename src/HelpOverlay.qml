@@ -26,7 +26,7 @@ Rectangle {
                      ["X", "Remove the picked keyframes, or those at the playhead"],
                      ["E", "Change their easing"], ["Ctrl+C Ctrl+V", "Copy them, paste at the playhead on any layer"]]],
         ["Break apart", [["C", "Cut tool: drag around a piece, or click points"], ["Drag a point", "Move it (click an edge to add one)"],
-                         ["Right-click", "Remove a point"], ["F", "Soft edge: 0, 1, 3, 8, 20 px"],
+                         ["Right-click", "Remove a point"], ["F", "Soft edge: 0, 1, 3, 8, 20 px"], ["G", "Fill the hole it leaves: on / off"],
                          ["Enter", "Cut it out, leaving a hole"], ["Shift+Enter", "Copy it out, leaving the source whole"],
                          ["R", "Reshape the selected piece"], ["P", "Pivot tool: click where the layer turns"],
                          ["Esc", "Cancel / deselect"]]]

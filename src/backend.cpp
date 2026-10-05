@@ -665,6 +665,7 @@ void Backend::setTool(const QString &tool) {
     m_tool = tool;
     m_cut.clear();
     m_reshaping.clear();
+    m_fill = true;
     emit toolChanged();
 }
 
@@ -675,7 +676,8 @@ void Backend::startReshape() {
         return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.")
                              .arg(m_scene.layers.at(m_selected).name));
     double feather = 0;
-    const QPolygonF outline = Project::cutOutline(m_scene, m_assets, m_selected, m_time, &feather);
+    bool fill = false;
+    const QPolygonF outline = Project::cutOutline(m_scene, m_assets, m_selected, m_time, &feather, &fill);
     if (outline.isEmpty())
         return setError(QString("The layer %1 was cut from is gone, so it can't be reshaped.")
                             .arg(m_scene.layers.at(m_selected).name));
@@ -685,6 +687,12 @@ void Backend::startReshape() {
     m_cut = outline;
     m_reshaping = m_scene.layers.at(m_selected).name;
     m_feather = std::round(feather * 10) / 10;
+    m_fill = fill;
+    emit toolChanged();
+}
+
+void Backend::toggleFill() {
+    m_fill = !m_fill;
     emit toolChanged();
 }
 
@@ -771,10 +779,11 @@ void Backend::finishCut(bool punch) {
     int index = -1;
     if (!m_reshaping.isEmpty()) {
         index = scene.indexOf(m_reshaping);
-        if (!Project::reshapeCut(scene, m_assets, index, QPolygonF(m_cut), m_time, m_feather, &error))
+        if (!Project::reshapeCut(scene, m_assets, index, QPolygonF(m_cut), m_time, m_feather, &error, m_fill ? 1 : 0))
             return setError(error);
     } else {
-        index = Project::cutOut(scene, m_assets, m_selected, QPolygonF(m_cut), m_time, punch, &error, {}, m_feather);
+        index = Project::cutOut(scene, m_assets, m_selected, QPolygonF(m_cut), m_time, punch, &error, {}, m_feather,
+                                m_fill);
         if (index < 0)
             return setError(error);
     }

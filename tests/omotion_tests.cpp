@@ -1,4 +1,6 @@
 #include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QLinearGradient>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -236,7 +238,7 @@ private slots:
 
         QString error;
         const QPolygonF square{{5, 5}, {80, 5}, {80, 60}, {5, 60}};
-        const int piece = Project::cutOut(scene, assets, 0, square, 0, true, &error);
+        const int piece = Project::cutOut(scene, assets, 0, square, 0, true, &error, {}, 0, false);
         QVERIFY2(piece == 1, qPrintable(error));
         QCOMPARE(scene.layers[1].parent, scene.layers[0].name);
         QVERIFY(scene.layers[0].source != "assets/p.png");  // The hole is a new file...
@@ -286,7 +288,7 @@ private slots:
         const QImage before = renderFrame(scene, assets, 0);
         QString error;
         const QPolygonF square{{20, 20}, {90, 20}, {90, 70}, {20, 70}};
-        QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, true, &error, "soft", 8), 1);
+        QCOMPARE(Project::cutOut(scene, assets, 0, square, 0, true, &error, "soft", 8, false), 1);
         QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
 
         // The piece fades out across its edge...
@@ -336,8 +338,8 @@ private slots:
         AssetCache assets(project);
         const QImage before = renderFrame(scene, assets, 0);
         QString error;
-        QCOMPARE(Project::cutOut(scene, assets, 0, {{10, 10}, {60, 10}, {60, 50}, {10, 50}}, 0, true, &error, "a"), 1);
-        QCOMPARE(Project::cutOut(scene, assets, 0, {{120, 50}, {170, 50}, {170, 80}, {120, 80}}, 0, true, &error, "b"), 1);
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{10, 10}, {60, 10}, {60, 50}, {10, 50}}, 0, true, &error, "a", 0, false), 1);
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{120, 50}, {170, 50}, {170, 80}, {120, 80}}, 0, true, &error, "b", 0, false), 1);
         QVERIFY(Project::reshapeCut(scene, assets, scene.indexOf("a"), {{10, 10}, {40, 10}, {40, 40}, {10, 40}}, 0, 3, &error));
         const QImage holed = assets.image(scene.layers[0].source);
         QCOMPARE(qAlpha(holed.pixel(150, 65)), 0);   // b's hole is still there.
@@ -353,9 +355,9 @@ private slots:
         AssetCache assets(project);
         const QImage before = renderFrame(scene, assets, 0);
         QString error;
-        Project::cutOut(scene, assets, 0, {{5, 5}, {90, 5}, {90, 70}, {5, 70}}, 0, true, &error, "arm");
+        Project::cutOut(scene, assets, 0, {{5, 5}, {90, 5}, {90, 70}, {5, 70}}, 0, true, &error, "arm", 0, false);
         QVERIFY(Project::cutOut(scene, assets, scene.indexOf("arm"), {{15, 15}, {40, 15}, {40, 40}, {15, 40}}, 0, true,
-                                &error, "hand") > 0);
+                                &error, "hand", 0, false) > 0);
         QVERIFY2(Project::reshapeCut(scene, assets, scene.indexOf("arm"), {{5, 5}, {110, 5}, {110, 80}, {5, 80}}, 0, 2, &error),
                  qPrintable(error));
         QCOMPARE(differences(renderFrame(scene, assets, 0), before), 0);
@@ -517,6 +519,62 @@ private slots:
         QCOMPARE(copy.blend, QString("add"));
         QVERIFY(!Project::isCut(backend.scene(), 2));
         QVERIFY(Project::isCut(backend.scene(), 1));
+    }
+
+    void filledHolesTakeTheColoursAround() {
+        QTemporaryDir dir;
+        // Left half one colour, right half another, with a red square on the seam.
+        QImage picture(200, 100, QImage::Format_ARGB32);
+        QPainter painter(&picture);
+        painter.fillRect(0, 0, 100, 100, QColor(0, 0, 200));
+        painter.fillRect(100, 0, 100, 100, QColor(0, 200, 0));
+        painter.fillRect(80, 30, 40, 40, QColor(255, 0, 0));
+        painter.end();
+        picture.save(dir.filePath("p.png"));
+        const QString project = Project::open(dir.filePath("p.png"), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{78, 28}, {122, 28}, {122, 72}, {78, 72}}, 0, true, &error, "red", 2), 1);
+        QVERIFY(scene.layers[1].raw["cut"].toObject()["fill"].toBool());
+        // Nothing shows until the piece moves, but a thin mix along the soft edge...
+        QVERIFY(differences(renderFrame(scene, assets, 0), before) < 4 * 44 * 4);
+        // ...and then the gap is the colours around it, no red, no see-through.
+        scene.layers[1].visible = false;
+        const QImage filled = renderFrame(scene, assets, 0);
+        const QColor left = filled.pixelColor(85, 50), right = filled.pixelColor(115, 50);
+        QCOMPARE(left.alpha(), 255);
+        QVERIFY(left.red() < 30 && left.blue() > left.green());
+        QVERIFY(right.red() < 30 && right.green() > right.blue());
+        // Reshaping can turn it off again.
+        QVERIFY(Project::reshapeCut(scene, assets, 1, {{78, 28}, {122, 28}, {122, 72}, {78, 72}}, 0, 2, &error, 0));
+        QCOMPARE(renderFrame(scene, assets, 0).pixelColor(100, 50), QColor(Qt::black));
+    }
+
+    void bigHolesFillQuicklyAtLowerResolution() {
+        QTemporaryDir dir;
+        QImage picture(3000, 2000, QImage::Format_ARGB32);
+        QPainter painter(&picture);
+        QLinearGradient gradient(0, 0, 3000, 0);
+        gradient.setColorAt(0, QColor(250, 0, 0));
+        gradient.setColorAt(1, QColor(0, 0, 250));
+        painter.fillRect(picture.rect(), gradient);
+        painter.end();
+        picture.save(dir.filePath("p.png"));
+        const QString project = Project::open(dir.filePath("p.png"), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QElapsedTimer timer;
+        timer.start();
+        QString error;
+        // A third of the canvas, which is 1920 wide.
+        QVERIFY(Project::cutOut(scene, assets, 0, {{640, 100}, {1280, 100}, {1280, 1100}, {640, 1100}}, 0, true, &error) > 0);
+        QVERIFY2(timer.elapsed() < 5000, qPrintable(QString::number(timer.elapsed())));
+        scene.layers[1].visible = false;
+        const QColor middle = renderFrame(scene, assets, 0).pixelColor(960, 600);
+        // Halfway along a red-to-blue gradient, the fill is a mix of both.
+        QVERIFY2(middle.red() > 80 && middle.blue() > 80, qPrintable(middle.name()));
     }
 
     void cuttingNothingFails() {

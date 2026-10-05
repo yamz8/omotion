@@ -121,6 +121,7 @@ ApplicationWindow {
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.cycleFeather() }
+    Shortcut { sequence: "G"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.toggleFill() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(true) }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.finishCut(false) }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
@@ -335,7 +336,7 @@ ApplicationWindow {
                               : (backend.reshaping !== ""
                                  ? "Reshape " + backend.reshaping + ": drag points, click an edge to add one, right-click one to remove it"
                                  : "Cut: drag around the piece, or click point by point (" + backend.cutPoints.length + " so far)")
-                                + "\nF soft edge: " + backend.feather + " px   ·   "
+                                + "\nF soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off") + "   ·   "
                                 + (backend.reshaping !== "" ? "Enter apply" : "Enter cut out   ·   Shift+Enter copy out")
                                 + "   ·   Backspace drops the last point   ·   Esc cancel"
                     }

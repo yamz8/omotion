@@ -11,6 +11,7 @@
 #include <QSaveFile>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace {
 
@@ -225,6 +226,153 @@ QImage maskFor(const QPolygonF &polygon, double feather, const QRect &area) {
     return mask;
 }
 
+// Fills the hole a punched piece left in image (straight ARGB) inside area,
+// from the pixels around it. before is area as it was before the punch; a
+// hole is wherever the alpha went down. Push-pull: the known colours are
+// averaged down a pyramid until they've flowed in from every side, then
+// pulled back up into the gaps, each level filling what the finer one
+// couldn't. Big holes are worked out smaller, as the fill is smooth anyway.
+void fillHole(QImage &image, const QImage &before, const QRect &area) {
+    QRect hole;
+    for (int y = 0; y < area.height(); ++y) {
+        const QRgb *now = reinterpret_cast<const QRgb *>(image.constScanLine(area.y() + y)) + area.x();
+        const QRgb *was = reinterpret_cast<const QRgb *>(before.constScanLine(y));
+        for (int x = 0; x < area.width(); ++x)
+            if (qAlpha(now[x]) < qAlpha(was[x]))
+                hole |= QRect(area.x() + x, area.y() + y, 1, 1);
+    }
+    if (hole.isEmpty())
+        return;
+
+    const int margin = std::max(16, std::max(hole.width(), hole.height()) / 2);
+    const QRect crop = hole.adjusted(-margin, -margin, margin, margin) & image.rect();
+    const double s = std::min(1.0, std::sqrt(2e6 / (double(crop.width()) * crop.height())));
+    const QSize work(std::max(1, int(crop.width() * s)), std::max(1, int(crop.height() * s)));
+
+    // What's known: everything around that isn't hole, weighted by alpha.
+    QImage holeMask(crop.size(), QImage::Format_Alpha8);
+    holeMask.fill(0);
+    for (int y = hole.top(); y <= hole.bottom(); ++y) {
+        const QRgb *now = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        uchar *maskLine = holeMask.scanLine(y - crop.y());
+        for (int x = hole.left(); x <= hole.right(); ++x) {
+            const QPoint inArea(x - area.x(), y - area.y());
+            if (area.contains(x, y) && qAlpha(now[x]) < qAlpha(before.pixel(inArea)))
+                maskLine[x - crop.x()] = 255;
+        }
+    }
+    QImage known = image.copy(crop).convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    if (work != crop.size()) {
+        known = known.scaled(work, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        holeMask = holeMask.scaled(work, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    struct Level {
+        int w, h;
+        std::vector<float> c, wt;  // Colour times weight (r, g, b), and weight.
+    };
+    std::vector<Level> levels;
+    levels.push_back({work.width(), work.height(), std::vector<float>(3 * work.width() * work.height()),
+                      std::vector<float>(work.width() * work.height())});
+    for (int y = 0; y < work.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(known.constScanLine(y));
+        const uchar *maskLine = holeMask.constScanLine(y);
+        for (int x = 0; x < work.width(); ++x) {
+            if (maskLine[x] > 0)
+                continue;
+            const int i = y * work.width() + x;
+            levels[0].c[3 * i] = qRed(line[x]) / 255.f;  // Premultiplied is already colour times alpha.
+            levels[0].c[3 * i + 1] = qGreen(line[x]) / 255.f;
+            levels[0].c[3 * i + 2] = qBlue(line[x]) / 255.f;
+            levels[0].wt[i] = qAlpha(line[x]) / 255.f;
+        }
+    }
+    while (levels.back().w > 1 || levels.back().h > 1) {
+        const Level &fine = levels.back();
+        Level coarse{(fine.w + 1) / 2, (fine.h + 1) / 2, {}, {}};
+        coarse.c.assign(3 * coarse.w * coarse.h, 0);
+        coarse.wt.assign(coarse.w * coarse.h, 0);
+        for (int y = 0; y < fine.h; ++y)
+            for (int x = 0; x < fine.w; ++x) {
+                const int i = y * fine.w + x, j = (y / 2) * coarse.w + x / 2;
+                for (int k = 0; k < 3; ++k)
+                    coarse.c[3 * j + k] += fine.c[3 * i + k];
+                coarse.wt[j] += fine.wt[i];
+            }
+        for (int j = 0; j < coarse.w * coarse.h; ++j)
+            if (coarse.wt[j] > 1) {
+                for (int k = 0; k < 3; ++k)
+                    coarse.c[3 * j + k] /= coarse.wt[j];
+                coarse.wt[j] = 1;
+            }
+        levels.push_back(std::move(coarse));
+    }
+    if (levels.back().wt[0] <= 0)
+        return;  // Nothing around to fill from.
+    for (int k = 0; k < 3; ++k)
+        levels.back().c[k] /= levels.back().wt[0];
+    levels.back().wt[0] = 1;
+
+    for (int l = int(levels.size()) - 2; l >= 0; --l) {
+        Level &fine = levels[l];
+        const Level &coarse = levels[l + 1];
+        for (int y = 0; y < fine.h; ++y) {
+            const float cy = std::clamp((y + .5f) / 2 - .5f, 0.f, float(coarse.h - 1));
+            const int y0 = int(cy), y1 = std::min(y0 + 1, coarse.h - 1);
+            const float fy = cy - y0;
+            for (int x = 0; x < fine.w; ++x) {
+                const int i = y * fine.w + x;
+                const float rest = 1 - std::min(1.f, fine.wt[i]);
+                if (rest <= 0) {
+                    for (int k = 0; k < 3; ++k)
+                        fine.c[3 * i + k] /= fine.wt[i];
+                    fine.wt[i] = 1;
+                    continue;
+                }
+                const float cx = std::clamp((x + .5f) / 2 - .5f, 0.f, float(coarse.w - 1));
+                const int x0 = int(cx), x1 = std::min(x0 + 1, coarse.w - 1);
+                const float fx = cx - x0;
+                for (int k = 0; k < 3; ++k) {
+                    const float top = coarse.c[3 * (y0 * coarse.w + x0) + k] * (1 - fx) + coarse.c[3 * (y0 * coarse.w + x1) + k] * fx;
+                    const float bottom = coarse.c[3 * (y1 * coarse.w + x0) + k] * (1 - fx) + coarse.c[3 * (y1 * coarse.w + x1) + k] * fx;
+                    fine.c[3 * i + k] = fine.c[3 * i + k] + rest * (top * (1 - fy) + bottom * fy);
+                }
+                fine.wt[i] = 1;
+            }
+        }
+    }
+
+    // Lay the fill into the hole, bringing the alpha back to what it was.
+    const Level &fill = levels[0];
+    for (int y = hole.top(); y <= hole.bottom(); ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        const QRgb *was = reinterpret_cast<const QRgb *>(before.constScanLine(y - area.y()));
+        const float wy = std::clamp((y - crop.y() + .5f) * float(s) - .5f, 0.f, float(fill.h - 1));
+        const int y0 = int(wy), y1 = std::min(y0 + 1, fill.h - 1);
+        const float fy = wy - y0;
+        for (int x = hole.left(); x <= hole.right(); ++x) {
+            if (!area.contains(x, y))
+                continue;
+            const QRgb old = was[x - area.x()];
+            const int a = qAlpha(old), h = qAlpha(line[x]);
+            if (h >= a)
+                continue;
+            const float wx = std::clamp((x - crop.x() + .5f) * float(s) - .5f, 0.f, float(fill.w - 1));
+            const int x0 = int(wx), x1 = std::min(x0 + 1, fill.w - 1);
+            const float fx = wx - x0;
+            int out[3];
+            const int original[3] = {qRed(old), qGreen(old), qBlue(old)};
+            for (int k = 0; k < 3; ++k) {
+                const float top = fill.c[3 * (y0 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y0 * fill.w + x1) + k] * fx;
+                const float bottom = fill.c[3 * (y1 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y1 * fill.w + x1) + k] * fx;
+                const float filled = std::clamp((top * (1 - fy) + bottom * fy) * 255.f, 0.f, 255.f);
+                out[k] = int(std::lround((h * original[k] + (a - h) * filled) / a));
+            }
+            line[x] = qRgba(out[0], out[1], out[2], a);
+        }
+    }
+}
+
 // Pieces cut from a layer, oldest first.
 QList<int> piecesOf(const Scene &scene, const QString &name) {
     QList<int> pieces;
@@ -240,8 +388,8 @@ QList<int> piecesOf(const Scene &scene, const QString &name) {
 
 // Redraws every piece cut from a layer, and the layer's holes, from the image
 // it had before any cuts ("uncut"). Each punched piece takes its pixels out
-// of what the earlier ones left, and the hole it leaves is worked out so
-// that piece over hole is exactly the original: with a soft edge, the hole's
+// of what the earlier ones left. An unfilled hole is worked out so that
+// piece over hole is exactly the original: with a soft edge, the hole's
 // alpha at a pixel is a(1 - m) / (1 - a·m) for image alpha a and mask m.
 bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, int depth = 0) {
     auto fail = [error](const QString &message) {
@@ -268,6 +416,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         const QPolygonF polygon = polygonFrom(cut.value("polygon"));
         const double feather = std::max(0.0, cut.value("feather").toDouble());
         const bool punch = cut.value("punch").toBool(true);
+        const bool fill = punch && cut.value("fill").toBool(false);
         const int margin = int(std::ceil(feather));
         const QRect area = polygon.boundingRect().toAlignedRect().adjusted(-margin, -margin, margin, margin) &
                            remaining.rect();
@@ -275,6 +424,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
             return fail(QString("The shape of %1 doesn't cover any of %2.").arg(piece.name, source.name));
 
         const QImage mask = maskFor(polygon, feather, area);
+        const QImage before = fill ? remaining.copy(area) : QImage();
         QImage image(area.size(), QImage::Format_ARGB32);
         bool opaque = false;
         for (int y = 0; y < area.height(); ++y) {
@@ -288,14 +438,21 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
                 to[x] = qRgba(qRed(pixel), qGreen(pixel), qBlue(pixel), pieceAlpha);
                 opaque |= pieceAlpha > 0;
                 if (punch && m > 0) {
+                    // Unfilled, the hole is exact: piece over hole is the
+                    // original even across a soft edge. Filled, it takes the
+                    // whole edge too, so no fringe of the piece stays behind
+                    // when it moves; at rest the edge then mixes in a little
+                    // of the fill.
                     const double af = a / 255.0, mf = m / 255.0, rest = 1 - af * mf;
-                    const double hole = rest <= 1e-6 ? 0 : af * (1 - mf) / rest;
+                    const double hole = fill ? af * (1 - mf) : (rest <= 1e-6 ? 0 : af * (1 - mf) / rest);
                     from[x] = qRgba(qRed(pixel), qGreen(pixel), qBlue(pixel), int(std::lround(hole * 255)));
                 }
             }
         }
         if (!opaque)
             return fail(QString("The shape of %1 only covers transparent pixels.").arg(piece.name));
+        if (fill)
+            fillHole(remaining, before, area);
 
         // A reshaped piece keeps its pivot on the same spot of the picture,
         // so its position and every keyframe still mean what they did.
@@ -342,7 +499,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
 }
 
 int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
-           bool punch, QString *error, const QString &wantedName, double feather) {
+           bool punch, QString *error, const QString &wantedName, double feather, bool fill) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -377,6 +534,7 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
                                    {"polygon", polygonJson(inverse.map(polygon))},
                                    {"feather", std::round(feather / pixelScale(transform) * 100) / 100},
                                    {"punch", punch},
+                                   {"fill", punch && fill},
                                    {"order", order}};
 
     Scene edited = scene;
@@ -390,7 +548,7 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
 }
 
 bool reshapeCut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
-                double feather, QString *error) {
+                double feather, QString *error, int fill) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -413,6 +571,8 @@ bool reshapeCut(Scene &scene, AssetCache &assets, int index, const QPolygonF &po
 
     cut["polygon"] = polygonJson(inverse.map(polygon));
     cut["feather"] = std::round(feather / pixelScale(transform) * 100) / 100;
+    if (fill >= 0)
+        cut["fill"] = fill > 0 && cut.value("punch").toBool(true);
     Scene edited = scene;
     edited.layers[index].raw["cut"] = cut;
     if (!rebuildCuts(edited, assets, from, error))
@@ -426,7 +586,7 @@ bool isCut(const Scene &scene, int index) {
            scene.layers.at(index).raw.value("cut").toObject().contains("polygon");
 }
 
-QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t, double *feather) {
+QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t, double *feather, bool *fill) {
     if (!isCut(scene, index))
         return {};
     const QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
@@ -436,6 +596,8 @@ QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t
     const QTransform transform = layerTransform(scene, assets, from, t);
     if (feather)
         *feather = cut.value("feather").toDouble() * pixelScale(transform);
+    if (fill)
+        *fill = cut.value("fill").toBool(false);
     return transform.map(polygonFrom(cut.value("polygon")));
 }
 

@@ -38,6 +38,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString tool READ tool NOTIFY toolChanged)
     Q_PROPERTY(QVariantList cutPoints READ cutPoints NOTIFY toolChanged)
     Q_PROPERTY(double feather READ feather NOTIFY toolChanged)
+    Q_PROPERTY(bool fill READ fill NOTIFY toolChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
@@ -66,6 +67,7 @@ public:
     QString tool() const { return m_tool; }
     QVariantList cutPoints() const;
     double feather() const { return m_feather; }
+    bool fill() const { return m_fill; }
     QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
     QStringList blends() const { return Scene::blends(); }
@@ -142,6 +144,8 @@ public:
     Q_INVOKABLE void removeCutPointAt(int index);
     // Steps the soft edge for the next cut: 0, 1, 3, 8, 20 canvas pixels.
     Q_INVOKABLE void cycleFeather();
+    // Whether the hole a cut leaves is painted in from its surroundings.
+    Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
     Q_INVOKABLE void finishCut(bool punch);
@@ -214,6 +218,7 @@ private:
     QList<QPointF> m_cut;
     QString m_reshaping;
     double m_feather = 1;
+    bool m_fill = true;
     QPointF m_dragStart;
     QPointF m_dragOrigin;
     bool m_dragging = false;

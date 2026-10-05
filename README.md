@@ -23,8 +23,10 @@ Your original image is copied into the project and never touched.
 1. Press **C** and drag around a part of the picture (an arm, a cloud, a
    logo), or click around it point by point. Drag the points to adjust the
    shape, and press **F** to soften its edge. **Enter** makes the part its
-   own layer and leaves a hole behind (**Shift+Enter** copies it out
-   instead). **R** reshapes a piece later, keeping its animation.
+   own layer, and paints the hole it leaves from the colours around it, so
+   the piece can move away without leaving a gap (**G** leaves the hole
+   empty; **Shift+Enter** copies the part out instead). **R** reshapes a
+   piece later, keeping its animation.
 2. Press **P** and click where the new layer should turn, like a shoulder.
 3. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
@@ -64,6 +66,7 @@ Your original image is copied into the project and never touched.
 | `C` | Cut tool: drag around a piece or click points, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
 | Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
+| `G` | Fill the hole the cut leaves from the colours around it: on (the default) / off |
 | `R` | Reshape the selected piece; its animation and pivot stay |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
@@ -131,7 +134,8 @@ photo.omotion/
   and GIF keep the transparency, MP4 can't.
 - **`cut`** on a piece remembers how it was made: the layer it came `from`,
   its `polygon` and `feather` in that layer's image pixels, whether it
-  `punch`ed a hole, and its `order` among that layer's pieces. **`uncut`**
+  `punch`ed a hole and whether that hole is `fill`ed, and its `order` among
+  that layer's pieces. **`uncut`**
   on a layer that has holes is its image before any cuts. omotion redraws
   pieces and holes from these when one is reshaped; edit the polygon by
   hand and press `R` then `Enter` to apply it.
