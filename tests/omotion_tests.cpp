@@ -1450,6 +1450,45 @@ private slots:
         QCOMPARE(outward, int(ball.triangles.size() / 3));
     }
 
+    void worldsTearAtJumpsOverTheLayerBehind() {
+        // A wall at 3 m before a background at 30 m: with a layer behind, the
+        // picture's mesh leaves out the triangles that would stretch between
+        // them, and the layer behind has a mesh of its own.
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {400, 200}), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QImage depth(40, 20, QImage::Format_Grayscale16);
+        for (int y = 0; y < 20; ++y)
+            for (int x = 0; x < 40; ++x)
+                reinterpret_cast<quint16 *>(depth.scanLine(y))[x] = World::encodeDepth(x < 20 ? 3 : 30);
+        QDir(project).mkpath("assets/world");
+        QVERIFY(depth.save(QDir(project).filePath("assets/world/d.png")));
+        QJsonObject world{{"picture", scene.layers[0].name}, {"depth", "assets/world/d.png"}, {"behind", "assets/world/d.png"},
+                          {"focal", 350}, {"ground", QJsonObject{{"up", QJsonArray{0, -1, 0}}, {"height", 1.5}}}};
+        scene.raw["world"] = world;
+        const int whole = int(World::mesh(scene, assets, 0).indices.size());
+        QVERIFY(World::mesh(scene, assets, World::FarLayer).isNull());
+        world["far"] = QJsonObject{{"depth", "assets/world/d.png"}, {"picture", "assets/p.png"}};
+        scene.raw["world"] = world;
+        const World::Mesh torn = World::mesh(scene, assets, 0);
+        QVERIFY(!torn.isNull());
+        QVERIFY(int(torn.indices.size()) < whole || torn.columns > 100);
+        // Every triangle left stays on one side of the jump.
+        const float *v = reinterpret_cast<const float *>(torn.vertices.constData());
+        const quint32 *t = reinterpret_cast<const quint32 *>(torn.indices.constData());
+        const QVector3D eye = World::frame(scene, assets, 0).cameraPosition;
+        for (qsizetype i = 0; i < torn.indices.size() / qsizetype(sizeof(quint32)); i += 3) {
+            float near = 1e9f, far = 0;
+            for (int k = 0; k < 3; ++k) {
+                const float d = (QVector3D(v[t[i + k] * 5], v[t[i + k] * 5 + 1], v[t[i + k] * 5 + 2]) - eye).length();
+                near = std::min(near, d), far = std::max(far, d);
+            }
+            QVERIFY(far <= near * 1.15f + 1e-3f);
+        }
+        QVERIFY(!World::mesh(scene, assets, World::FarLayer).isNull());
+    }
+
     void aiSaysWhatsMissing() {
         QTemporaryDir dir;
         Ai::setPaths(dir.filePath("no-such-library.so"), dir.path());

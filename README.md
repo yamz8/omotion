@@ -213,7 +213,9 @@ its real height, and a drive over the ground from the playhead.
 
 A world can't show what the picture never did: turned far, a shape's
 unseen side is the AI's guess; the camera can turn a little past the
-frame, and move a little before gaps open behind things.
+frame; moving it opens gaps behind near things, which show what the AI
+painted there. Moves of a meter or so in a scene a few meters deep look
+right; much more and flat things (a cut-out of dust) show they're flat.
 
 ## The project folder
 
@@ -287,6 +289,9 @@ photo.omotion/
   the `ground` (`up`, which way is up as the picture's camera sees it, x
   right, y down, z ahead; and the camera's `height` above it in meters),
   the picture carried past its edges (`wide`, by `margin` pixels each side),
+  the layer `far` behind the near side of jumps in distance (its `depth`
+  and `picture`, where the picture's own mesh tears so a moving camera sees
+  behind a hill or a sign),
   its `scale`, the `dust` colour and the camera's `shutter` in degrees (180
   unless set; 0 for none): what moves fast smears across that much of each
   frame, as on film. A world layer's **world properties**

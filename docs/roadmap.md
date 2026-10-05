@@ -36,10 +36,13 @@ UHD), with the timings measured there.
    with handles, and the same in scene.json and the CLI for agents
    ("drive along the road at 70 km/h from 80 m away").
 
-Also next: the unseen side of shapes from the AI's own colours; layers
-split by depth so a moving camera doesn't stretch the background; painted
-effects (dust already in the picture) taken out or animated; finding the
-horizon by itself.
+Done since: the unseen side of shapes in the AI's own colours, held to the
+outline; depth layers (the background tears at jumps over an AI-painted
+layer behind), so the camera can move about a meter; painted dust cut out
+and brought back as an animated piece; motion blur.
+
+Next: haze with distance, light wrap and grain; finding the horizon by
+itself; clicking pieces in 3D in the window; collisions between pieces.
 
 The 2D engine stays: scenes without a world work as they do.
 
