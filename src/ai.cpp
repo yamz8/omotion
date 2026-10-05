@@ -13,9 +13,11 @@
 #include <QMutexLocker>
 #include <QRect>
 #include <QStandardPaths>
+#include <QScopeGuard>
 #include <QThread>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #ifdef OMOTION_AI
@@ -49,8 +51,85 @@ const QList<Ai::Model> &Ai::models() {
          16496559, "8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe"},
         {"lama.onnx", "https://huggingface.co/Carve/LaMa-ONNX/resolve/c3c0c9e468934d62e79c329e35d82dd09ff8c444/lama_fp32.onnx",
          208044816, "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"},
+        {"moge-2-vits-normal.onnx",
+         "https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx/resolve/e50ffda41565591092adea54c6ac83d6212e1e23/model.onnx",
+         140852051, "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0"},
     };
     return list;
+}
+
+bool Ai::solveLens(Geometry &g, double scale, const QSize &picture) {
+    // The model's view plane: the half-diagonal spans 1, so a cell's place
+    // on it is (u, v), and a point (x, y, z + shift) seen through a lens f
+    // lands at f (x, y) / (z + shift). For each shift the best f has a
+    // closed form; the shift is the one that leaves the least error.
+    const int w = g.width, h = g.height;
+    if (w < 2 || h < 2 || !(scale > 0))
+        return false;
+    const double aspect = double(w) / h, sx = aspect / std::sqrt(1 + aspect * aspect), sy = 1 / std::sqrt(1 + aspect * aspect);
+    const int step = std::max(1, int(std::sqrt(double(w) * h / 20000)));
+    std::vector<double> u, v, x, y, z;
+    for (int row = 0; row < h; row += step)
+        for (int col = 0; col < w; col += step) {
+            const size_t i = size_t(row) * w + col;
+            if (!g.valid[i])
+                continue;
+            u.push_back(sx * (2 * (col + .5) / w - 1));
+            v.push_back(sy * (2 * (row + .5) / h - 1));
+            x.push_back(g.points[i * 3]);
+            y.push_back(g.points[i * 3 + 1]);
+            z.push_back(g.points[i * 3 + 2]);
+        }
+    if (z.size() < 50)
+        return false;
+    const double nearest = *std::min_element(z.begin(), z.end());
+    auto fit = [&](double shift, double *focal) {
+        double qu = 0, qq = 0;
+        for (size_t i = 0; i < z.size(); ++i) {
+            const double d = z[i] + shift, px = x[i] / d, py = y[i] / d;
+            qu += px * u[i] + py * v[i];
+            qq += px * px + py * py;
+        }
+        const double f = qq > 0 ? qu / qq : 0;
+        double error = 0;
+        for (size_t i = 0; i < z.size(); ++i) {
+            const double d = z[i] + shift, eu = f * x[i] / d - u[i], ev = f * y[i] / d - v[i];
+            error += eu * eu + ev * ev;
+        }
+        if (focal)
+            *focal = f;
+        return error;
+    };
+    // Every point stays in front of the camera; scanned finely near that
+    // limit, coarsely further out, then narrowed down around the best.
+    const double lo = -nearest + 1e-3;
+    double best = lo, least = std::numeric_limits<double>::infinity();
+    for (int i = 0; i <= 600; ++i) {
+        const double shift = i <= 300 ? lo + 5.0 * i / 300 : lo + 5 + 195.0 * (i - 300) / 300;
+        const double error = fit(shift, nullptr);
+        if (error < least)
+            least = error, best = shift;
+    }
+    double a = std::max(lo, best - 1), b = best + 1;
+    for (int i = 0; i < 60; ++i) {
+        const double m1 = a + (b - a) / 3, m2 = b - (b - a) / 3;
+        if (fit(m1, nullptr) < fit(m2, nullptr))
+            b = m2;
+        else
+            a = m1;
+    }
+    best = (a + b) / 2;
+    double focal = 0;
+    fit(best, &focal);
+    if (!(focal > 0))
+        return false;
+    for (size_t i = 0; i < size_t(w) * h; ++i) {
+        g.points[i * 3 + 2] += float(best);
+        for (int c = 0; c < 3; ++c)
+            g.points[i * 3 + c] *= float(scale);
+    }
+    g.focal = focal / 2 * std::hypot(picture.width(), picture.height());
+    return true;
 }
 
 qint64 Ai::modelBytes() {
@@ -218,6 +297,10 @@ QImage Ai::inpaint(const QImage &, const QImage &, QString *error) {
     load(error);
     return {};
 }
+Ai::Geometry Ai::geometry(const QImage &, QString *error) {
+    load(error);
+    return {};
+}
 bool Ai::canInpaint() { return false; }
 
 #else
@@ -232,6 +315,7 @@ struct Ai::Runtime {
     OrtSession *encoder = nullptr;
     OrtSession *decoder = nullptr;
     OrtSession *inpainter = nullptr;
+    OrtSession *shaper = nullptr;
 
     // Fills already worked out, by their input, so redrawing a layer's
     // pieces doesn't paint the same hole again.
@@ -249,7 +333,7 @@ struct Ai::Runtime {
     ~Runtime() {
         if (!api)
             return;
-        for (OrtSession *session : {depth, encoder, decoder, inpainter})
+        for (OrtSession *session : {depth, encoder, decoder, inpainter, shaper})
             if (session)
                 api->ReleaseSession(session);
         if (memory)
@@ -287,6 +371,15 @@ struct Ai::Runtime {
         OrtValue *value = nullptr;
         if (!ok(api->CreateTensorWithDataAsOrtValue(memory, data.data(), data.size() * sizeof(float), shape.data(),
                                                    shape.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &value),
+                error))
+            return nullptr;
+        return value;
+    }
+
+    OrtValue *scalar(int64_t &data, QString *error) {
+        OrtValue *value = nullptr;
+        if (!ok(api->CreateTensorWithDataAsOrtValue(memory, &data, sizeof(int64_t), nullptr, 0,
+                                                   ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &value),
                 error))
             return nullptr;
         return value;
@@ -452,6 +545,64 @@ QImage Ai::depth(const QImage &picture, QString *error) {
     return result;
 }
 
+Ai::Geometry Ai::geometry(const QImage &picture, QString *error) {
+    QMutexLocker lock(&m_mutex);
+    if (!load(error))
+        return {};
+    Runtime &rt = *m_runtime;
+    OrtSession *session = rt.session(rt.shaper, "moge-2-vits-normal.onnx", error);
+    if (!session)
+        return {};
+
+    // Any size works; around 960 across keeps it to a few seconds here.
+    const QImage image = picture.convertToFormat(QImage::Format_RGB888);
+    const double fit = std::min(1.0, 960.0 / std::max(image.width(), image.height()));
+    const int w = std::max(14, int(std::lround(image.width() * fit))), h = std::max(14, int(std::lround(image.height() * fit)));
+    const QImage small = image.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    std::vector<float> input(size_t(3) * w * h);
+    for (int y = 0; y < h; ++y) {
+        const uchar *line = small.constScanLine(y);
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 3; ++c)
+                input[size_t(c) * w * h + size_t(y) * w + x] = line[x * 3 + c] / 255.f;
+    }
+    int64_t tokens = 1800;
+    OrtValue *image0 = rt.tensor(input, {1, 3, h, w}, error);
+    OrtValue *tokens0 = image0 ? rt.scalar(tokens, error) : nullptr;
+    std::vector<OrtValue *> outputs;
+    if (!image0 || !tokens0 ||
+        !rt.run(session, {"image", "num_tokens"}, {image0, tokens0}, {"points", "normal", "mask", "scale"}, outputs, error))
+        return {};
+    auto release = qScopeGuard([&] {
+        for (OrtValue *value : outputs)
+            if (value)
+                rt.api->ReleaseValue(value);
+    });
+    const std::vector<int64_t> dims = rt.shape(outputs[0]);
+    const float *points = rt.data(outputs[0]), *normals = rt.data(outputs[1]), *mask = rt.data(outputs[2]),
+                *scale = rt.data(outputs[3]);
+    if (dims.size() != 4 || dims[3] != 3 || !points || !normals || !mask || !scale) {
+        if (error)
+            *error = "The shape model gave back something unexpected.";
+        return {};
+    }
+    Geometry geometry;
+    geometry.width = int(dims[2]);
+    geometry.height = int(dims[1]);
+    const size_t cells = size_t(geometry.width) * geometry.height;
+    geometry.points.assign(points, points + cells * 3);
+    geometry.normals.assign(normals, normals + cells * 3);
+    geometry.valid.resize(cells);
+    for (size_t i = 0; i < cells; ++i)
+        geometry.valid[i] = mask[i] > .5f;
+    if (!solveLens(geometry, *scale, picture.size())) {
+        if (error)
+            *error = "The shape model couldn't make out a lens in this picture.";
+        return {};
+    }
+    return geometry;
+}
+
 bool Ai::canInpaint() {
     if (!m_loaded) {
         QMutexLocker lock(&m_mutex);
@@ -459,7 +610,10 @@ bool Ai::canInpaint() {
             return false;
     }
     const QFileInfo model(QDir(modelDirectory()).filePath("lama.onnx"));
-    return model.exists() && model.size() == models().last().size;
+    for (const Model &known : models())
+        if (known.file == "lama.onnx")
+            return model.exists() && model.size() == known.size;
+    return false;
 }
 
 QImage Ai::inpaint(const QImage &picture, const QImage &holes, QString *error) {

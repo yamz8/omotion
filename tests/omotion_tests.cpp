@@ -1307,6 +1307,40 @@ private slots:
         QVERIFY(differences(renderFrame(scene, assets, 0), before) < 10);
     }
 
+    void lensComesBackFromShiftedPoints() {
+        // A made-up scene seen through an 800 px lens, handed over as the
+        // model would: shifted along the view and at a third of its size.
+        const QSize picture(960, 540);
+        const double focal = 800, shift = 2.5, scale = 3;
+        Ai::Geometry g;
+        g.width = 96;
+        g.height = 54;
+        const double diagonal = std::hypot(picture.width(), picture.height());
+        const double aspect = double(g.width) / g.height;
+        const double sx = aspect / std::sqrt(1 + aspect * aspect), sy = 1 / std::sqrt(1 + aspect * aspect);
+        const double f = 2 * focal / diagonal;
+        std::vector<double> truth;
+        for (int row = 0; row < g.height; ++row)
+            for (int col = 0; col < g.width; ++col) {
+                const double u = sx * (2 * (col + .5) / g.width - 1), v = sy * (2 * (row + .5) / g.height - 1);
+                const double z = 5 + 3 * std::sin(col / 10.0) + row * .1;
+                const double point[3] = {u / f * z, v / f * z, z};
+                for (int c = 0; c < 3; ++c) {
+                    truth.push_back(point[c]);
+                    g.points.push_back(float((point[c] - (c == 2 ? shift : 0)) / scale));
+                }
+                g.normals.insert(g.normals.end(), {0, 0, -1});
+                g.valid.push_back(row > 3);  // A strip of sky at the top.
+            }
+        QVERIFY(Ai::solveLens(g, scale, picture));
+        QVERIFY2(std::abs(g.focal - focal) < 2, qPrintable(QString::number(g.focal)));
+        for (size_t i = 0; i < truth.size(); i += 97)
+            QVERIFY(std::abs(g.points[i] - truth[i]) < .01);
+        // Nothing valid, nothing to solve.
+        std::fill(g.valid.begin(), g.valid.end(), 0);
+        QVERIFY(!Ai::solveLens(g, scale, picture));
+    }
+
     void aiSaysWhatsMissing() {
         QTemporaryDir dir;
         Ai::setPaths(dir.filePath("no-such-library.so"), dir.path());

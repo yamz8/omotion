@@ -1,7 +1,9 @@
 #pragma once
 
 // The optional AI side: depth from a single picture (Depth Anything V2
-// Small) and click-to-select (MobileSAM), run on the CPU with ONNX Runtime.
+// Small), its 3D shape in meters with the lens it was seen through (MoGe-2),
+// click-to-select (MobileSAM) and filling holes (LaMa), run on the CPU with
+// ONNX Runtime.
 // The runtime is loaded when first needed rather than linked, so omotion
 // works without it and says what's missing when an AI feature is asked for.
 
@@ -44,6 +46,25 @@ public:
     // Relative depth for a picture, larger nearer, as a 16-bit grey image at
     // the size the model worked at (around 518 pixels on the short side).
     QImage depth(const QImage &image, QString *error);
+
+    // Where everything in a picture is, in meters from the camera that saw
+    // it: x right, y down, z forward, one point per cell of a grid laid over
+    // the picture (about 960 cells across). Cells the model sees nothing in,
+    // like the sky, aren't valid. focal is the lens, in the picture's pixels.
+    struct Geometry {
+        int width = 0;
+        int height = 0;
+        std::vector<float> points;   // x, y, z for each cell, row by row.
+        std::vector<float> normals;  // Facing the camera is -z.
+        std::vector<uchar> valid;
+        double focal = 0;
+        bool isNull() const { return width == 0; }
+    };
+    Geometry geometry(const QImage &image, QString *error);
+    // Finishes the model's raw points: finds the shift along the view and
+    // the lens that put every point back on its own cell, then sizes them by
+    // scale into meters. False when too little of the picture is valid.
+    static bool solveLens(Geometry &geometry, double scale, const QSize &picture);
 
     // The picture with the masked part (Alpha8, 255 to fill, same size)
     // painted in to match its surroundings. Worked at 512 pixels square, so
