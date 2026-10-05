@@ -41,8 +41,11 @@ outline; depth layers (the background tears at jumps over an AI-painted
 layer behind), so the camera can move about a meter; painted dust cut out
 and brought back as an animated piece; motion blur.
 
-Next: haze with distance, light wrap and grain; finding the horizon by
-itself; clicking pieces in 3D in the window; collisions between pieces.
+Also done: haze past the picture's distance (its colour from the farthest
+land), light at a shape's unseen edges, film grain.
+
+Next: finding the horizon by itself; clicking pieces in 3D in the window;
+collisions between pieces; light wrap on flat pieces' edges.
 
 The 2D engine stays: scenes without a world work as they do.
 
