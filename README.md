@@ -77,7 +77,8 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `Home` `End` | Start / end |
 | `L` | Show the selected layer's path through the scene, and faint ghosts of it at the keyframes either side |
 | Click, drag | Select the layer under the mouse and move it (Shift+drag keeps the selection) |
-| Mouse wheel | Scale the selected layer (Ctrl+wheel rotates) |
+| Mouse wheel | Scale the selected layer (Shift+wheel turns it) |
+| Ctrl+wheel, middle-drag | Look closer about the mouse, and move the view; `Ctrl+=` `Ctrl+-` zoom, `Ctrl+0` fits it again |
 | `Tab` / `Shift+Tab` | Select the layer below / above |
 | `Ctrl+↑` `Ctrl+↓` | Move the layer up / down the stack |
 | `←` `→` `↑` `↓` | Nudge 1px (Shift: 10px) |

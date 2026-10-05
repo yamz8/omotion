@@ -106,6 +106,9 @@ ApplicationWindow {
     Shortcut { sequence: "F2"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: timeline.rename(backend.selected) }
     Shortcut { sequence: "Ctrl+D"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.duplicateLayer() }
     Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.selectCamera() }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.zoomBy(1.25, view.width / 2, view.height / 2) }
+    Shortcut { sequence: "Ctrl+-"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.zoomBy(1 / 1.25, view.width / 2, view.height / 2) }
+    Shortcut { sequence: "Ctrl+0"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: view.fit() }
     Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.showMotion = !backend.showMotion }
     Shortcut { sequence: "Ctrl+Shift+K"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.cleanUp() }
     Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
@@ -271,7 +274,8 @@ ApplicationWindow {
                     id: canvasMouse
                     anchors.fill: parent
                     enabled: backend.hasProject && backend.busy === ""
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    property point panFrom
                     cursorShape: backend.tool === "brush" ? Qt.BlankCursor : backend.tool === "move" ? (pressed && backend.selected >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor) : Qt.CrossCursor
                     property bool dragging: false
                     // In the cut tool: the point being dragged, or a lasso
@@ -283,6 +287,11 @@ ApplicationWindow {
 
                     onPressed: function (mouse) {
                         win.focusCanvas();
+                        // The middle button pans the view, whatever the tool.
+                        if (mouse.button === Qt.MiddleButton) {
+                            panFrom = Qt.point(mouse.x, mouse.y);
+                            return;
+                        }
                         const p = view.toScene(mouse.x, mouse.y);
                         if (backend.tool === "cut") {
                             const reach = 9 / view.zoom();
@@ -326,6 +335,11 @@ ApplicationWindow {
                         }
                     }
                     onPositionChanged: function (mouse) {
+                        if (pressedButtons & Qt.MiddleButton) {
+                            view.panBy(mouse.x - panFrom.x, mouse.y - panFrom.y);
+                            panFrom = Qt.point(mouse.x, mouse.y);
+                            return;
+                        }
                         if (backend.tool === "brush") {
                             if (pressed) {
                                 const b = view.toScene(mouse.x, mouse.y);
@@ -360,6 +374,11 @@ ApplicationWindow {
                         lassoing = false;
                     }
                     onWheel: function (wheel) {
+                        // Ctrl looks closer, about the mouse.
+                        if (wheel.modifiers & Qt.ControlModifier) {
+                            view.zoomBy(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15, wheel.x, wheel.y);
+                            return;
+                        }
                         if (backend.tool === "brush") {
                             backend.adjustBrush(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15);
                             return;
@@ -371,7 +390,7 @@ ApplicationWindow {
                         if (backend.selected < 0 && !backend.cameraSelected)
                             return;
                         const step = wheel.angleDelta.y > 0 ? 1 : -1;
-                        if (wheel.modifiers & Qt.ControlModifier)
+                        if (wheel.modifiers & Qt.ShiftModifier)
                             backend.adjust("rotation", step * 2);
                         else
                             backend.multiply("scale", step > 0 ? 1.03 : 1 / 1.03);

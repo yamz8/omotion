@@ -29,6 +29,8 @@ void SceneView::setBackend(Backend *backend) {
         connect(m_backend, &Backend::toolChanged, this, repaint);
         connect(m_backend, &Backend::playingChanged, this, repaint);
         connect(m_backend, &Backend::showMotionChanged, this, repaint);
+        // A new project starts fitted in the window.
+        connect(m_backend, &Backend::projectChanged, this, &SceneView::fit);
     }
     emit backendChanged();
     update();
@@ -48,10 +50,52 @@ QTransform SceneView::viewTransform() const {
         return transform;
     const Scene &scene = m_backend->scene();
     const double available = std::max(1.0, width() - 2 * Margin), availableHeight = std::max(1.0, height() - 2 * Margin);
-    const double s = std::min(available / scene.width, availableHeight / scene.height);
-    transform.translate((width() - scene.width * s) / 2, (height() - scene.height * s) / 2);
+    const double fit = std::min(available / scene.width, availableHeight / scene.height);
+    const double s = fit * m_viewZoom;
+    // The point looked at sits in the middle of the item; until the view is
+    // panned, that's the canvas's centre.
+    const QPointF focus = m_focusSet ? m_focus : QPointF(scene.width / 2.0, scene.height / 2.0);
+    transform.translate(width() / 2, height() / 2);
     transform.scale(s, s);
+    transform.translate(-focus.x(), -focus.y());
     return transform;
+}
+
+void SceneView::zoomBy(double factor, double x, double y) {
+    if (!m_backend || !m_backend->hasProject() || !(factor > 0))
+        return;
+    // The canvas point under the mouse stays under it.
+    const QPointF under = toScene(x, y);
+    const double zoom = std::clamp(m_viewZoom * factor, .1, 40.0);
+    if (zoom == m_viewZoom)
+        return;
+    m_viewZoom = zoom;
+    const QTransform view = viewTransform();
+    const double s = view.m11();
+    m_focus = under - (QPointF(x, y) - QPointF(width() / 2, height() / 2)) / s;
+    m_focusSet = true;
+    update();
+    emit zoomChanged();
+}
+
+void SceneView::panBy(double dx, double dy) {
+    if (!m_backend || !m_backend->hasProject())
+        return;
+    const double s = viewTransform().m11();
+    if (!m_focusSet) {
+        m_focus = QPointF(m_backend->scene().width / 2.0, m_backend->scene().height / 2.0);
+        m_focusSet = true;
+    }
+    m_focus -= QPointF(dx, dy) / s;
+    update();
+    emit zoomChanged();
+}
+
+void SceneView::fit() {
+    m_viewZoom = 1;
+    m_focusSet = false;
+    update();
+    emit zoomChanged();
 }
 
 QPointF SceneView::toScene(double x, double y) const { return viewTransform().inverted().map(QPointF(x, y)); }

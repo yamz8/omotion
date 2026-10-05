@@ -27,6 +27,11 @@ public:
     Q_INVOKABLE QPointF toScene(double x, double y) const;
     // How many item pixels one canvas pixel takes up.
     Q_INVOKABLE double zoom() const { return viewTransform().m11(); }
+    // Looking closer: zoom about an item point, pan by item pixels, or fit
+    // the canvas back in the window. Only the view; not the camera.
+    Q_INVOKABLE void zoomBy(double factor, double x, double y);
+    Q_INVOKABLE void panBy(double dx, double dy);
+    Q_INVOKABLE void fit();
 
     void paint(QPainter *painter) override;
 
@@ -36,6 +41,9 @@ signals:
     void zoomChanged();
 
 private:
+    double m_viewZoom = 1;
+    QPointF m_focus;
+    bool m_focusSet = false;
     QTransform viewTransform() const;
 
     QPointer<Backend> m_backend;
