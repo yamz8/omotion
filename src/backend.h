@@ -385,6 +385,7 @@ private:
     QMediaPlayer *m_player = nullptr;
     QAudioOutput *m_audioOutput = nullptr;
     QString m_playerSource;
+    qint64 m_pendingSeek = -1;  // A seek waiting for a new file to load.
     QList<double> m_peaks;
     QString m_peaksFor;
     QFutureWatcher<QList<double>> m_peaksJob;

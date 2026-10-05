@@ -332,6 +332,8 @@ int command(const QStringList &args) {
 
     if (args.at(1) == "audio") {
         Scene edited = scene;
+        if (args.at(3) == "--none" && args.size() > 4)
+            return fail("--none takes the sound away; there's nothing left to set.");
         if (args.at(3) == "--none") {
             edited.raw.remove("audio");
         } else if (!Project::setAudio(edited, directory, QFileInfo(args.at(3)).absoluteFilePath(), &error)) {
@@ -345,8 +347,11 @@ int command(const QStringList &args) {
             double value = 0;
             if (!numberAfter(args, i, &value))
                 return 1;
-            if (!audio.isEmpty())
-                audio[name] = value;
+            if (name == "offset" && value < 0)
+                return fail("--offset is seconds into the sound, from 0.");
+            if (name == "volume" && (value < 0 || value > 4))
+                return fail("--volume goes from 0 (silent) to 4.");
+            audio[name] = value;
         }
         if (!audio.isEmpty())
             edited.raw["audio"] = audio;

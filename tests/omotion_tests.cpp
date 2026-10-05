@@ -958,6 +958,37 @@ private slots:
         QVERIFY(error.contains("pin3x"));
     }
 
+    void bentLayersLookWhole() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // A red square over a blue one, 40×40, on a 100×100 canvas.
+        scene.layers.removeFirst();
+        Layer &red = scene.layers[0];
+        red.base["opacity"] = .5;
+        red.pins = {QPointF(0, 20), QPointF(40, 20)};
+        red.base["pin1y"] = 3;  // A slight bend.
+        const QImage bent = renderFrame(scene, assets, 0);
+        // Half see-through all over: no darker seams where triangles meet.
+        QColor reference = bent.pixelColor(50, 50);
+        int seams = 0;
+        for (int y = 36; y < 62; ++y)
+            for (int x = 36; x < 62; ++x)
+                seams += std::abs(bent.pixelColor(x, y).red() - reference.red()) > 6;
+        QCOMPARE(seams, 0);
+        // A glow still has its halo when bent.
+        red.base["opacity"] = 1;
+        red.base["glow"] = 8;
+        red.base["pin1y"] = 0;
+        const QImage straight = renderFrame(scene, assets, 0);
+        red.base["pin1y"] = .01;
+        const QImage barely = renderFrame(scene, assets, 0);
+        QVERIFY2(differences(straight, barely) < 40, qPrintable(QString::number(differences(straight, barely))));
+        QVERIFY(barely.pixelColor(27, 50).red() > 10);  // Halo outside the square.
+        // Clicks find it where it's bent to.
+        red.base["pin1y"] = 25;
+        QCOMPARE(layerAt(scene, assets, 0, QPointF(68, 70)), 0);
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;
@@ -1628,6 +1659,15 @@ private slots:
         QVERIFY(probe.waitForFinished(20000));
         QCOMPARE(QString::fromUtf8(probe.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts), (QStringList{"video", "audio"}));
 
+        // A sound shorter than the scene doesn't cut the video short.
+        Scene longer = scene;
+        longer.duration = 8;  // The beep (from .5 s in) runs out at 5.5.
+        QVERIFY2(Exporter::run(longer, backend.projectPath(), dir.filePath("long.mp4"), &error, .25), qPrintable(error));
+        QProcess length;
+        length.start("ffprobe", {"-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", dir.filePath("long.mp4")});
+        QVERIFY(length.waitForFinished(20000));
+        QVERIFY2(qAbs(QString::fromUtf8(length.readAllStandardOutput()).trimmed().toDouble() - 8) < .2, "the video kept its length");
+
         backend.removeAudio();
         QVERIFY(backend.audio().isEmpty());
         backend.undo();
@@ -1686,6 +1726,62 @@ private slots:
         QVERIFY(!backend.scene().layers[0].keys.contains("pin1y"));
         backend.undo();
         QCOMPARE(backend.scene().layers[0].pins.size(), 2);
+    }
+
+    void pastingKeepsTheSceneLoadable() {
+        QTemporaryDir motions, dir;
+        Project::setMotionDirectory(motions.path());
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.selectCamera();
+        backend.keyAll();
+        backend.saveMotion("zoomy");
+        backend.select(0);
+        backend.applyMotion("zoomy");  // A camera's zoom goes on as the layer's scale.
+        QVERIFY(backend.scene().layers[0].keys.contains("scale"));
+        QVERIFY(!backend.scene().layers[0].keys.contains("zoom"));
+        // Pin keys on a layer without those pins are left out.
+        backend.setTool("pin");
+        backend.addPinAt(50, 50);
+        backend.setTool("move");
+        backend.keyAll();
+        backend.copyKeys();
+        backend.duplicateLayer();
+        backend.setTool("pin");
+        backend.removePin(0);
+        backend.setTool("move");
+        backend.pasteKeys();
+        QVERIFY(!backend.scene().layers[1].keys.contains("pin0x"));
+        backend.flush();
+        QString error;
+        Project::load(backend.projectPath(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        // Only pin keys: not a motion.
+        backend.select(0);
+        backend.clearKeySelection();
+        QVERIFY(!Project::saveMotion("pins", {KeyClip{"pin0x", Key{0, 1}}}, &error));
+        QVERIFY(error.contains("pin"));
+        Project::setMotionDirectory({});
+    }
+
+    void addingAPinToABentLayerKeepsItsPoint() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setTool("pin");
+        backend.addPinAt(20, 50);
+        backend.addPinAt(180, 50);
+        backend.beginPinDrag(1, 180, 50);
+        backend.pinDragTo(180, 20);
+        backend.endPinDrag();
+        const QImage before = renderFrame(backend.scene(), backend.assets(), 0);
+        QCOMPARE(backend.addPinAt(120, 40), 2);
+        // The pinned point stays put; the rest can settle a little, as every
+        // pin has a say in the bend (here about 1% of the picture moves).
+        const int changed = differences(renderFrame(backend.scene(), backend.assets(), 0), before);
+        QVERIFY2(changed < 200 * 100 / 30, qPrintable(QString::number(changed)));
+        QVERIFY(QLineF(backend.pinPoints().at(2).toPointF(), QPointF(120, 40)).length() < .5);
     }
 
     void backendEditsTheCamera() {

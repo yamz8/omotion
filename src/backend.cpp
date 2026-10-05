@@ -769,15 +769,7 @@ void Backend::pasteKeys() {
 void Backend::pasteClip(QList<KeyClip> clip) {
     if (!targetLayer())
         return setNotice("Select the layer to paste onto.");
-    // Pasting a layer's keys on the camera keeps only what a camera has.
-    if (m_cameraSelected) {
-        for (KeyClip &item : clip)
-            if (item.property == "scale")
-                item.property = "zoom";
-        clip.erase(std::remove_if(clip.begin(), clip.end(),
-                                  [](const KeyClip &item) { return !Scene::cameraProperties().contains(item.property); }),
-                   clip.end());
-    }
+    // Scene::pasteKeys keeps only what the target can animate.
     checkpoint();
     setKeySelection(m_scene.pasteKeys(target(), m_time, clip));
     changed();
@@ -1029,15 +1021,31 @@ void Backend::syncAudio(bool reseek) {
         m_player = new QMediaPlayer(this);
         m_audioOutput = new QAudioOutput(this);
         m_player->setAudioOutput(m_audioOutput);
+        // A seek made while a file is still loading is lost; make it once
+        // the file's ready.
+        connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+            if (m_pendingSeek >= 0 && (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia)) {
+                m_player->setPosition(m_pendingSeek);
+                m_pendingSeek = -1;
+                if (m_playing)
+                    m_player->play();
+            }
+        });
     }
+    const qint64 position = qint64((m_time + audio.value("offset").toDouble()) * 1000);
     if (m_playerSource != path) {
         m_player->setSource(QUrl::fromLocalFile(path));
         m_playerSource = path;
-        reseek = true;
+        m_pendingSeek = position;
+        reseek = false;
     }
     m_audioOutput->setVolume(float(std::clamp(audio.value("volume").toDouble(1), 0.0, 1.0)));
-    if (reseek)
-        m_player->setPosition(qint64((m_time + audio.value("offset").toDouble()) * 1000));
+    if (reseek) {
+        if (m_pendingSeek >= 0)
+            m_pendingSeek = position;
+        else
+            m_player->setPosition(position);
+    }
     if (m_playing)
         m_player->play();
     else
@@ -1157,15 +1165,29 @@ int Backend::addPinAt(double x, double y) {
     const QTransform toImage = layerTransform(m_scene, m_assets, m_selected, m_time).inverted(&invertible);
     if (!invertible)
         return -1;
-    // Where on the image, as it is unbent: near enough while it's lightly bent.
-    const QPointF at = toImage.map(QPointF(x, y));
-    const QSizeF size = m_assets.size(m_scene.layers.at(m_selected).source);
+    // The point of the image the bend has put under the mouse: the pin goes
+    // there, already offset to where it's bent to, so nothing moves.
+    const Layer &layer = m_scene.layers.at(m_selected);
+    const QPointF bent = toImage.map(QPointF(x, y));
+    const QPointF at = unbend(m_scene, layer, bent, m_time);
+    const QSizeF size = m_assets.size(layer.source);
     if (!QRectF(QPointF(0, 0), size).contains(at)) {
         setNotice("Pins go on the layer; click on it.");
         return -1;
     }
     checkpoint();
-    m_scene.layers[m_selected].pins.append(at);
+    Layer &edited = m_scene.layers[m_selected];
+    const int pin = int(edited.pins.size());
+    edited.pins.append(at);
+    const bool keyed = std::any_of(edited.keys.keyBegin(), edited.keys.keyEnd(),
+                                   [](const QString &key) { return key.startsWith("pin"); });
+    for (const auto &[axis, offset] : {std::pair{QString("x"), bent.x() - at.x()}, std::pair{QString("y"), bent.y() - at.y()}}) {
+        const QString property = QString("pin%1%2").arg(pin).arg(axis);
+        edited.base[property] = std::abs(offset) < 1e-6 ? 0 : offset;
+        // Among keyed pins, the new one is keyed here too.
+        if (keyed)
+            m_scene.keyProperty(m_selected, property, m_time);
+    }
     changed();
     const int count = int(m_scene.layers.at(m_selected).pins.size());
     setNotice(count == 1 ? "Pinned. Add another, then drag one to bend between them." : QString("%1 pins. Drag one to bend.").arg(count));
@@ -1816,8 +1838,12 @@ void Backend::changed(bool saveSoon) {
         emit audioChanged();
         if (m_player && source.isEmpty())
             m_player->stop();
+        // The sound or its offset changed: the player follows, at the playhead.
+        if (!source.isEmpty())
+            syncAudio(true);
     } else if (!key.isEmpty()) {
         emit audioChanged();
+        syncAudio(false);  // The volume may have.
     }
     reportMissing();
     emit sceneChanged();

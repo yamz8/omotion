@@ -1358,9 +1358,17 @@ bool saveMotion(const QString &wanted, const QList<KeyClip> &keys, QString *erro
     }
     QJsonObject properties;
     for (const KeyClip &item : keys) {
+        // Pins belong to one layer's picture; a motion is for any layer.
+        if (!Scene::properties().contains(item.property) && !Scene::cameraProperties().contains(item.property))
+            continue;
         QJsonArray list = properties.value(item.property).toArray();
         list.append(QJsonObject{{"t", item.key.t}, {"v", item.key.v}, {"ease", item.key.ease}});
         properties.insert(item.property, list);
+    }
+    if (properties.isEmpty()) {
+        if (error)
+            *error = "Only pin keyframes there, and pins belong to one layer; there's nothing to save as a motion.";
+        return false;
     }
     QDir().mkpath(motionDirectory());
     QSaveFile file(QDir(motionDirectory()).filePath(name + ".json"));

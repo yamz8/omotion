@@ -258,7 +258,7 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         for (const QString &property : properties())
             layer.base.insert(property, object.value(property).toDouble(defaultValue(property)));
         for (auto it = object.begin(); it != object.end(); ++it)
-            if (it.key().startsWith("pin"))
+            if (isPinProperty(layer, it.key()))
                 layer.base.insert(it.key(), it.value().toDouble());
 
         const QJsonObject keys = object.value("keys").toObject();
@@ -658,7 +658,17 @@ QList<KeyRef> Scene::pasteKeys(int index, double t, const QList<KeyClip> &clip) 
     QList<KeyRef> pasted;
     if (!at(index))
         return pasted;
-    for (const KeyClip &item : clip) {
+    // Only what the target can animate: a camera's zoom is a layer's scale
+    // and back, and the rest that doesn't fit (another layer's pins, say) is
+    // left out rather than written where it would break the scene.
+    const QStringList valid = index == CameraIndex ? cameraProperties() : propertiesOf(*at(index));
+    for (KeyClip item : clip) {
+        if (index == CameraIndex && item.property == "scale")
+            item.property = "zoom";
+        else if (index != CameraIndex && item.property == "zoom")
+            item.property = "scale";
+        if (!valid.contains(item.property))
+            continue;
         Key key = item.key;
         key.t = snap(t + key.t);
         placeKey((*at(index)).keys[item.property], key, .5 / fps);
@@ -970,21 +980,26 @@ bool isBent(const Scene &scene, const Layer &layer, double t) {
     return false;
 }
 
-QPointF bend(const Scene &scene, const Layer &layer, const QPointF &v, double t) {
-    const int n = int(layer.pins.size());
+PinSet pinsAt(const Scene &scene, const Layer &layer, double t) {
+    PinSet pins;
+    for (int i = 0; i < layer.pins.size(); ++i) {
+        pins.p.append(layer.pins.at(i));
+        pins.q.append(layer.pins.at(i) + QPointF(scene.value(layer, QString("pin%1x").arg(i), t),
+                                                 scene.value(layer, QString("pin%1y").arg(i), t)));
+    }
+    return pins;
+}
+
+QPointF bendWith(const PinSet &pins, const QPointF &v) {
+    const QList<QPointF> &p = pins.p, &q = pins.q;
+    const int n = int(p.size());
     if (n == 0)
         return v;
-    QList<QPointF> p, q;
-    for (int i = 0; i < n; ++i) {
-        p.append(layer.pins.at(i));
-        q.append(layer.pins.at(i) + QPointF(scene.value(layer, QString("pin%1x").arg(i), t),
-                                             scene.value(layer, QString("pin%1y").arg(i), t)));
-    }
     if (n == 1)
         return v + (q[0] - p[0]);  // One pin just carries the image along.
     // Moving least squares (Schaefer, McPhail and Warren): each point moves
     // as rigidly as it can to follow the pins, the nearer ones most.
-    QList<double> w(n);
+    QVarLengthArray<double, 16> w(n);
     double total = 0;
     QPointF pStar, qStar;
     for (int i = 0; i < n; ++i) {
@@ -1014,62 +1029,113 @@ QPointF bend(const Scene &scene, const Layer &layer, const QPointF &v, double t)
     return qStar + bent * (std::hypot(d.x(), d.y()) / length);
 }
 
+QPointF bend(const Scene &scene, const Layer &layer, const QPointF &v, double t) {
+    return bendWith(pinsAt(scene, layer, t), v);
+}
+
+QPointF unbend(const Scene &scene, const Layer &layer, const QPointF &target, double t) {
+    // Where on the image ends up at target: walked towards, a step at a time,
+    // by how far its bent place is off. Bends are smooth, so it gets there.
+    const PinSet pins = pinsAt(scene, layer, t);
+    QPointF guess = target;
+    for (int i = 0; i < 24; ++i) {
+        const QPointF off = target - bendWith(pins, guess);
+        guess += off;
+        if (QPointF::dotProduct(off, off) < 1e-6)
+            break;
+    }
+    return guess;
+}
+
 namespace {
 
-// Draws a pinned layer's image bent: a mesh of small triangles, each mapped
-// from where it was in the image to where the pins take it.
-void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double t, const QImage &image,
-              double factor, int margin, const QSizeF &size, const QTransform &toOutput) {
-    // Finer for bigger drawings: about a triangle side every 40 output
-    // pixels, which bends smoothly and keeps a frame quick.
+// Draws a pinned layer's image (and its glow) bent: a mesh of small
+// triangles, each mapped from where it was in the image to where the pins
+// take it, into a scratch image first, then laid on once with the layer's
+// opacity and blend, so where triangles meet nothing is drawn twice.
+void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double t, const QImage &image, const QImage &glow,
+              double factor, int margin, const QSizeF &size, const QTransform &toOutput, double opacity,
+              QPainter::CompositionMode blend) {
+    const PinSet pins = pinsAt(scene, layer, t);
+    // About a triangle side every 40 output pixels, over the padding too, so
+    // a blur's or glow's halo bends with the picture.
     const double drawn = std::max(size.width(), size.height()) *
                          std::max(std::hypot(toOutput.m11(), toOutput.m12()), std::hypot(toOutput.m21(), toOutput.m22()));
     const int cells = std::clamp(int(drawn / 40), 6, 32);
-    const double cw = size.width() / cells, ch = size.height() / cells;
-    QList<QPointF> to((cells + 1) * (cells + 1));
+    const double pad = margin / factor;
+    const QRectF spread(-pad, -pad, size.width() + 2 * pad, size.height() + 2 * pad);
+    const double cw = spread.width() / cells, ch = spread.height() / cells;
+    QList<QPointF> from((cells + 1) * (cells + 1)), to((cells + 1) * (cells + 1));
+    QRectF reach;
     for (int y = 0; y <= cells; ++y)
-        for (int x = 0; x <= cells; ++x)
-            to[y * (cells + 1) + x] = bend(scene, layer, QPointF(x * cw, y * ch), t);
-    auto copyAt = [&](const QPointF &p) { return p * factor + QPointF(margin, margin); };
-    painter.save();
-    painter.setRenderHint(QPainter::Antialiasing, false);
-    for (int y = 0; y < cells; ++y)
-        for (int x = 0; x < cells; ++x) {
+        for (int x = 0; x <= cells; ++x) {
             const int i = y * (cells + 1) + x;
-            const QPointF source[4] = {QPointF(x * cw, y * ch), QPointF((x + 1) * cw, y * ch),
-                                       QPointF((x + 1) * cw, (y + 1) * ch), QPointF(x * cw, (y + 1) * ch)};
-            const QPointF target[4] = {to[i], to[i + 1], to[i + cells + 2], to[i + cells + 1]};
-            for (const auto &tri : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
-                QPolygonF from, into;
-                for (int k : tri) {
-                    from << copyAt(source[k]);
-                    into << target[k];
-                }
-                // Three points fix the map from the image to where it's bent to.
-                const QPointF u = from[1] - from[0], v = from[2] - from[0];
-                const QPointF U = into[1] - into[0], V = into[2] - into[0];
-                const double det = u.x() * v.y() - u.y() * v.x();
-                if (std::abs(det) < 1e-12)
-                    continue;
-                const QTransform linear((U.x() * v.y() - V.x() * u.y()) / det, (U.y() * v.y() - V.y() * u.y()) / det,
-                                        (V.x() * u.x() - U.x() * v.x()) / det, (V.y() * u.x() - U.y() * v.x()) / det, 0, 0);
-                const QTransform map = QTransform::fromTranslate(-from[0].x(), -from[0].y()) * linear *
-                                       QTransform::fromTranslate(into[0].x(), into[0].y());
-                // A hair bigger than the triangle, so neighbours meet without seams.
-                const QPointF middle = (from[0] + from[1] + from[2]) / 3;
-                QPolygonF clip;
-                for (const QPointF &corner : from)
-                    clip << corner + (corner - middle) * (1.2 / std::max(1.0, QLineF(corner, middle).length()));
-                painter.save();
-                painter.setTransform(map * toOutput);
-                QPainterPath path;
-                path.addPolygon(clip);
-                painter.setClipPath(path, Qt::IntersectClip);  // Within the canvas still.
-                const QRectF bounds = clip.boundingRect().adjusted(-1, -1, 1, 1) & QRectF(image.rect());
-                painter.drawImage(bounds, image, bounds);
-                painter.restore();
-            }
+            from[i] = spread.topLeft() + QPointF(x * cw, y * ch);
+            to[i] = bendWith(pins, from[i]);
+            const QPointF out = toOutput.map(to[i]);
+            reach |= QRectF(out, QSizeF(1, 1));
         }
+    const QRect area = reach.toAlignedRect().adjusted(-2, -2, 2, 2) &
+                       QRect(0, 0, painter.device()->width(), painter.device()->height());
+    if (area.isEmpty())
+        return;
+    auto copyAt = [&](const QPointF &p) { return p * factor + QPointF(margin, margin); };
+
+    auto mesh = [&](const QImage &picture) {
+        QImage scratch(area.size(), QImage::Format_ARGB32_Premultiplied);
+        scratch.fill(Qt::transparent);
+        QPainter into(&scratch);
+        into.setRenderHint(QPainter::SmoothPixmapTransform);
+        // Each triangle replaces what's under it: where the slightly bigger
+        // triangles overlap, see-through pixels (an edge, a glow) aren't
+        // laid twice.
+        into.setCompositionMode(QPainter::CompositionMode_Source);
+        const QTransform shift = QTransform::fromTranslate(-area.x(), -area.y());
+        for (int y = 0; y < cells; ++y)
+            for (int x = 0; x < cells; ++x) {
+                const int i = y * (cells + 1) + x;
+                const int corners[4] = {i, i + 1, i + cells + 2, i + cells + 1};
+                for (const auto &tri : {std::array<int, 3>{0, 1, 2}, std::array<int, 3>{0, 2, 3}}) {
+                    QPolygonF source, target;
+                    for (int k : tri) {
+                        source << copyAt(from[corners[k]]);
+                        target << to[corners[k]];
+                    }
+                    // Three points fix the map from the image to where it's bent to.
+                    const QPointF u = source[1] - source[0], v = source[2] - source[0];
+                    const QPointF U = target[1] - target[0], V = target[2] - target[0];
+                    const double det = u.x() * v.y() - u.y() * v.x();
+                    if (std::abs(det) < 1e-12)
+                        continue;
+                    const QTransform linear((U.x() * v.y() - V.x() * u.y()) / det, (U.y() * v.y() - V.y() * u.y()) / det,
+                                            (V.x() * u.x() - U.x() * v.x()) / det, (V.y() * u.x() - U.y() * v.x()) / det, 0, 0);
+                    const QTransform map = QTransform::fromTranslate(-source[0].x(), -source[0].y()) * linear *
+                                           QTransform::fromTranslate(target[0].x(), target[0].y());
+                    // A hair bigger than the triangle, so neighbours meet.
+                    const QPointF middle = (source[0] + source[1] + source[2]) / 3;
+                    QPolygonF clip;
+                    for (const QPointF &corner : source)
+                        clip << corner + (corner - middle) * (1.2 / std::max(1.0, QLineF(corner, middle).length()));
+                    into.setTransform(map * toOutput * shift);
+                    QPainterPath path;
+                    path.addPolygon(clip);
+                    into.setClipPath(path);
+                    const QRectF bounds = clip.boundingRect().adjusted(-1, -1, 1, 1) & QRectF(picture.rect());
+                    into.drawImage(bounds, picture, bounds);
+                }
+            }
+        return scratch;
+    };
+
+    painter.save();
+    painter.setTransform(QTransform());
+    painter.setOpacity(opacity);
+    painter.setCompositionMode(blend);
+    painter.drawImage(area.topLeft(), mesh(image));
+    if (!glow.isNull()) {
+        painter.setCompositionMode(QPainter::CompositionMode_Screen);
+        painter.drawImage(area.topLeft(), mesh(glow));
+    }
     painter.restore();
 }
 
@@ -1253,12 +1319,8 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         painter.setOpacity(opacity);
         painter.setCompositionMode(compositionFor(layer.blend));
         if (!layer.pins.isEmpty() && isBent(scene, layer, t)) {
-            const QSizeF size = assets.size(layer.source);
-            drawBent(painter, scene, layer, t, image, factor, margin, size, toOutput);
-            if (!glow.isNull()) {
-                painter.setCompositionMode(QPainter::CompositionMode_Screen);
-                drawBent(painter, scene, layer, t, glow, factor, margin, size, toOutput);
-            }
+            drawBent(painter, scene, layer, t, image, glow, factor, margin, assets.size(layer.source), toOutput, opacity,
+                     compositionFor(layer.blend));
             continue;
         }
         // The copy is drawn back up to the image's full size, less its padding.
@@ -1295,7 +1357,10 @@ int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &poi
         const QTransform inverse = layerTransform(scene, assets, i, t).inverted(&invertible);
         if (image.isNull() || !invertible)
             continue;
-        const QPoint local = (inverse.map(point) * factor).toPoint();
+        QPointF unbent = inverse.map(point);
+        if (!layer.pins.isEmpty() && isBent(scene, layer, t))
+            unbent = unbend(scene, layer, unbent, t);
+        const QPoint local = (unbent * factor).toPoint();
         if (image.rect().contains(local) && qAlpha(image.pixel(local)) > 16)
             return i;
     }

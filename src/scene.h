@@ -202,6 +202,14 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
 // Where a point of a pinned layer's image goes, bent by its pins at time t
 // (moving least squares, as rigid as can be); the point itself if unpinned.
 QPointF bend(const Scene &scene, const Layer &layer, const QPointF &point, double t);
+// The point of the image that the bend takes to target.
+QPointF unbend(const Scene &scene, const Layer &layer, const QPointF &target, double t);
+// A layer's pins at time t, where they started (p) and where they are (q).
+struct PinSet {
+    QList<QPointF> p, q;
+};
+PinSet pinsAt(const Scene &scene, const Layer &layer, double t);
+QPointF bendWith(const PinSet &pins, const QPointF &point);
 bool isBent(const Scene &scene, const Layer &layer, double t);
 // A particle layer's particles at time t, in world pixels.
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1);

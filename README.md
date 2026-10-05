@@ -196,7 +196,9 @@ photo.omotion/
 - **`pins`** bend a layer: points on its image (in its pixels), each with
   an offset `pin<n>x` and `pin<n>y` (constant or keyed, like any property).
   The image follows them as rigidly as it can, so a pin at the shoulder and
-  one at the hand bend an arm at the elbow.
+  one at the hand bend an arm at the elbow. A pin added to a layer that's
+  already bent holds the point it's put on; the rest can settle a little,
+  as every pin has a say in the bend.
 - **`audio`** is the scene's sound: its `source`, the `offset` in seconds
   into it where the scene starts, and `volume` (1 as it is).
 - **`particles`** makes a layer of rain, snow and the like instead of an

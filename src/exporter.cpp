@@ -112,7 +112,10 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
              << "-loop" << "0";
     if (withSound) {
         args << "-map" << "0:v" << "-map" << "1:a" << "-c:a" << (m_format == "mp4" ? "aac" : "libopus") << "-b:a"
-             << "160k" << "-filter:a" << QString("volume=%1").arg(std::clamp(audio.value("volume").toDouble(1), 0.0, 4.0))
+             << "160k"
+             // Padded with silence, and stopped with the picture: a short
+             // sound mustn't cut the video short.
+             << "-filter:a" << QString("volume=%1,apad").arg(std::clamp(audio.value("volume").toDouble(1), 0.0, 4.0))
              << "-shortest";
     }
     args << m_partial;

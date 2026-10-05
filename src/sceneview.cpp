@@ -112,9 +112,13 @@ void SceneView::paint(QPainter *painter) {
     if (scene.background.alpha() < 255) {
         painter->save();
         painter->setClipRect(canvas);
+        // Only the squares in sight: zoomed far in, the canvas is huge.
         const int cell = 10;
-        for (int y = 0; y * cell < canvas.height(); ++y)
-            for (int x = 0; x * cell < canvas.width(); ++x)
+        const QRectF shown = canvas & QRectF(0, 0, width(), height());
+        const int x0 = int((shown.left() - canvas.left()) / cell), x1 = int(std::ceil((shown.right() - canvas.left()) / cell));
+        const int y0 = int((shown.top() - canvas.top()) / cell), y1 = int(std::ceil((shown.bottom() - canvas.top()) / cell));
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x)
                 painter->fillRect(QRectF(canvas.left() + x * cell, canvas.top() + y * cell, cell, cell),
                                   (x + y) % 2 ? QColor("#2a2a2e") : QColor("#1c1c1f"));
         painter->restore();
