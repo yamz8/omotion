@@ -1938,6 +1938,29 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
     }
     painter.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
     renderScene(painter, scene, assets, t, !world.isNull());
+    painter.end();
+    // Film grain over a world's frame, the painting and what moves in it
+    // alike, so the two share one surface. Seeded by the frame's time, so a
+    // frame always comes out the same.
+    if (!world.isNull()) {
+        const double grain = scene.raw.value("world").toObject().value("grain").toDouble(.025);
+        if (grain > 0) {
+            quint32 seed = quint32(std::lround(t * 1000)) * 2654435761u + 1;
+            const int amount = int(std::lround(grain * 255));
+            for (int y = 0; y < frame.height(); ++y) {
+                QRgb *line = reinterpret_cast<QRgb *>(frame.scanLine(y));
+                for (int x = 0; x < frame.width(); ++x) {
+                    seed = seed * 1664525u + 1013904223u;
+                    const int n = int((seed >> 24) & 0xff) - 128;
+                    const int d = n * amount / 128, a = qAlpha(line[x]);
+                    // Premultiplied: the grain is scaled by how solid the pixel is.
+                    const int e = d * a / 255;
+                    line[x] = qRgba(std::clamp(qRed(line[x]) + e, 0, a), std::clamp(qGreen(line[x]) + e, 0, a),
+                                    std::clamp(qBlue(line[x]) + e, 0, a), a);
+                }
+            }
+        }
+    }
     return frame;
 }
 

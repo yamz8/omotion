@@ -39,6 +39,7 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
             const QString path = QDir(directory).filePath(layer.source);
             const QString picture = QDir(directory).filePath(World::texture(scene, *m_assets, index));
             layers.append(QVariantMap{{"layer", index},
+                                      {"opaque", index == scene.indexOf(m_info.picture)},
                                       {"picture", QUrl::fromLocalFile(picture)},
                                       {"shaped", !layer.raw.value("shape").toObject().isEmpty()}});
             parts.append(QJsonArray{index, layer.source, layer.anchor.x(), layer.anchor.y(),
@@ -80,7 +81,9 @@ void WorldSource::update() {
         frame["fov"] = f.fov;
         QVariantMap places;
         for (const World::Placement &place : f.layers)
-            places.insert(QString::number(place.layer), QVariantMap{{"position", QVariant::fromValue(place.position)},
+            places.insert(QString::number(place.layer), QVariantMap{{"haze", place.haze},
+                                                                     {"wrap", place.wrap},
+                                                                     {"position", QVariant::fromValue(place.position)},
                                                                      {"rotation", QVariant::fromValue(place.rotation)},
                                                                      {"scale", place.scale},
                                                                      {"opacity", place.opacity},
@@ -102,6 +105,7 @@ void WorldSource::update() {
                                       {"strength", burst.strength}});
         frame["bursts"] = bursts;
         frame["time"] = f.time;
+        frame["haze"] = f.haze;
         frame["dustCount"] = f.puffs.size();
 
         // Puffs face the camera and are drawn far to near, so they blend.
@@ -167,9 +171,10 @@ void WorldGeometry::rebuild() {
             setPrimitiveType(PrimitiveType::Triangles);
             addAttribute(Attribute::PositionSemantic, 0, Attribute::F32Type);
             addAttribute(Attribute::TexCoord0Semantic, 3 * sizeof(float), Attribute::F32Type);
-            if (mesh.stride >= 11) {
+            if (mesh.stride >= 14) {
                 addAttribute(Attribute::ColorSemantic, 5 * sizeof(float), Attribute::F32Type);
                 addAttribute(Attribute::TexCoord1Semantic, 9 * sizeof(float), Attribute::F32Type);
+                addAttribute(Attribute::NormalSemantic, 11 * sizeof(float), Attribute::F32Type);
             }
             addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
             setBounds(mesh.minimum, mesh.maximum);

@@ -59,6 +59,10 @@ Info info(const Scene &scene) {
     }
     info.height = ground.value("height").toDouble(info.height);
     info.scale = world.value("scale").toDouble(1);
+    const QJsonObject haze = world.value("haze").toObject();
+    if (QColor(haze.value("color").toString()).isValid())
+        info.haze = QColor(haze.value("color").toString());
+    info.hazeDensity = std::max(0.0, haze.value("density").toDouble(info.hazeDensity));
     if (!(info.scale > 0))
         info.scale = 1;
     info.wide = world.value("wide").toString();
@@ -627,7 +631,8 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
         const QImage cut = assets.mip(layer.source, std::min(1.0, 1024 / fit.size.width()), &factor);
         const float cutScale = float(cut.width() / fit.size.width());
         Mesh mesh;
-        mesh.stride = 11;  // The last two are a texture coordinate: worn, and nothing.
+        // Then two as a texture coordinate (worn, and nothing) and the normal.
+        mesh.stride = 14;
         mesh.vertices.resize(qsizetype(count) * mesh.stride * sizeof(float));
         float *v = reinterpret_cast<float *>(mesh.vertices.data());
         mesh.minimum = QVector3D(1e9f, 1e9f, 1e9f);
@@ -651,6 +656,8 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
             *v++ = alpha;
             *v++ = worn;
             *v++ = 0;
+            const QVector3D normal = toWorld.mapVector(normals[i]).normalized();
+            *v++ = normal.x(), *v++ = normal.y(), *v++ = normal.z();
             mesh.minimum = QVector3D(std::min(mesh.minimum.x(), p.x()), std::min(mesh.minimum.y(), p.y()), std::min(mesh.minimum.z(), p.z()));
             mesh.maximum = QVector3D(std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()), std::max(mesh.maximum.z(), p.z()));
         }
@@ -793,6 +800,42 @@ QVector3D pivot(const Scene &scene, AssetCache &assets, int index) {
     return pictureToWorld(world).map(depth.point(ax, ay, distance));
 }
 
+namespace {
+// The light around a piece: the background's average colour in a ring
+// round its rectangle, a little brighter, as light does round an edge.
+QColor wrapColour(const Scene &scene, AssetCache &assets, int index) {
+    static QHash<QByteArray, QColor> cache;
+    const QByteArray key = layerKey(scene, assets, index);
+    {
+        QMutexLocker lock(&cacheLock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const int root = scene.indexOf(info(scene).picture);
+    double factor = 1;
+    const QSizeF full = assets.size(scene.layers.at(root).source);
+    const QImage background = assets.mip(scene.layers.at(root).source, std::min(1.0, 256 / std::max(1.0, full.width())), &factor);
+    const double k = background.width() / std::max(1.0, full.width());
+    const QSizeF size = assets.size(scene.layers.at(index).source);
+    const QRectF piece(offsetInPicture(scene, index) * k, size * k);
+    const QRectF ring = piece.adjusted(-piece.width() * .25, -piece.height() * .25, piece.width() * .25, piece.height() * .25);
+    double r = 0, g = 0, b = 0;
+    int n = 0;
+    for (int y = std::max(0, int(ring.top())); y < std::min(background.height(), int(ring.bottom())); ++y)
+        for (int x = std::max(0, int(ring.left())); x < std::min(background.width(), int(ring.right())); ++x) {
+            if (piece.contains(x, y))
+                continue;
+            const QRgb p = background.pixel(x, y);
+            r += qRed(p), g += qGreen(p), b += qBlue(p), ++n;
+        }
+    QColor colour = n ? QColor(int(r / n), int(g / n), int(b / n)) : QColor(128, 128, 128);
+    colour = colour.lighter(130);
+    QMutexLocker lock(&cacheLock);
+    cache.insert(key, colour);
+    return colour;
+}
+}
+
 Frame frame(const Scene &scene, AssetCache &assets, double t) {
     Frame frame;
     const Info world = info(scene);
@@ -822,6 +865,7 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     frame.fov = 2 * std::atan(std::tan(half) / zoom) * 180 / M_PI;
 
     frame.time = t;
+    frame.haze = world.haze;
     for (const int index : layers(scene)) {
         const Layer &layer = scene.layers.at(index);
         const QVector3D centre = pivot(scene, assets, index);
@@ -857,6 +901,11 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         const QVector3D move(scene.value(layer, "worldX", t), scene.value(layer, "worldY", t), -scene.value(layer, "worldZ", t));
         // Turned and scaled about its pivot, then moved.
         place.position = centre + move - place.rotation.rotatedVector(centre * place.scale);
+        if (index != root) {
+            const double farther = (centre + move - frame.cameraPosition).length() - (centre - toWorld.map(QVector3D(0, 0, 0))).length();
+            place.haze = float(farther > 0 ? 1 - std::exp(-world.hazeDensity * farther) : 0);
+            place.wrap = wrapColour(scene, assets, index);
+        }
         frame.layers.append(place);
 
         // Shaped pieces stand on the ground: a shadow under them.
@@ -1616,6 +1665,33 @@ QColor dustColour(const QImage &picture) {
 }
 }
 
+namespace {
+// The air's colour: the picture just below its horizon, where the land is
+// farthest and most hidden by it.
+QColor hazeColour(const QImage &picture, const Ai::Geometry &shape) {
+    // The air is the colour of the farthest land the picture shows, where
+    // most of it lies between the eye and the land: the farthest tenth of
+    // what isn't sky.
+    const QImage small = picture.scaled(shape.width, shape.height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                             .convertToFormat(QImage::Format_RGB32);
+    QList<std::pair<float, QRgb>> land;
+    for (int y = 0; y < shape.height; y += 2)
+        for (int x = 0; x < shape.width; x += 2) {
+            const size_t i = size_t(y) * shape.width + x;
+            if (shape.valid[i])
+                land.append({shape.points[i * 3 + 2], small.pixel(x, y)});
+        }
+    if (land.isEmpty())
+        return QColor(200, 140, 160);
+    std::sort(land.begin(), land.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    double r = 0, g = 0, b = 0;
+    const int n = std::max<qsizetype>(1, land.size() / 10);
+    for (int i = 0; i < n; ++i)
+        r += qRed(land.at(i).second), g += qGreen(land.at(i).second), b += qBlue(land.at(i).second);
+    return QColor(int(r / n), int(g / n), int(b / n));
+}
+}
+
 bool build(Scene &scene, AssetCache &assets, int index, QString *error, double horizon) {
     auto fail = [error](const QString &message) {
         if (error)
@@ -1908,6 +1984,7 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         {"wide", wideFile},
         {"far", QJsonObject{{"depth", farDepthFile}, {"picture", farPictureFile}}},
         {"dust", dustColour(picture).name()},
+        {"haze", QJsonObject{{"color", hazeColour(picture, shape).name()}, {"density", .02}}},
         {"margin", QJsonArray{margin.width(), margin.height()}},
         {"ground", QJsonObject{{"up", QJsonArray{std::round(up.x() * 1e4) / 1e4, std::round(up.y() * 1e4) / 1e4,
                                                    std::round(up.z() * 1e4) / 1e4}},

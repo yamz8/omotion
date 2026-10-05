@@ -91,6 +91,9 @@ Item {
                         cullMode: Material.NoCulling
                         vertexShader: "qrc:/shape.vert"
                         fragmentShader: "qrc:/shape.frag"
+                        property color wrap: holder.place.wrap || "black"
+                        property real haze: holder.place.haze || 0
+                        property color hazeColour: view.frame.haze || "white"
                         property TextureInput picture: TextureInput {
                             texture: Texture {
                                 source: holder.modelData.picture
@@ -103,21 +106,31 @@ Item {
                     }
                 }
 
+                // A flat piece, or the picture itself (solid, so it hides
+                // what's behind it and the layer behind its edges).
                 Model {
                     visible: !holder.modelData.shaped
                     geometry: WorldGeometry { source: view.source; layer: holder.modelData.shaped ? -1 : holder.modelData.layer }
-                    opacity: holder.place.opacity === undefined ? 1 : holder.place.opacity
-                    materials: DefaultMaterial {
-                        lighting: DefaultMaterial.NoLighting
+                    materials: CustomMaterial {
+                        shadingMode: CustomMaterial.Unshaded
                         cullMode: Material.NoCulling
-                        diffuseMap: Texture {
-                            source: holder.modelData.picture
-                            generateMipmaps: true
-                            mipFilter: Texture.Linear
-                            // A shape can reach past its cut-out's rectangle;
-                            // out there it's see-through, not the far side.
-                            tilingModeHorizontal: Texture.ClampToEdge
-                            tilingModeVertical: Texture.ClampToEdge
+                        vertexShader: "qrc:/card.vert"
+                        fragmentShader: "qrc:/card.frag"
+                        sourceBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.One
+                        destinationBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.OneMinusSrcAlpha
+                        property real fade: holder.place.opacity === undefined ? 1 : holder.place.opacity
+                        property real haze: holder.place.haze || 0
+                        property color hazeColour: view.frame.haze || "white"
+                        property TextureInput picture: TextureInput {
+                            texture: Texture {
+                                source: holder.modelData.picture
+                                generateMipmaps: true
+                                mipFilter: Texture.Linear
+                                // A shape can reach past its cut-out's rectangle;
+                                // out there it's see-through, not the far side.
+                                tilingModeHorizontal: Texture.ClampToEdge
+                                tilingModeVertical: Texture.ClampToEdge
+                            }
                         }
                     }
                 }

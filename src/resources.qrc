@@ -11,5 +11,7 @@
         <file alias="dust.frag">dust.frag</file>
         <file alias="shape.vert">shape.vert</file>
         <file alias="shape.frag">shape.frag</file>
+        <file alias="card.vert">card.vert</file>
+        <file alias="card.frag">card.frag</file>
     </qresource>
 </RCC>

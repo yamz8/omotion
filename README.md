@@ -294,7 +294,11 @@ photo.omotion/
   behind a hill or a sign),
   its `scale`, the `dust` colour and the camera's `shutter` in degrees (180
   unless set; 0 for none): what moves fast smears across that much of each
-  frame, as on film. A world layer's **world properties**
+  frame, as on film. `haze` is the air: its `color` (from the farthest land
+  the picture shows) and `density`, how much of a piece it hides a meter
+  farther than the picture has it (0.02). `grain` is the film grain over a
+  world's frames (0.025; 0 for none). A shape's sides the picture never
+  showed catch the light round it at their edges. A world layer's **world properties**
   move it from where it is in the picture: `worldX` (right), `worldY` (up)
   and `worldZ` (away), in meters, and `yaw` (right), `pitch` (nose up) and
   `roll` (lean right), in degrees, turning about its pivot. The camera has

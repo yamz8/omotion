@@ -54,6 +54,10 @@ struct Info {
     // picture's pixels go) and how high the camera stood above it.
     QVector3D up{0, -1, 0};
     double height = 1.6;
+    // The air: its colour (from the picture near the horizon) and how much
+    // of a thing it hides a meter (past where the picture has it).
+    QColor haze{200, 140, 160};
+    double hazeDensity = .02;
     // Everything's distance times this: what the AI reads from a picture,
     // a painting above all, is only roughly to scale.
     double scale = 1;
@@ -99,6 +103,12 @@ QVector3D pivot(const Scene &scene, AssetCache &assets, int index);
 // its world properties about its pivot.
 struct Placement {
     int layer = -1;
+    // Farther than the picture shows it, a piece fades into the air: how
+    // much (0 to 1). The picture already has the air at its own distance.
+    float haze = 0;
+    // The light around it, for its edges that face away (a shape's sides
+    // the picture never showed).
+    QColor wrap{0, 0, 0};
     QVector3D position;
     QQuaternion rotation;
     float scale = 1;
@@ -129,6 +139,7 @@ struct Puff {
 };
 struct Frame {
     double time = 0;
+    QColor haze{200, 140, 160};
     QList<Shadow> shadows;
     QList<Burst> bursts;
     QList<Puff> puffs;
