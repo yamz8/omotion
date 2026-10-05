@@ -6,12 +6,14 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QPainter>
 #include <QSaveFile>
 #include <QImageWriter>
 #include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "ai.h"
 
@@ -45,6 +47,9 @@ Info info(const Scene &scene) {
             info.up = v.normalized();
     }
     info.height = ground.value("height").toDouble(info.height);
+    info.wide = world.value("wide").toString();
+    const QJsonArray margin = world.value("margin").toArray();
+    info.margin = QSize(margin.at(0).toInt(), margin.at(1).toInt());
     info.valid = scene.indexOf(info.picture) >= 0 && !info.depth.isEmpty() && !info.behind.isEmpty() && info.focal > 0;
     return info;
 }
@@ -120,10 +125,15 @@ struct DepthMap {
     QImage image;
     QSize picture;
     double focal = 0;
+    // What part of the picture the image covers: all of it unless said, or
+    // more, for one carried on past its edges.
+    QPointF origin;
+    QSizeF span;
     // Distance at a point of the picture, nearest cell.
     double at(double x, double y) const {
-        const int gx = std::clamp(int(x / picture.width() * image.width()), 0, image.width() - 1);
-        const int gy = std::clamp(int(y / picture.height() * image.height()), 0, image.height() - 1);
+        const QSizeF covers = span.isEmpty() ? QSizeF(picture) : span;
+        const int gx = std::clamp(int((x - origin.x()) / covers.width() * image.width()), 0, image.width() - 1);
+        const int gy = std::clamp(int((y - origin.y()) / covers.height() * image.height()), 0, image.height() - 1);
         return decodeDepth(reinterpret_cast<const quint16 *>(image.constScanLine(gy))[gx]);
     }
     QVector3D point(double x, double y, double distance) const {
@@ -262,15 +272,22 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     if (!world.valid || index < 0 || index >= scene.layers.size() || rootOf(scene, index) != root)
         return {};
     const Layer &layer = scene.layers.at(index);
-    const QSizeF size = assets.size(layer.source);
+    QSizeF size = assets.size(layer.source);
     const QSizeF picture = assets.size(pictureFile(scene, root));
     if (size.isEmpty() || picture.isEmpty())
         return {};
-    // The picture lies on what's behind its pieces; pieces on the picture's own depth.
-    const DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
+    // The picture lies on what's behind its pieces; pieces on the picture's
+    // own depth. Carried on past its edges, the picture covers more.
+    DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
     if (depth.image.isNull())
         return {};
-    const QPointF offset = index == root ? QPointF() : offsetInPicture(scene, index);
+    QPointF offset = index == root ? QPointF() : offsetInPicture(scene, index);
+    if (index == root && !world.wide.isEmpty() && !world.margin.isEmpty()) {
+        offset = -QPointF(world.margin.width(), world.margin.height());
+        size = picture + QSizeF(2 * world.margin.width(), 2 * world.margin.height());
+        depth.origin = offset;
+        depth.span = size;
+    }
     const QMatrix4x4 toWorld = pictureToWorld(world);
 
     // About four picture pixels a cell, at most 320 across, at least 2.
@@ -278,7 +295,7 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     // Its box counts only what shows: a piece's see-through margin reads
     // whatever lies behind it, as far as the sky.
     double factor = 1;
-    const QImage image = assets.mip(layer.source, std::min(1.0, 4 * cols / size.width()), &factor);
+    const QImage image = index == root ? QImage() : assets.mip(layer.source, std::min(1.0, 4 * cols / size.width()), &factor);
     const DepthMap own = index == root || image.isNull() ? depth : pieceDepth(depth, image, offset, size);
     Mesh mesh;
     mesh.vertices.resize(qsizetype(cols + 1) * (rows + 1) * 5 * sizeof(float));
@@ -406,6 +423,23 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
     QImage image = assets.image(source).convertToFormat(QImage::Format_ARGB32);
     if (image.isNull())
         return source;
+    // The picture the world was made from wears its margins too: the layer
+    // in the middle, the painted margins round it, at most 6144 across.
+    const Info world = info(scene);
+    if (index == scene.indexOf(world.picture) && !world.wide.isEmpty() && !world.margin.isEmpty()) {
+        const QImage wide(dir.filePath(world.wide));
+        if (!wide.isNull()) {
+            const QSizeF full = QSizeF(image.size()) + QSizeF(2 * world.margin.width(), 2 * world.margin.height());
+            const double s = std::min(1.0, 6144 / full.width());
+            QImage both(int(full.width() * s), int(full.height() * s), QImage::Format_ARGB32);
+            QPainter painter(&both);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(both.rect(), wide);
+            painter.drawImage(QRectF(world.margin.width() * s, world.margin.height() * s, image.width() * s, image.height() * s), image);
+            painter.end();
+            image = both;
+        }
+    }
     bool seeThrough = false;
     for (int y = 0; y < image.height() && !seeThrough; ++y) {
         const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
@@ -478,6 +512,86 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
     if (!writeDepth(image, dir.filePath(file), &error))
         return source;
     return file;
+}
+
+QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
+    // Worked at about 768 pixels across the picture, in squares of 384.
+    const double s = std::min(1.0, 768.0 / picture.width());
+    const QSize inner(std::max(1, int(picture.width() * s)), std::max(1, int(picture.height() * s)));
+    const QSize pad(int(margin.width() * s), int(margin.height() * s));
+    QImage work(inner.width() + 2 * pad.width(), inner.height() + 2 * pad.height(), QImage::Format_RGB32);
+    work.fill(Qt::black);
+    QImage known(work.size(), QImage::Format_Grayscale8);
+    known.fill(0);
+    {
+        QPainter painter(&work);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(QRect(QPoint(pad.width(), pad.height()), inner), picture);
+        QPainter mark(&known);
+        mark.fillRect(QRect(QPoint(pad.width(), pad.height()), inner), Qt::white);
+    }
+    const int tile = std::min({384, work.width(), work.height()}), step = tile * 2 / 3;
+    QList<QPoint> corners;
+    for (int y = 0;; y += step) {
+        const int top = std::min(y, work.height() - tile);
+        for (int x = 0;; x += step) {
+            const int left = std::min(x, work.width() - tile);
+            corners.append(QPoint(left, top));
+            if (left == work.width() - tile)
+                break;
+        }
+        if (top == work.height() - tile)
+            break;
+    }
+    // Squares next to what's known go first, so each one has something to
+    // carry on from; rounds repeat until nothing is left unknown.
+    for (int round = 0; round < 6; ++round) {
+        bool left = false;
+        for (const QPoint &corner : corners) {
+            const QRect area(corner, QSize(tile, tile));
+            QImage mask(area.size(), QImage::Format_Alpha8);
+            int unknown = 0, seen = 0;
+            for (int y = 0; y < tile; ++y) {
+                const uchar *k = known.constScanLine(area.y() + y) + area.x();
+                uchar *m = mask.scanLine(y);
+                for (int x = 0; x < tile; ++x) {
+                    m[x] = k[x] ? 0 : 255;
+                    unknown += !k[x];
+                    seen += k[x] != 0;
+                }
+            }
+            if (!unknown)
+                continue;
+            if (seen < tile * tile / 8) {
+                left = true;
+                continue;
+            }
+            const QImage filled = Ai::instance().inpaint(work.copy(area), mask, error);
+            if (filled.isNull())
+                return {};
+            const QImage rgb = filled.convertToFormat(QImage::Format_RGB32);
+            for (int y = 0; y < tile; ++y) {
+                QRgb *to = reinterpret_cast<QRgb *>(work.scanLine(area.y() + y)) + area.x();
+                uchar *k = known.scanLine(area.y() + y) + area.x();
+                const QRgb *from = reinterpret_cast<const QRgb *>(rgb.constScanLine(y));
+                for (int x = 0; x < tile; ++x)
+                    if (!k[x]) {
+                        to[x] = from[x];
+                        k[x] = 255;
+                    }
+            }
+        }
+        if (!left)
+            break;
+    }
+    // Back at full size: the margins as painted, the picture as it was.
+    QImage wide(picture.width() + 2 * margin.width(), picture.height() + 2 * margin.height(), QImage::Format_RGB32);
+    QPainter painter(&wide);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.drawImage(wide.rect(), work);
+    painter.drawImage(QPoint(margin.width(), margin.height()), picture.convertToFormat(QImage::Format_RGB32));
+    painter.end();
+    return wide;
 }
 
 void fillDepth(QImage &depth, const QImage &hole) {
@@ -638,18 +752,60 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error) {
     }
     height = std::max(.05, height);
 
+    // Past the edges: the picture carried on by the AI, and its distances by
+    // the cells around, or the ground where a view down meets it, so a
+    // camera can turn a little without looking off the world.
+    const QSize margin(int(picture.width() * .3), int(picture.height() * .25));
+    const QImage wide = outpaint(picture, margin, error);
+    if (wide.isNull())
+        return false;
+    const QSize cells(int(std::round(margin.width() * toCell)), int(std::round(margin.height() * toCell)));
+    QImage around(shape.width + 2 * cells.width(), shape.height + 2 * cells.height(), QImage::Format_Grayscale16);
+    QImage unknown(around.size(), QImage::Format_Grayscale8);
+    unknown.fill(255);
+    for (int y = 0; y < shape.height; ++y) {
+        memcpy(around.scanLine(y + cells.height()) + cells.width() * 2, behind.constScanLine(y), size_t(shape.width) * 2);
+        memset(unknown.scanLine(y + cells.height()) + cells.width(), 0, size_t(shape.width));
+    }
+    fillDepth(around, unknown);
+    const double cellToPicture = 1 / toCell;
+    for (int y = 0; y < around.height(); ++y)
+        for (int x = 0; x < around.width(); ++x) {
+            if (!unknown.scanLine(y)[x])
+                continue;
+            const double px = (x - cells.width() + .5) * cellToPicture, py = (y - cells.height() + .5) * cellToPicture;
+            const QVector3D ray((px - picture.width() / 2.0) / shape.focal, (py - picture.height() / 2.0) / shape.focal, 1);
+            const double down = QVector3D::dotProduct(up, ray);
+            if (down < -.01) {
+                const double ground = height / -down;
+                quint16 &code = reinterpret_cast<quint16 *>(around.scanLine(y))[x];
+                code = encodeDepth(std::min(decodeDepth(code), ground));
+            }
+        }
+    behind = around;
+
     const QDir dir(assets.directory());
     dir.mkpath("assets/world");
     const QString stem = "assets/world/" + scene.layers.at(root).name.toLower().replace(QRegularExpression("[^a-z0-9]+"), "-");
     const QString depthFile = stem + "-depth.png", behindFile = stem + "-behind.png";
+    const QString wideFile = stem + "-wide.jpg";
+    QSaveFile wideOut(dir.filePath(wideFile));
+    QImageWriter wideWriter(&wideOut, "jpg");
+    wideWriter.setQuality(92);
     if (!writeDepth(depth, dir.filePath(depthFile), error) || !writeDepth(behind, dir.filePath(behindFile), error))
         return false;
+    // Stored at most 4096 across: only its margins are used, and soft.
+    const QImage stored = wide.width() > 4096 ? wide.scaledToWidth(4096, Qt::SmoothTransformation) : wide;
+    if (!wideOut.open(QIODevice::WriteOnly) || !wideWriter.write(stored) || !wideOut.commit())
+        return fail(QString("Couldn't write %1.").arg(wideFile));
     const double focal = shape.focal;
     scene.raw["world"] = QJsonObject{
         {"picture", scene.layers.at(root).name},
         {"depth", depthFile},
         {"behind", behindFile},
         {"focal", std::round(focal * 10) / 10},
+        {"wide", wideFile},
+        {"margin", QJsonArray{margin.width(), margin.height()}},
         {"ground", QJsonObject{{"up", QJsonArray{std::round(up.x() * 1e4) / 1e4, std::round(up.y() * 1e4) / 1e4,
                                                    std::round(up.z() * 1e4) / 1e4}},
                                {"height", std::round(height * 1000) / 1000}}}};

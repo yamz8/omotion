@@ -38,6 +38,11 @@ struct Info {
     QString depth;     // The picture's depth.
     QString behind;    // The same with the pieces taken out and filled in.
     double focal = 0;  // The lens, in the picture's pixels.
+    // The picture carried on past its edges, so a camera can turn a little:
+    // an image of the picture with margin pixels added each side (painted in
+    // by the AI), and those margins.
+    QString wide;
+    QSize margin;
     // The ground, from the camera: which way is up (y down, z forward, as a
     // picture's pixels go) and how high the camera stood above it.
     QVector3D up{0, -1, 0};
@@ -99,6 +104,11 @@ QString texture(const Scene &scene, AssetCache &assets, int index);
 // The picture under a layer turned into a world (the AI reads it, a few
 // seconds): writes the depth images and sets the scene's "world".
 bool build(Scene &scene, AssetCache &assets, int index, QString *error);
+
+// The picture carried on past each edge by margin pixels, painted in by the
+// AI a square at a time around the border, each square seeing what's
+// already there; done at a working size, so quick and soft.
+QImage outpaint(const QImage &picture, const QSize &margin, QString *error);
 
 // Fills the cells of a depth grid where hole is set from the cells around,
 // smoothly, in log distance; holes as wide as the grid still fill.
