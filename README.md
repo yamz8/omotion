@@ -51,11 +51,14 @@ layer it stands in, so it rides the camera move with its surroundings, and
 5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
    to change how they ease into the next one. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
-6. Give a layer a look in the inspector: brightness, contrast, saturation,
+6. Press **V** for the camera, and animate it like a layer: pan, zoom and
+   turn the whole scene. Each layer's **Follow camera** sets how much the
+   camera moves it, for depth.
+7. Give a layer a look in the inspector: brightness, contrast, saturation,
    blur, glow, and a blend (**B**). They animate like everything else. A
    glowing light is a soft copy-cut of it (**Shift+Enter**), set to *add*,
    with the contrast up, the brightness down and some glow.
-7. **Ctrl+E** exports into `renders/` in the project folder, at full size or
+8. **Ctrl+E** exports into `renders/` in the project folder, at full size or
    half (**H** in the export menu). GIFs play at 15 fps to stay small.
 
 ## Shortcuts
@@ -84,8 +87,9 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
+| `V` | Select the camera (or its row at the top of the timeline): drag the canvas to pan, wheel to zoom, `[ ]` to turn, `K` to keyframe |
 | `D` | Split the picture into layers by depth (AI) |
-| `A` | Make a depth split move: a looping parallax camera |
+| `A` | Make a depth split move: the camera drifts and pushes in, and each depth layer follows it by its depth |
 | `W` | Select: click a thing (AI), Shift+click adds, right-click leaves out; `C` then fine-tunes its points |
 | `M` | In `W`: switch between AI select and colour select |
 | `T` | In `W`: the AI's other guesses, or colour select's tolerance (also the mouse wheel) |
@@ -181,6 +185,12 @@ photo.omotion/
   either a number or animated under `keys`; keys win.
 - **`blend`** is how a layer mixes with the ones below: `normal`, `add`,
   `screen`, `multiply`, `overlay`, `lighten` or `darken`.
+- **`camera`** is what part of the world the canvas shows: `x`, `y` (the
+  world point at the canvas centre), `zoom` and `rotation`, constant or
+  under `keys` like a layer's. A layer's **`follow`** says how much the
+  camera moves it, from 1 (fully; the default) to 0 (stuck to the screen);
+  depth layers follow less the farther they are, which is the parallax.
+  Without its own `follow`, a layer takes its parent's.
 - **`x`, `y`** place the layer's `anchor`, its pivot as a fraction of the
   image (`[0.5, 0.5]` is the centre). Without a parent that's in canvas
   pixels. With a `parent` it's in the parent image's pixels, and the layer

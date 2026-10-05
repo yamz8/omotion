@@ -123,16 +123,20 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: timeline.layers.length
+            // The camera's row first, then the layers, top one first.
+            model: timeline.layers.length + 1
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
             delegate: Rectangle {
                 id: row
                 required property int index
-                readonly property int layerIndex: timeline.layers.length - 1 - index
-                readonly property var entry: timeline.layers[layerIndex] || {}
-                readonly property bool selected: backend.selected === layerIndex
+                readonly property bool isCamera: index === 0
+                readonly property int layerIndex: isCamera ? -2 : timeline.layers.length - index
+                readonly property var entry: isCamera
+                    ? {"name": "Camera", "visible": true, "depth": 0, "parent": "", "keyTimes": backend.sceneInfo.cameraKeys || []}
+                    : (timeline.layers[layerIndex] || {})
+                readonly property bool selected: isCamera ? backend.cameraSelected : backend.selected === layerIndex
                 width: rows.width
                 height: 26
                 color: selected ? "#1e2130" : (index % 2 ? "#121215" : "transparent")
@@ -150,22 +154,26 @@ Rectangle {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: { backend.select(row.layerIndex); timeline.done() }
-                            onDoubleClicked: timeline.rename(row.layerIndex)
+                            onClicked: {
+                                if (row.isCamera) backend.selectCamera();
+                                else backend.select(row.layerIndex);
+                                timeline.done();
+                            }
+                            onDoubleClicked: if (!row.isCamera) timeline.rename(row.layerIndex)
                         }
                         Row {
                             anchors.verticalCenter: parent.verticalCenter
                             x: 10
                             spacing: 6
                             Label {
-                                text: row.entry.visible ? "●" : "○"
+                                text: row.isCamera ? "◎" : row.entry.visible ? "●" : "○"
                                 color: row.entry.visible ? win.text : win.muted
                                 width: 14
                                 MouseArea {
                                     anchors.fill: parent
                                     anchors.margins: -4
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: { backend.toggleVisible(row.layerIndex); timeline.done() }
+                                    onClicked: { if (!row.isCamera) backend.toggleVisible(row.layerIndex); timeline.done() }
                                 }
                             }
                             Item { width: (row.entry.depth || 0) * 12; height: 1 }
@@ -239,7 +247,8 @@ Rectangle {
                                     return;
                                 }
                                 if (!shift) backend.clearKeySelection();
-                                backend.select(row.layerIndex);
+                                if (row.isCamera) backend.selectCamera();
+                                else backend.select(row.layerIndex);
                                 scrub(mouse.x);
                             }
                             onPositionChanged: function (mouse) {
@@ -288,6 +297,7 @@ Rectangle {
     Label {
         anchors.centerIn: parent
         visible: timeline.layers.length === 0
+        anchors.verticalCenterOffset: 30
         text: "No layers yet. Press I to add an image."
         color: win.muted
     }

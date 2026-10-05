@@ -32,6 +32,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap sceneInfo READ sceneInfo NOTIFY sceneChanged)
     Q_PROPERTY(QVariantList layers READ layers NOTIFY sceneChanged)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectedChanged)
+    Q_PROPERTY(bool cameraSelected READ cameraSelected NOTIFY selectedChanged)
     Q_PROPERTY(QVariantMap values READ values NOTIFY valuesChanged)
     Q_PROPERTY(double time READ time WRITE seek NOTIFY timeChanged)
     Q_PROPERTY(int frame READ frame NOTIFY timeChanged)
@@ -70,6 +71,7 @@ public:
     QVariantMap sceneInfo() const;
     QVariantList layers() const;
     int selected() const { return m_selected; }
+    bool cameraSelected() const { return m_cameraSelected; }
     QVariantMap values() const;
     double time() const { return m_time; }
     int frame() const;
@@ -119,6 +121,12 @@ public:
 
     // Layers.
     Q_INVOKABLE void select(int index);
+    // Selects the camera: edits, keyframes and dragging the canvas then move
+    // the view rather than a layer.
+    Q_INVOKABLE void selectCamera();
+    // How much the selected layer follows the camera, 0 to 1; below 0 goes
+    // back to following its parent.
+    Q_INVOKABLE void setFollow(double follow);
     Q_INVOKABLE void selectNext(int direction);
     Q_INVOKABLE void selectAt(double x, double y);
     Q_INVOKABLE void toggleVisible(int index);
@@ -243,6 +251,13 @@ private:
     void tick();
     void reportMissing();
     QString selectedName() const;
+    // What edits act on: the selected layer, or the camera.
+    int target() const { return m_cameraSelected ? Scene::CameraIndex : m_selected; }
+    const Layer *targetLayer() const { return m_scene.at(target()); }
+    // The camera zooms where a layer scales.
+    QString propertyFor(const QString &property) const {
+        return m_cameraSelected && property == "scale" ? QString("zoom") : property;
+    }
     void restoreSelection(const QString &name);
     void setKeySelection(const QList<KeyRef> &refs);
     // The selected columns, or the selected layer's keys at the playhead.
@@ -256,6 +271,7 @@ private:
     QList<QJsonObject> m_redo;
     bool m_inGesture = false;
     int m_selected = -1;
+    bool m_cameraSelected = false;
     double m_time = 0;
     bool m_playing = false;
     QElapsedTimer m_clock;

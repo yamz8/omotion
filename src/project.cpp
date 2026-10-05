@@ -1072,6 +1072,7 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImag
 }
 
 bool animateParallax(Scene &scene, AssetCache &assets, int index, double strength, QString *error) {
+    Q_UNUSED(assets);
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -1100,28 +1101,34 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
             for (auto &keys : layer.keys)
                 for (Key &key : keys)
                     key.t *= stretch;
+        for (auto &keys : scene.camera.keys)
+            for (Key &key : keys)
+                key.t *= stretch;
         scene.duration = 10;
     }
     const double d = scene.duration;
     auto loop = [d](double a, double b) {
         return QList<Key>{Key{0, a, "inOut"}, Key{d / 2, b, "inOut"}, Key{d, a, "inOut"}};
     };
-    // The camera drifts and pushes in a little; it's scaled up enough that the
-    // nearest layer, which moves furthest, never shows an edge.
-    const double base = scene.value(source, "scale", 0);
-    const double x = scene.value(source, "x", 0);
-    const double overscan = 1 + 2 * (strength * 4 / 3) / scene.width + .01;
-    source.keys["scale"] = loop(base * overscan, base * overscan * 1.035);
-    source.keys["x"] = loop(x, x - strength / 3);
-    // The source's new scale key already holds the overscan.
-    const double perPixel = 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)));
+
+    // Depth becomes how much each layer follows the camera: the background
+    // a little, the nearest fully, so one camera move makes the parallax.
+    constexpr double FarFollow = .3;
+    scene.layers[index].follow = FarFollow;
     for (const int i : pieces) {
-        Layer &piece = scene.layers[i];
-        const double depth = piece.raw.value("cut").toObject().value("depth").toDouble();
-        const double shift = strength * std::clamp((depth - far) / std::max(1e-6, 1 - far), 0.0, 1.0);
-        const double px = scene.value(piece, "x", 0);
-        piece.keys["x"] = loop(px, px - shift * perPixel);
+        const double depth = scene.layers.at(i).raw.value("cut").toObject().value("depth").toDouble();
+        scene.layers[i].follow = FarFollow + (1 - FarFollow) * std::clamp((depth - far) / std::max(1e-6, 1 - far), 0.0, 1.0);
     }
+
+    // The camera drifts sideways and pushes in a little, zoomed in enough
+    // from the start that no layer's edge comes into view.
+    const double centre = scene.width / 2.0;
+    const double reach = std::min(std::abs(strength), centre * .5);
+    const double zoom = 1 / (1 - reach / centre) + .01;
+    Layer &camera = scene.camera;
+    const double x = scene.value(camera, "x", 0);
+    camera.keys["x"] = loop(x, x + reach);
+    camera.keys["zoom"] = loop(zoom, zoom * 1.035);
     return true;
 }
 
@@ -1145,9 +1152,7 @@ bool applyPreset(Scene &scene, AssetCache &assets, int index, const QString &pre
     const double d = scene.duration;
     // Canvas pixels in the layer's parent's pixels, for moves that should
     // look the same size whatever the parent's scale.
-    const int parent = scene.indexOf(layer.parent);
-    const double perPixel =
-        parent < 0 ? 1 : 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, parent, t)));
+    const double perPixel = 1 / std::max(1e-6, pixelScale(parentTransform(scene, assets, index, t)));
 
     // A whole number of cycles in the scene, near the period wanted.
     auto cycles = [d](double period) { return std::max(1, int(std::lround(d / period))); };

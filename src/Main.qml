@@ -31,6 +31,8 @@ ApplicationWindow {
     readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible
                                   && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool hasLayer: ready && backend.selected >= 0
+    // Something whose properties edits act on: a layer, or the camera.
+    readonly property bool hasTarget: ready && (backend.selected >= 0 || backend.cameraSelected)
 
     function quit() {
         if (backend.exporting && !quitConfirmVisible) {
@@ -100,31 +102,32 @@ ApplicationWindow {
     Shortcut { sequence: "Delete"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.deleteLayer() }
     Shortcut { sequence: "F2"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: timeline.rename(backend.selected) }
     Shortcut { sequence: "Ctrl+D"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.duplicateLayer() }
+    Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.selectCamera() }
     Shortcut { sequence: "Ctrl+Shift+K"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.cleanUp() }
     Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
 
-    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", -1) }
-    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", 1) }
-    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("y", -1) }
-    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("y", 1) }
-    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", -10) }
-    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("x", 10) }
-    Shortcut { sequence: "Shift+Up"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("y", -10) }
-    Shortcut { sequence: "Shift+Down"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("y", 10) }
-    Shortcut { sequence: "["; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("rotation", -1) }
-    Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("rotation", 1) }
-    Shortcut { sequence: "{"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("rotation", -15) }
-    Shortcut { sequence: "}"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.adjust("rotation", 15) }
-    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.multiply("scale", 1 / 1.05) }
-    Shortcut { sequences: ["=", "+"]; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.multiply("scale", 1.05) }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", -1) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", 1) }
+    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", -1) }
+    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", 1) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", -10) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", 10) }
+    Shortcut { sequence: "Shift+Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", -10) }
+    Shortcut { sequence: "Shift+Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", 10) }
+    Shortcut { sequence: "["; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", -1) }
+    Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", 1) }
+    Shortcut { sequence: "{"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", -15) }
+    Shortcut { sequence: "}"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", 15) }
+    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.multiply("scale", 1 / 1.05) }
+    Shortcut { sequences: ["=", "+"]; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.multiply("scale", 1.05) }
     Shortcut { sequence: "9"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setProperty("opacity", Math.max(0, backend.values.opacity - 0.1)) }
     Shortcut { sequence: "0"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setProperty("opacity", Math.min(1, backend.values.opacity + 0.1)) }
 
-    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.keyAll() }
-    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.removeKeys() }
-    Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleEase() }
-    Shortcut { sequence: "Ctrl+C"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.copyKeys() }
-    Shortcut { sequence: "Ctrl+V"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.pasteKeys() }
+    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.keyAll() }
+    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.removeKeys() }
+    Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.cycleEase() }
+    Shortcut { sequence: "Ctrl+C"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.copyKeys() }
+    Shortcut { sequence: "Ctrl+V"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.pasteKeys() }
 
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
@@ -300,11 +303,12 @@ ApplicationWindow {
                             backend.setPivotAt(p.x, p.y);
                             return;
                         }
-                        // Shift drags the selected layer even when another
-                        // one is on top of it.
-                        if (!(mouse.modifiers & Qt.ShiftModifier))
+                        // With the camera selected, dragging pans the view.
+                        // Otherwise, Shift drags the selected layer even
+                        // when another one is on top of it.
+                        if (!backend.cameraSelected && !(mouse.modifiers & Qt.ShiftModifier))
                             backend.selectAt(p.x, p.y);
-                        if (backend.selected >= 0 && mouse.button === Qt.LeftButton) {
+                        if ((backend.selected >= 0 || backend.cameraSelected) && mouse.button === Qt.LeftButton) {
                             backend.beginDrag(p.x, p.y);
                             dragging = true;
                         }
@@ -339,7 +343,7 @@ ApplicationWindow {
                             backend.adjustTolerance(wheel.angleDelta.y > 0 ? 4 : -4);
                             return;
                         }
-                        if (backend.selected < 0)
+                        if (backend.selected < 0 && !backend.cameraSelected)
                             return;
                         const step = wheel.angleDelta.y > 0 ? 1 : -1;
                         if (wheel.modifiers & Qt.ControlModifier)

@@ -36,9 +36,26 @@ const QStringList &Scene::eases() {
     return list;
 }
 
+const QStringList &Scene::cameraProperties() {
+    static const QStringList list{"x", "y", "zoom", "rotation"};
+    return list;
+}
+
+Layer *Scene::at(int index) {
+    if (index == CameraIndex)
+        return &camera;
+    return index >= 0 && index < layers.size() ? &layers[index] : nullptr;
+}
+
+const Layer *Scene::at(int index) const {
+    if (index == CameraIndex)
+        return &camera;
+    return index >= 0 && index < layers.size() ? &layers.at(index) : nullptr;
+}
+
 double Scene::defaultValue(const QString &property) {
     if (property == "scale" || property == "scaleX" || property == "scaleY" || property == "opacity" ||
-        property == "contrast" || property == "saturation")
+        property == "contrast" || property == "saturation" || property == "zoom")
         return 1;
     return 0;
 }
@@ -93,6 +110,8 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         layer.source = object.value("source").toString();
         layer.parent = object.value("parent").toString();
         layer.visible = object.value("visible").toBool(true);
+        if (object.contains("follow"))
+            layer.follow = object.value("follow").toDouble(1);
         layer.blend = object.value("blend").toString("normal");
         if (!blends().contains(layer.blend))
             return fail(QString("Layer \"%1\" blends as \"%2\"; use one of %3.")
@@ -129,6 +148,36 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
                 layer.keys.insert(it.key(), list);
         }
         scene.layers.append(layer);
+    }
+
+    // The camera: looking at the canvas centre, unzoomed, unless it says.
+    {
+        const QJsonObject camera = json.value("camera").toObject();
+        scene.camera.name = "camera";
+        scene.camera.raw = camera;
+        scene.camera.base["x"] = camera.value("x").toDouble(scene.width / 2.0);
+        scene.camera.base["y"] = camera.value("y").toDouble(scene.height / 2.0);
+        scene.camera.base["zoom"] = camera.value("zoom").toDouble(1);
+        scene.camera.base["rotation"] = camera.value("rotation").toDouble(0);
+        if (scene.camera.base["zoom"] <= 0)
+            return fail("The camera's zoom must be more than 0.");
+        const QJsonObject keys = camera.value("keys").toObject();
+        for (auto it = keys.begin(); it != keys.end(); ++it) {
+            if (!cameraProperties().contains(it.key()))
+                return fail(QString("The camera animates \"%1\", which isn't one of its properties (%2).")
+                                .arg(it.key(), cameraProperties().join(", ")));
+            QList<Key> list;
+            for (const auto &entry : it.value().toArray()) {
+                const QJsonObject k = entry.toObject();
+                Key key{k.value("t").toDouble(), k.value("v").toDouble(), k.value("ease").toString("linear")};
+                if (!eases().contains(key.ease))
+                    return fail(QString("The camera uses easing \"%1\"; use one of %2.").arg(key.ease, eases().join(", ")));
+                list.append(key);
+            }
+            std::stable_sort(list.begin(), list.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
+            if (!list.isEmpty())
+                scene.camera.keys.insert(it.key(), list);
+        }
     }
 
     for (const Layer &layer : scene.layers) {
@@ -175,6 +224,10 @@ QJsonObject Scene::toJson() const {
             object.remove("blend");
         else
             object.insert("blend", layer.blend);
+        if (std::isnan(layer.follow))
+            object.remove("follow");
+        else
+            object.insert("follow", layer.follow);
         // Looks only appear once they're used, so plain layers stay short.
         for (const QString &property : properties()) {
             const double v = layer.base.value(property, defaultValue(property));
@@ -198,6 +251,31 @@ QJsonObject Scene::toJson() const {
         array.append(object);
     }
     json.insert("layers", array);
+
+    // The camera appears once it's moved or animated.
+    QJsonObject cam = camera.raw;
+    const double cx = camera.base.value("x", width / 2.0), cy = camera.base.value("y", height / 2.0);
+    const double zoom = camera.base.value("zoom", 1), turn = camera.base.value("rotation", 0);
+    QJsonObject cameraKeys;
+    for (auto it = camera.keys.begin(); it != camera.keys.end(); ++it) {
+        QJsonArray list;
+        for (const Key &key : it.value())
+            list.append(QJsonObject{{"t", key.t}, {"v", key.v}, {"ease", key.ease}});
+        cameraKeys.insert(it.key(), list);
+    }
+    if (cameraKeys.isEmpty() && cx == width / 2.0 && cy == height / 2.0 && zoom == 1 && turn == 0 && cam.isEmpty()) {
+        json.remove("camera");
+    } else {
+        cam.insert("x", cx);
+        cam.insert("y", cy);
+        cam.insert("zoom", zoom);
+        cam.insert("rotation", turn);
+        if (cameraKeys.isEmpty())
+            cam.remove("keys");
+        else
+            cam.insert("keys", cameraKeys);
+        json.insert("camera", cam);
+    }
     return json;
 }
 
@@ -242,9 +320,9 @@ double Scene::value(const Layer &layer, const QString &property, double t) const
 }
 
 void Scene::setValue(int index, const QString &property, double t, double v) {
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return;
-    Layer &layer = layers[index];
+    Layer &layer = (*at(index));
     auto it = layer.keys.find(property);
     if (it == layer.keys.end() || it->isEmpty()) {
         layer.base.insert(property, v);
@@ -270,10 +348,10 @@ void Scene::setValue(int index, const QString &property, double t, double v) {
 }
 
 void Scene::keyProperty(int index, const QString &property, double t) {
-    if (index < 0 || index >= layers.size() || !properties().contains(property))
+    if (!at(index) || !(index == CameraIndex ? cameraProperties() : properties()).contains(property))
         return;
-    const double v = value(layers.at(index), property, t);
-    Layer &layer = layers[index];
+    const double v = value((*at(index)), property, t);
+    Layer &layer = (*at(index));
     if (layer.keys.value(property).isEmpty())
         layer.keys.insert(property, {Key{t, v, "inOut"}});
     else
@@ -281,10 +359,15 @@ void Scene::keyProperty(int index, const QString &property, double t) {
 }
 
 void Scene::keyAll(int index, double t) {
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return;
+    if (index == CameraIndex) {
+        for (const QString &property : cameraProperties())
+            keyProperty(index, property, t);
+        return;
+    }
     for (const QString &property : properties()) {
-        const Layer &layer = layers.at(index);
+        const Layer &layer = (*at(index));
         const bool used = layer.keys.contains(property) ||
                           layer.base.value(property, defaultValue(property)) != defaultValue(property);
         if (!lookProperties().contains(property) || used)
@@ -293,9 +376,9 @@ void Scene::keyAll(int index, double t) {
 }
 
 bool Scene::removeKeysAt(int index, double t) {
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return false;
-    Layer &layer = layers[index];
+    Layer &layer = (*at(index));
     const double tolerance = .5 / fps;
     bool removed = false;
     for (auto it = layer.keys.begin(); it != layer.keys.end();) {
@@ -315,11 +398,11 @@ bool Scene::removeKeysAt(int index, double t) {
 }
 
 QString Scene::cycleEaseAt(int index, double t) {
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return {};
     const double tolerance = .5 / fps;
     QString next;
-    for (auto &keys : layers[index].keys) {
+    for (auto &keys : (*at(index)).keys) {
         for (Key &key : keys) {
             if (std::abs(key.t - t) >= tolerance)
                 continue;
@@ -338,11 +421,11 @@ bool KeyRef::operator==(const KeyRef &other) const {
 double Scene::snap(double t) const { return std::clamp(std::round(t * fps) / fps, 0.0, duration); }
 
 bool Scene::setEaseAt(int index, double t, const QString &ease) {
-    if (index < 0 || index >= layers.size() || !eases().contains(ease))
+    if (!at(index) || !eases().contains(ease))
         return false;
     const double tolerance = .5 / fps;
     bool found = false;
-    for (auto &keys : layers[index].keys)
+    for (auto &keys : (*at(index)).keys)
         for (Key &key : keys)
             if (std::abs(key.t - t) < tolerance) {
                 key.ease = ease;
@@ -374,9 +457,9 @@ QList<KeyRef> Scene::shiftKeys(const QList<KeyRef> &refs, double delta) {
     // don't trample one another, then set them all down at their new times.
     QList<Lifted> lifted;
     for (const KeyRef &ref : refs) {
-        if (ref.layer < 0 || ref.layer >= layers.size())
+        if (!at(ref.layer))
             continue;
-        for (auto it = layers[ref.layer].keys.begin(); it != layers[ref.layer].keys.end(); ++it) {
+        for (auto it = (*at(ref.layer)).keys.begin(); it != (*at(ref.layer)).keys.end(); ++it) {
             QList<Key> &keys = *it;
             for (int i = keys.size() - 1; i >= 0; --i)
                 if (std::abs(keys.at(i).t - ref.t) < tolerance)
@@ -386,7 +469,7 @@ QList<KeyRef> Scene::shiftKeys(const QList<KeyRef> &refs, double delta) {
     QList<KeyRef> moved;
     for (Lifted &item : lifted) {
         item.key.t = snap(item.key.t + delta);
-        placeKey(layers[item.layer].keys[item.property], item.key, tolerance);
+        placeKey((*at(item.layer)).keys[item.property], item.key, tolerance);
         const KeyRef ref{item.layer, item.key.t};
         if (!moved.contains(ref))
             moved.append(ref);
@@ -401,9 +484,9 @@ QList<KeyClip> Scene::copyKeys(const QList<KeyRef> &refs) const {
     for (const KeyRef &ref : refs)
         first = std::min(first, ref.t);
     for (const KeyRef &ref : refs) {
-        if (ref.layer < 0 || ref.layer >= layers.size())
+        if (!at(ref.layer))
             continue;
-        const Layer &layer = layers.at(ref.layer);
+        const Layer &layer = (*at(ref.layer));
         for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
             for (const Key &key : *it)
                 if (std::abs(key.t - ref.t) < tolerance)
@@ -414,12 +497,12 @@ QList<KeyClip> Scene::copyKeys(const QList<KeyRef> &refs) const {
 
 QList<KeyRef> Scene::pasteKeys(int index, double t, const QList<KeyClip> &clip) {
     QList<KeyRef> pasted;
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return pasted;
     for (const KeyClip &item : clip) {
         Key key = item.key;
         key.t = snap(t + key.t);
-        placeKey(layers[index].keys[item.property], key, .5 / fps);
+        placeKey((*at(index)).keys[item.property], key, .5 / fps);
         const KeyRef ref{index, key.t};
         if (!pasted.contains(ref))
             pasted.append(ref);
@@ -429,9 +512,9 @@ QList<KeyRef> Scene::pasteKeys(int index, double t, const QList<KeyClip> &clip) 
 
 QList<double> Scene::keyTimes(int index) const {
     QList<double> times;
-    if (index < 0 || index >= layers.size())
+    if (!at(index))
         return times;
-    for (const auto &keys : layers.at(index).keys)
+    for (const auto &keys : (*at(index)).keys)
         for (const Key &key : keys)
             times.append(key.t);
     std::sort(times.begin(), times.end());
@@ -639,7 +722,46 @@ const AssetCache::Look &AssetCache::look(const QString &source, double factor, d
     return *m_looks.insert(key, look);
 }
 
+QTransform cameraTransform(const Scene &scene, double follow, double t) {
+    const Layer &camera = scene.camera;
+    const QPointF centre(scene.width / 2.0, scene.height / 2.0);
+    // A layer that follows the camera partly sees a camera moved, zoomed and
+    // turned partly: far things drift less than near ones.
+    const QPointF pan = (QPointF(scene.value(camera, "x", t), scene.value(camera, "y", t)) - centre) * follow;
+    const double zoom = 1 + (scene.value(camera, "zoom", t) - 1) * follow;
+    QTransform transform;
+    transform.translate(centre.x(), centre.y());
+    transform.rotate(-scene.value(camera, "rotation", t) * follow);
+    transform.scale(zoom, zoom);
+    transform.translate(-(centre.x() + pan.x()), -(centre.y() + pan.y()));
+    return transform;
+}
+
+double followOf(const Scene &scene, int index) {
+    QSet<int> seen;
+    while (index >= 0 && index < scene.layers.size() && !seen.contains(index)) {
+        seen.insert(index);
+        const Layer &layer = scene.layers.at(index);
+        if (!std::isnan(layer.follow))
+            return layer.follow;
+        index = layer.parent.isEmpty() ? -1 : scene.indexOf(layer.parent);
+    }
+    return 1;
+}
+
 QTransform layerTransform(const Scene &scene, AssetCache &assets, int index, double t) {
+    return chainTransform(scene, assets, index, t) * cameraTransform(scene, followOf(scene, index), t);
+}
+
+QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t) {
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const int parent = scene.indexOf(scene.layers.at(index).parent);
+    return (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
+           cameraTransform(scene, followOf(scene, index), t);
+}
+
+QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, double t) {
     QTransform transform;
     QSet<int> seen;
     // Built from the layer up through its parents: each one maps its own

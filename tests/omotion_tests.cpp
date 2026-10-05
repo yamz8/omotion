@@ -811,6 +811,43 @@ private slots:
         QVERIFY(qAbs(scene.value(swaying, "rotation", 2.5)) > 3);  // ...at the stretched quarter.
     }
 
+    void theCameraMovesWhatFollowsIt() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // 100×100 canvas, squares 40×40 at the centre.
+        QCOMPARE(scene.toJson().contains("camera"), false);  // At rest it isn't written.
+        scene.camera.base["x"] = 60;  // Look 10 px right of centre...
+        scene.camera.base["zoom"] = 2;  // ...twice as close.
+        scene.layers[0].follow = 0;     // The bottom one is stuck to the screen.
+        scene.layers[1].follow = .5;
+        const QPointF fixed = layerTransform(scene, assets, 0, 0).map(QPointF(20, 20));
+        QCOMPARE(fixed, QPointF(50, 50));  // Didn't move.
+        // Half-following: half the pan (5) and half the extra zoom (1.5).
+        const QPointF half = layerTransform(scene, assets, 1, 0).map(QPointF(20, 20));
+        QVERIFY(QLineF(half, QPointF(50 + (50 - 55) * 1.5, 50)).length() < 1e-9);
+        // An unset follow is the parent's, and a full one the whole camera.
+        scene.layers[1].follow = std::numeric_limits<double>::quiet_NaN();
+        scene.layers[1].parent = "under";
+        QCOMPARE(followOf(scene, 1), 0.0);
+        scene.layers[1].parent.clear();
+        QCOMPARE(followOf(scene, 1), 1.0);
+        QCOMPARE(layerTransform(scene, assets, 1, 0).map(QPointF(20, 20)), QPointF(50 + (50 - 60) * 2, 50));
+
+        // Through JSON and back, with keys.
+        scene.camera.keys["rotation"] = {Key{0, 0, "inOut"}, Key{2, 30, "out"}};
+        QString error;
+        const Scene again = Scene::fromJson(scene.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(again.camera.base["zoom"], 2.0);
+        QCOMPARE(again.camera.keys["rotation"].size(), 2);
+        QCOMPARE(again.layers[0].follow, 0.0);
+        QVERIFY(std::isnan(again.layers[1].follow));
+        QJsonObject broken = scene.toJson();
+        broken["camera"] = QJsonObject{{"keys", QJsonObject{{"scale", QJsonArray{}}}}};
+        Scene::fromJson(broken, &error);
+        QVERIFY(error.contains("camera"));
+    }
+
     void parallaxMovesNearerLayersFurther() {
         QTemporaryDir dir;
         QImage depth;
@@ -982,7 +1019,8 @@ private slots:
         QCOMPARE(splitter.error(), QString());
         QVERIFY(splitter.scene().layers.size() >= 2);
         splitter.animateParallax();
-        QVERIFY(splitter.scene().layers[0].keys.contains("x"));
+        QVERIFY(splitter.scene().camera.keys.contains("x"));  // A moves the camera...
+        QVERIFY(splitter.scene().layers[0].follow < 1);       // ...which the background follows less.
         splitter.undo();
         splitter.undo();
         QCOMPARE(splitter.scene().layers.size(), 1);
@@ -1327,6 +1365,61 @@ private slots:
         backend.seek(1);
         backend.removeKeys();
         QCOMPARE(backend.scene().keyTimes(0), (QList<double>{3}));
+    }
+
+    void backendEditsTheCamera() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));  // 200×100.
+        backend.selectCamera();
+        QVERIFY(backend.cameraSelected());
+        QCOMPARE(backend.selected(), -1);
+        QCOMPARE(backend.values()["name"].toString(), QString("Camera"));
+        backend.multiply("scale", 2);  // Scale means zoom for the camera.
+        QCOMPARE(backend.values()["zoom"].toDouble(), 2.0);
+        // Dragging pans: the picture follows the hand, at the zoom.
+        backend.beginDrag(100, 50);
+        backend.dragTo(120, 50);
+        backend.endDrag();
+        QCOMPARE(backend.values()["x"].toDouble(), 90.0);
+        backend.keyAll();
+        QCOMPARE(backend.sceneInfo()["cameraKeys"].toList().size(), 1);
+        backend.seek(1);
+        backend.adjust("rotation", 10);
+        QCOMPARE(backend.scene().camera.keys["rotation"].size(), 2);
+        // Its keyframes retime like a layer's.
+        backend.selectKey(Scene::CameraIndex, 1, false);
+        backend.beginKeyDrag();
+        backend.dragKeys(.5);
+        backend.endKeyDrag();
+        QCOMPARE(backend.scene().camera.keys["rotation"].last().t, 1.5);
+        backend.undo();
+        QCOMPARE(backend.scene().camera.keys["rotation"].last().t, 1.0);
+        // Selecting a layer leaves the camera.
+        backend.select(0);
+        QVERIFY(!backend.cameraSelected());
+        backend.setFollow(.25);
+        QCOMPARE(backend.values()["follow"].toDouble(), .25);
+        QVERIFY(backend.values()["ownFollow"].toBool());
+        backend.setFollow(-1);
+        QCOMPARE(backend.values()["follow"].toDouble(), 1.0);
+    }
+
+    void cuttingThroughTheCameraLandsOnThePicture() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        scene.camera.base["zoom"] = 2;  // Zoomed into the centre (100, 50).
+        QString error;
+        // The red square (10..70, 10..50 in the picture) at 2× around the
+        // centre is canvas -80..40, -30..50; cut a bit of it on screen.
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{0, 0}, {20, 0}, {20, 20}, {0, 20}}, 0, true, &error, "bit", 0, false), 1);
+        const QRectF piece = QPolygonF(Project::cutOutline(scene, assets, 1, 0)).boundingRect();
+        QVERIFY(qAbs(piece.width() - 20) < .01);
+        const QJsonArray origin = scene.layers[1].raw["cut"].toObject()["origin"].toArray();
+        QCOMPARE(origin[0].toInt(), 50);  // Canvas 0 is picture 50 at 2× around 100.
+        QCOMPARE(origin[1].toInt(), 25);
     }
 
     void backendDragsInTheParentsPixels() {

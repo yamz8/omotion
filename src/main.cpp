@@ -215,12 +215,22 @@ int command(const QStringList &args) {
             for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
                 animated.append(it.key());
             entry["animated"] = animated;
+            entry["follow"] = followOf(scene, i);
             const QJsonObject cut = layer.raw.value("cut").toObject();
             if (!cut.isEmpty())
                 entry["cutFrom"] = cut.value("from");
             layers.append(entry);
         }
+        QJsonArray cameraAnimated;
+        for (auto it = scene.camera.keys.begin(); it != scene.camera.keys.end(); ++it)
+            cameraAnimated.append(it.key());
+        const QJsonObject camera{{"x", scene.value(scene.camera, "x", t)},
+                                 {"y", scene.value(scene.camera, "y", t)},
+                                 {"zoom", scene.value(scene.camera, "zoom", t)},
+                                 {"rotation", scene.value(scene.camera, "rotation", t)},
+                                 {"animated", cameraAnimated}};
         const QJsonObject info{{"directory", directory},
+                               {"camera", camera},
                                {"width", scene.width},
                                {"height", scene.height},
                                {"fps", scene.fps},

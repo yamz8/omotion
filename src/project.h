@@ -77,10 +77,11 @@ QImage depthOf(const Scene &scene, AssetCache &assets, int layer, QString *error
 QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImage &depth, int count, double feather,
                         QString *error);
 
-// Animates a depth-split layer as a slow camera move: it drifts sideways and
-// pushes in, and nearer layers slide further, strength canvas pixels for the
-// nearest, as a loop over the scene's duration. A scene shorter than 10
-// seconds is made 10, stretching any animation it already has to match.
+// Animates a depth-split layer as a slow camera move: each depth layer
+// follows the camera by its depth (the background 30%, the nearest fully),
+// and the camera drifts strength canvas pixels sideways and pushes in, as a
+// loop over the scene's duration. A scene shorter than 10 seconds is made 10,
+// stretching any animation it already has to match.
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
 
 // The motion presets, by name: sway, float, pulse, bounce, spin, fade.

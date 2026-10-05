@@ -13,7 +13,7 @@ Rectangle {
     signal done()
 
     readonly property var v: backend.values
-    readonly property bool hasLayer: backend.selected >= 0
+    readonly property bool hasLayer: backend.selected >= 0 || backend.cameraSelected
 
     // Compact fields; Material's own are sized for touch.
     component SmallField: TextField {
@@ -122,7 +122,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Label {
-                visible: inspector.hasLayer
+                visible: inspector.hasLayer && !backend.cameraSelected
                 text: (inspector.v.source || "") + (inspector.v.parent ? "\nmoves with " + inspector.v.parent : "")
                 color: win.muted
                 font.pixelSize: 12
@@ -137,8 +137,28 @@ Rectangle {
                 Layout.fillWidth: true
             }
 
+            // The camera, when it's selected.
             ColumnLayout {
-                visible: inspector.hasLayer
+                visible: backend.cameraSelected
+                Layout.fillWidth: true
+                Layout.topMargin: 8
+                spacing: 4
+                PropertyRow { name: "x"; label: "X" }
+                PropertyRow { name: "y"; label: "Y" }
+                PropertyRow { name: "zoom"; label: "Zoom %"; factor: 100; decimals: 1 }
+                PropertyRow { name: "rotation"; label: "Rotation°" }
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "X and Y are the point of the picture at the middle of the view. Layers follow the camera as much as their Follow camera says."
+                }
+            }
+
+            ColumnLayout {
+                visible: inspector.hasLayer && !backend.cameraSelected
                 Layout.fillWidth: true
                 Layout.topMargin: 8
                 spacing: 4
@@ -152,14 +172,14 @@ Rectangle {
             }
 
             Label {
-                visible: inspector.hasLayer
+                visible: inspector.hasLayer && !backend.cameraSelected
                 Layout.topMargin: 10
                 text: "Look"
                 color: win.text
                 font.bold: true
             }
             ColumnLayout {
-                visible: inspector.hasLayer
+                visible: inspector.hasLayer && !backend.cameraSelected
                 Layout.fillWidth: true
                 spacing: 4
                 RowLayout {
@@ -183,6 +203,34 @@ Rectangle {
                 PropertyRow { name: "saturation"; label: "Saturation %"; factor: 100; decimals: 0 }
                 PropertyRow { name: "blur"; label: "Blur px"; decimals: 1 }
                 PropertyRow { name: "glow"; label: "Glow px"; decimals: 1 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    spacing: 8
+                    Label {
+                        text: inspector.v.ownFollow ? "●" : "○"
+                        color: inspector.v.ownFollow ? theme.accent : win.muted
+                        font.pixelSize: 12
+                        Layout.preferredWidth: 14
+                        ToolTip.visible: followMouse.containsMouse
+                        ToolTip.text: inspector.v.ownFollow ? "Its own; click to follow its parent again" : "Its parent's"
+                        MouseArea {
+                            id: followMouse
+                            anchors.fill: parent
+                            anchors.margins: -4
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: if (inspector.v.ownFollow) backend.setFollow(-1)
+                        }
+                    }
+                    Label { text: "Follow camera %"; color: win.text; Layout.preferredWidth: 90; elide: Text.ElideRight }
+                    NumberField {
+                        Layout.fillWidth: true
+                        decimals: 0
+                        value: (inspector.v.follow === undefined ? 1 : inspector.v.follow) * 100
+                        onCommitted: function (n) { backend.setFollow(n / 100) }
+                    }
+                }
             }
 
             Label {

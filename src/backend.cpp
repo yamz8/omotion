@@ -12,6 +12,7 @@
 #include <QUrl>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "project.h"
 
@@ -104,7 +105,13 @@ QVariantMap Backend::sceneInfo() const {
             {"fps", m_scene.fps},
             {"duration", m_scene.duration},
             {"frames", m_scene.frameCount()},
-            {"background", m_scene.background.name(QColor::HexArgb)}};
+            {"background", m_scene.background.name(QColor::HexArgb)},
+            {"cameraKeys", [this] {
+                 QVariantList times;
+                 for (double t : m_scene.keyTimes(Scene::CameraIndex))
+                     times.append(t);
+                 return times;
+             }()}};
 }
 
 QVariantList Backend::layers() const {
@@ -130,6 +137,27 @@ QVariantList Backend::layers() const {
 }
 
 QVariantMap Backend::values() const {
+    auto easeHere = [this](const Layer &layer) {
+        QString ease;
+        for (const auto &keys : layer.keys)
+            for (const Key &key : keys)
+                if (std::abs(key.t - m_time) < .5 / m_scene.fps)
+                    ease = key.ease;
+        return ease;
+    };
+    if (m_cameraSelected) {
+        const Layer &camera = m_scene.camera;
+        QVariantMap map{{"name", "Camera"}, {"camera", true}};
+        QVariantList animated;
+        for (const QString &property : Scene::cameraProperties()) {
+            map.insert(property, m_scene.value(camera, property, m_time));
+            if (camera.keys.contains(property))
+                animated.append(property);
+        }
+        map.insert("animated", animated);
+        map.insert("keyEase", easeHere(camera));
+        return map;
+    }
     if (m_selected < 0 || m_selected >= m_scene.layers.size())
         return {};
     const Layer &layer = m_scene.layers.at(m_selected);
@@ -146,14 +174,10 @@ QVariantMap Backend::values() const {
             animated.append(property);
     }
     map.insert("animated", animated);
-
+    map.insert("follow", followOf(m_scene, m_selected));
+    map.insert("ownFollow", !std::isnan(layer.follow));
     // The easing of a keyframe under the playhead, for the inspector.
-    QString ease;
-    for (const auto &keys : layer.keys)
-        for (const Key &key : keys)
-            if (std::abs(key.t - m_time) < .5 / m_scene.fps)
-                ease = key.ease;
-    map.insert("keyEase", ease);
+    map.insert("keyEase", easeHere(layer));
     return map;
 }
 
@@ -327,12 +351,34 @@ void Backend::jumpTo(bool end) {
 void Backend::select(int index) {
     if (index < -1 || index >= m_scene.layers.size())
         index = -1;
-    if (index == m_selected)
+    if (index == m_selected && !m_cameraSelected)
         return;
     ++m_aiGeneration;
     m_selected = index;
+    m_cameraSelected = false;
     emit selectedChanged();
     emit valuesChanged();
+}
+
+void Backend::selectCamera() {
+    if (!hasProject() || m_cameraSelected)
+        return;
+    if (m_tool != "move")
+        setTool("move");
+    ++m_aiGeneration;
+    m_selected = -1;
+    m_cameraSelected = true;
+    emit selectedChanged();
+    emit valuesChanged();
+    setNotice("Camera: drag the canvas to pan, the wheel zooms, [ ] turns, K keyframes it.");
+}
+
+void Backend::setFollow(double follow) {
+    if (m_selected < 0 || (follow >= 0 && !std::isfinite(follow)))
+        return;
+    checkpoint();
+    m_scene.layers[m_selected].follow = follow < 0 ? std::numeric_limits<double>::quiet_NaN() : std::clamp(follow, 0.0, 2.0);
+    changed();
 }
 
 void Backend::selectNext(int direction) {
@@ -447,41 +493,45 @@ void Backend::cycleBlend() {
     setBlend(blends.at((blends.indexOf(m_scene.layers.at(m_selected).blend) + 1) % blends.size()));
 }
 
-void Backend::setProperty(const QString &property, double value) {
-    if (m_selected < 0 || !Scene::properties().contains(property) || !std::isfinite(value))
+void Backend::setProperty(const QString &name, double value) {
+    const QString property = propertyFor(name);
+    const QStringList &valid = m_cameraSelected ? Scene::cameraProperties() : Scene::properties();
+    if (!targetLayer() || !valid.contains(property) || !std::isfinite(value))
+        return;
+    if (property == "zoom" && value <= 0)
         return;
     checkpoint();
-    m_scene.setValue(m_selected, property, m_time, value);
+    m_scene.setValue(target(), property, m_time, value);
     changed();
 }
 
 void Backend::adjust(const QString &property, double delta) {
-    if (m_selected < 0)
-        return;
-    setProperty(property, m_scene.value(m_scene.layers.at(m_selected), property, m_time) + delta);
+    if (const Layer *layer = targetLayer())
+        setProperty(property, m_scene.value(*layer, propertyFor(property), m_time) + delta);
 }
 
 void Backend::multiply(const QString &property, double factor) {
-    if (m_selected < 0)
-        return;
-    setProperty(property, m_scene.value(m_scene.layers.at(m_selected), property, m_time) * factor);
+    if (const Layer *layer = targetLayer())
+        setProperty(property, m_scene.value(*layer, propertyFor(property), m_time) * factor);
 }
 
-void Backend::keyProperty(const QString &property) {
-    if (m_selected < 0 || !Scene::properties().contains(property))
+void Backend::keyProperty(const QString &name) {
+    const QString property = propertyFor(name);
+    const QStringList &valid = m_cameraSelected ? Scene::cameraProperties() : Scene::properties();
+    if (!targetLayer() || !valid.contains(property))
         return;
     checkpoint();
-    m_scene.keyProperty(m_selected, property, m_time);
+    m_scene.keyProperty(target(), property, m_time);
     changed();
 }
 
 void Backend::keyAll() {
-    if (m_selected < 0)
+    if (!targetLayer())
         return;
     checkpoint();
-    m_scene.keyAll(m_selected, m_time);
+    m_scene.keyAll(target(), m_time);
     changed();
-    setNotice(QString("Keyframed %1 at %2s").arg(m_scene.layers.at(m_selected).name).arg(m_time, 0, 'f', 2));
+    setNotice(QString("Keyframed %1 at %2s").arg(m_cameraSelected ? QString("the camera") : targetLayer()->name).arg(m_time, 0, 'f', 2));
 }
 
 void Backend::removeKeys() {
@@ -524,7 +574,11 @@ void Backend::setSceneValue(const QString &name, const QVariant &value) {
         const int v = value.toInt();
         if (v < 2 || v > 8192)
             return setError("The canvas must be between 2 and 8192 pixels on each side.");
-        (name == "width" ? scene.width : scene.height) = v;
+        const QString axis = name == "width" ? "x" : "y";
+        int &side = name == "width" ? scene.width : scene.height;
+        if (scene.camera.base.value(axis) == side / 2.0 && !scene.camera.keys.contains(axis))
+            scene.camera.base[axis] = v / 2.0;
+        side = v;
     } else if (name == "fps") {
         const double v = value.toDouble();
         if (v <= 0 || v > 240)
@@ -567,16 +621,16 @@ void Backend::setKeySelection(const QList<KeyRef> &refs) {
 QList<KeyRef> Backend::targetKeys() const {
     if (!m_keySelection.isEmpty())
         return m_keySelection;
-    if (m_selected < 0)
+    if (!targetLayer())
         return {};
-    for (double t : m_scene.keyTimes(m_selected))
+    for (double t : m_scene.keyTimes(target()))
         if (std::abs(t - m_time) < .5 / m_scene.fps)
-            return {KeyRef{m_selected, t}};
+            return {KeyRef{target(), t}};
     return {};
 }
 
 void Backend::selectKey(int layer, double t, bool add) {
-    if (layer < 0 || layer >= m_scene.layers.size())
+    if (!m_scene.at(layer))
         return;
     const KeyRef ref{layer, t};
     QList<KeyRef> refs = m_keySelection;
@@ -590,7 +644,10 @@ void Backend::selectKey(int layer, double t, bool add) {
         // whole selection can be dragged from any of its keys.
         refs = {ref};
     }
-    select(layer);
+    if (layer == Scene::CameraIndex)
+        selectCamera();
+    else
+        select(layer);
     setKeySelection(refs);
 }
 
@@ -641,10 +698,20 @@ void Backend::copyKeys() {
 void Backend::pasteKeys() {
     if (m_clipboard.isEmpty())
         return setNotice("Nothing copied yet.");
-    if (m_selected < 0)
+    if (!targetLayer())
         return setNotice("Select the layer to paste onto.");
+    // Pasting a layer's keys on the camera keeps only what a camera has.
+    QList<KeyClip> clip = m_clipboard;
+    if (m_cameraSelected) {
+        for (KeyClip &item : clip)
+            if (item.property == "scale")
+                item.property = "zoom";
+        clip.erase(std::remove_if(clip.begin(), clip.end(),
+                                  [](const KeyClip &item) { return !Scene::cameraProperties().contains(item.property); }),
+                   clip.end());
+    }
     checkpoint();
-    setKeySelection(m_scene.pasteKeys(m_selected, m_time, m_clipboard));
+    setKeySelection(m_scene.pasteKeys(target(), m_time, clip));
     changed();
 }
 
@@ -671,24 +738,34 @@ void Backend::endGesture() {
 }
 
 void Backend::beginDrag(double x, double y) {
-    if (m_selected < 0)
+    if (!targetLayer())
         return;
     beginGesture();
-    const Layer &layer = m_scene.layers.at(m_selected);
+    const Layer &layer = *targetLayer();
     m_dragStart = QPointF(x, y);
     m_dragOrigin = QPointF(m_scene.value(layer, "x", m_time), m_scene.value(layer, "y", m_time));
     m_dragging = true;
 }
 
 void Backend::dragTo(double x, double y) {
-    if (!m_dragging || m_selected < 0)
+    if (!m_dragging || !targetLayer())
         return;
+    if (m_cameraSelected) {
+        // Dragging the view: the picture follows the hand, so the camera goes
+        // the other way, by the distance in world pixels.
+        const double zoom = std::max(1e-6, m_scene.value(m_scene.camera, "zoom", m_time));
+        QTransform turn;
+        turn.rotate(m_scene.value(m_scene.camera, "rotation", m_time));
+        const QPointF moved = turn.map(QPointF(x, y) - m_dragStart) / zoom;
+        m_scene.setValue(Scene::CameraIndex, "x", m_time, m_dragOrigin.x() - moved.x());
+        m_scene.setValue(Scene::CameraIndex, "y", m_time, m_dragOrigin.y() - moved.y());
+        changed();
+        return;
+    }
     // Positions are in the parent's pixels, so the mouse's movement on the
     // canvas is turned back through the parent before it's applied.
-    const int parent = m_scene.indexOf(m_scene.layers.at(m_selected).parent);
     bool invertible = true;
-    const QTransform inverse =
-        parent < 0 ? QTransform() : layerTransform(m_scene, m_assets, parent, m_time).inverted(&invertible);
+    const QTransform inverse = parentTransform(m_scene, m_assets, m_selected, m_time).inverted(&invertible);
     if (!invertible)
         return;
     const QPointF delta = inverse.map(QPointF(x, y)) - inverse.map(m_dragStart);

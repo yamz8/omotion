@@ -20,6 +20,8 @@ Rectangle {
                     ["H", "Hide / show"], ["F2", "Rename"], ["Ctrl+D", "Duplicate"], ["Delete", "Delete"]]],
         ["Look", [["B", "Blend: normal, add, screen, multiply, overlay, lighten, darken"],
                   ["Inspector", "Brightness, contrast, saturation, blur, glow; ◇ keyframes them"]]],
+        ["Camera", [["V", "Select the camera (or its row on the timeline)"], ["Drag", "Pan the view; the wheel zooms, [ ] turns"],
+                    ["K", "Keyframe the camera"], ["Follow camera %", "In a layer's look: how much the camera moves it"]]],
         ["Animate", [["← → ↑ ↓", "Nudge 1px (Shift: 10px)"], ["[ ]", "Rotate 1° ({ }: 15°)"],
                      ["- =", "Scale down / up (or the mouse wheel)"], ["9 0", "Opacity down / up"],
                      ["N", "A ready-made motion: sway, float, pulse, bounce, spin, fade in"],
