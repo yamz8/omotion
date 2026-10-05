@@ -226,8 +226,13 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
         }
     if (inside.isEmpty())
         return picture;
+    // A solid thing is about as deep as it is wide: its relief is held to
+    // its middle distance give or take 40% of its width there, so gaps in it
+    // that see through to the ground don't push parts of it meters back.
     std::sort(inside.begin(), inside.end());
-    const double low = inside.at(inside.size() / 20), high = inside.at(inside.size() * 19 / 20);
+    const double middle = inside.at(inside.size() / 2), width = size.width() / picture.focal * middle;
+    const double low = std::max(inside.at(inside.size() / 20), middle - .4 * width);
+    const double high = std::min(inside.at(inside.size() * 19 / 20), middle + .4 * width);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
             if (!hole.scanLine(y)[x]) {
@@ -235,6 +240,18 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
                 code = encodeDepth(std::clamp(decodeDepth(code), low, high));
             }
     fillDepth(local, hole);
+    // And smoothed a little, so its surface has no spikes.
+    for (int pass = 0; pass < 3; ++pass) {
+        const QImage before = local.copy();
+        for (int y = 1; y + 1 < h; ++y)
+            for (int x = 1; x + 1 < w; ++x) {
+                double sum = 0;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        sum += std::log(decodeDepth(reinterpret_cast<const quint16 *>(before.constScanLine(y + dy))[x + dx]));
+                reinterpret_cast<quint16 *>(local.scanLine(y))[x] = encodeDepth(std::exp(sum / 9));
+            }
+    }
     // Laid out as a picture of its own: the piece's rectangle, cell for cell.
     return DepthMap{local, QSize(int(std::round(w * cell)), int(std::round(h * cell))), picture.focal};
 }
@@ -377,6 +394,90 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         frame.layers.append(place);
     }
     return frame;
+}
+
+QString texture(const Scene &scene, AssetCache &assets, int index) {
+    const QString source = scene.layers.at(index).source;
+    const QDir dir(assets.directory());
+    const QString file = "assets/world/" + QFileInfo(source).completeBaseName() + "-3d.png";
+    const QFileInfo made(dir.filePath(file)), from(dir.filePath(source));
+    if (made.exists() && made.lastModified() >= from.lastModified())
+        return file;
+    QImage image = assets.image(source).convertToFormat(QImage::Format_ARGB32);
+    if (image.isNull())
+        return source;
+    bool seeThrough = false;
+    for (int y = 0; y < image.height() && !seeThrough; ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width() && !seeThrough; ++x)
+            seeThrough = qAlpha(line[x]) < 255;
+    }
+    if (!seeThrough)
+        return source;
+    // Push-pull on colour weighted by alpha: shrink until every cell has some
+    // colour, then grow back, filling the empty pixels from the level above.
+    struct Level {
+        int w, h;
+        std::vector<float> rgb, weight;
+    };
+    Level fine{image.width(), image.height(), {}, {}};
+    fine.rgb.resize(size_t(fine.w) * fine.h * 3);
+    fine.weight.resize(size_t(fine.w) * fine.h);
+    for (int y = 0; y < fine.h; ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < fine.w; ++x) {
+            const size_t i = size_t(y) * fine.w + x;
+            const float a = qAlpha(line[x]) / 255.f;
+            fine.weight[i] = a;
+            fine.rgb[i * 3] = qRed(line[x]) * a, fine.rgb[i * 3 + 1] = qGreen(line[x]) * a, fine.rgb[i * 3 + 2] = qBlue(line[x]) * a;
+        }
+    }
+    QList<Level> levels{fine};
+    while (levels.last().w > 1 || levels.last().h > 1) {
+        const Level &f = levels.last();
+        Level c{std::max(1, (f.w + 1) / 2), std::max(1, (f.h + 1) / 2), {}, {}};
+        c.rgb.assign(size_t(c.w) * c.h * 3, 0);
+        c.weight.assign(size_t(c.w) * c.h, 0);
+        for (int y = 0; y < f.h; ++y)
+            for (int x = 0; x < f.w; ++x) {
+                const size_t a = size_t(y) * f.w + x, b = size_t(y / 2) * c.w + x / 2;
+                for (int k = 0; k < 3; ++k)
+                    c.rgb[b * 3 + k] += f.rgb[a * 3 + k];
+                c.weight[b] += f.weight[a];
+            }
+        levels.append(c);
+    }
+    for (int l = levels.size() - 2; l >= 0; --l) {
+        Level &f = levels[l];
+        const Level &c = levels.at(l + 1);
+        for (int y = 0; y < f.h; ++y)
+            for (int x = 0; x < f.w; ++x) {
+                const size_t a = size_t(y) * f.w + x, b = size_t(y / 2) * c.w + x / 2;
+                // Colour is kept multiplied by weight; a cell short of a
+                // full weight takes the rest from the coarser level's colour.
+                const float own = std::min(1.f, f.weight[a]);
+                if (own >= 1 || c.weight[b] <= 0)
+                    continue;
+                for (int k = 0; k < 3; ++k)
+                    f.rgb[a * 3 + k] += (1 - own) * c.rgb[b * 3 + k] / c.weight[b];
+                f.weight[a] = 1;
+            }
+    }
+    const Level &top = levels.first();
+    for (int y = 0; y < top.h; ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < top.w; ++x) {
+            const size_t i = size_t(y) * top.w + x;
+            const float w = std::max(top.weight[i], 1e-6f);
+            line[x] = qRgba(std::clamp(int(top.rgb[i * 3] / w), 0, 255), std::clamp(int(top.rgb[i * 3 + 1] / w), 0, 255),
+                            std::clamp(int(top.rgb[i * 3 + 2] / w), 0, 255), qAlpha(line[x]));
+        }
+    }
+    dir.mkpath("assets/world");
+    QString error;
+    if (!writeDepth(image, dir.filePath(file), &error))
+        return source;
+    return file;
 }
 
 void fillDepth(QImage &depth, const QImage &hole) {

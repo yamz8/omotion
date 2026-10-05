@@ -90,6 +90,12 @@ struct Frame {
 };
 Frame frame(const Scene &scene, AssetCache &assets, double t);
 
+// The picture a world layer wears: its own image, with the colour at its
+// edges spread out under the see-through part, so the GPU, shrinking it,
+// doesn't darken its edges with the black of empty pixels. Made once, next
+// to the depth images; a path in the project.
+QString texture(const Scene &scene, AssetCache &assets, int index);
+
 // The picture under a layer turned into a world (the AI reads it, a few
 // seconds): writes the depth images and sets the scene's "world".
 bool build(Scene &scene, AssetCache &assets, int index, QString *error);

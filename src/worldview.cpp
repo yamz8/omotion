@@ -30,7 +30,8 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
         for (const int index : World::layers(scene)) {
             const Layer &layer = scene.layers.at(index);
             const QString path = QDir(directory).filePath(layer.source);
-            layers.append(QVariantMap{{"layer", index}, {"picture", QUrl::fromLocalFile(path)}});
+            const QString picture = QDir(directory).filePath(World::texture(scene, *m_assets, index));
+            layers.append(QVariantMap{{"layer", index}, {"picture", QUrl::fromLocalFile(picture)}});
             parts.append(QJsonArray{index, layer.source, layer.anchor.x(), layer.anchor.y(),
                                     QFileInfo(path).lastModified().toMSecsSinceEpoch()});
         }
