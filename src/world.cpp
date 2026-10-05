@@ -298,6 +298,41 @@ QQuaternion turn(double yaw, double pitch, double roll) {
 // keeping only those it covers (its edge cells mix in what's behind it, as
 // far as the sky), held between the 5th and 95th percentile of them, and
 // the rest filled from those, so its edges stay on it.
+// The picture's depth as one piece sees it: where another piece was cut
+// out over it (a car in front of painted dust, say), what's behind that
+// piece, not the piece itself.
+DepthMap depthUnderOthers(const Scene &scene, AssetCache &assets, int index, const DepthMap &depth, const DepthMap &behind) {
+    DepthMap seen = depth;
+    seen.image = depth.image.copy();
+    const double toCell = double(depth.image.width()) / depth.picture.width();
+    bool changed = false;
+    for (const int other : layers(scene)) {
+        if (other == index || other == scene.indexOf(info(scene).picture) ||
+            !scene.layers.at(other).raw.value("cut").toObject().value("punch").toBool(true))
+            continue;
+        double factor = 1;
+        const QSizeF size = assets.size(scene.layers.at(other).source);
+        const QImage image = assets.mip(scene.layers.at(other).source, std::min(1.0, 256 / std::max(1.0, size.width())), &factor);
+        if (image.isNull())
+            continue;
+        const QPointF offset = offsetInPicture(scene, other);
+        const double k = size.width() / image.width();
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x) {
+                if (qAlpha(image.pixel(x, y)) < 128)
+                    continue;
+                const double px = offset.x() + (x + .5) * k, py = offset.y() + (y + .5) * k;
+                const int cx = int(px * toCell), cy = int(py * toCell);
+                if (cx < 0 || cy < 0 || cx >= seen.image.width() || cy >= seen.image.height())
+                    continue;
+                const double under = behind.at(px, py) / std::max(1e-9, behind.scale) ;
+                reinterpret_cast<quint16 *>(seen.image.scanLine(cy))[cx] = encodeDepth(under);
+                changed = true;
+            }
+    }
+    return changed ? seen : depth;
+}
+
 DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF &offset, const QSizeF &size,
                     double *middleOut = nullptr) {
     const double cell = double(picture.picture.width()) / picture.image.width();
@@ -335,8 +370,10 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
                 code = encodeDepth(std::clamp(decodeDepth(code), low, high));
             }
     fillDepth(local, hole);
-    // And smoothed a little, so its surface has no spikes.
-    for (int pass = 0; pass < 3; ++pass) {
+    // And smoothed, more the bigger it is, so its surface has no folds: a
+    // flat cut-out is a gently curved card, not a relief of every speck.
+    const int passes = std::clamp(std::max(w, h) / 6, 3, 40);
+    for (int pass = 0; pass < passes; ++pass) {
         const QImage before = local.copy();
         for (int y = 1; y + 1 < h; ++y)
             for (int x = 1; x + 1 < w; ++x) {
@@ -598,7 +635,23 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     // whatever lies behind it, as far as the sky.
     double factor = 1;
     const QImage image = index == root ? QImage() : assets.mip(layer.source, std::min(1.0, 4 * cols / size.width()), &factor);
-    const DepthMap own = index == root || image.isNull() ? depth : pieceDepth(depth, image, offset, size);
+    DepthMap own = depth;
+    DepthMap behind;
+    if (index != root && !image.isNull()) {
+        behind = depthMap(assets, world.behind, picture.toSize(), world.focal, world.scale);
+        if (!world.wide.isEmpty() && !world.margin.isEmpty()) {
+            behind.origin = -QPointF(world.margin.width(), world.margin.height());
+            behind.span = picture + QSizeF(2 * world.margin.width(), 2 * world.margin.height());
+        }
+        own = pieceDepth(behind.image.isNull() ? depth : depthUnderOthers(scene, assets, index, depth, behind), image, offset, size);
+    }
+    // A piece lies in front of what's behind it, never in it.
+    auto inFront = [&](double x, double y, double distance) {
+        if (behind.image.isNull())
+            return distance;
+        const double back = behind.at(x, y);
+        return back < Far ? std::min(distance, back * .97) : distance;
+    };
     Mesh mesh;
     mesh.vertices.resize(qsizetype(cols + 1) * (rows + 1) * 5 * sizeof(float));
     float *v = reinterpret_cast<float *>(mesh.vertices.data());
@@ -608,7 +661,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
         for (int c = 0; c <= cols; ++c) {
             const double px = size.width() * c / cols, py = size.height() * r / rows;
             const double x = offset.x() + px, y = offset.y() + py;
-            const double distance = index == root ? depth.at(x, y) : own.at(px, py);
+            const double distance = index == root ? depth.at(x, y) : inFront(x, y, own.at(px, py));
             const QVector3D p = toWorld.map(depth.point(x, y, distance));
             *v++ = p.x();
             *v++ = p.y();
