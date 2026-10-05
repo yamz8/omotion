@@ -50,6 +50,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
     Q_PROPERTY(QString busy READ busy NOTIFY busyChanged)
+    // Whether the canvas shows the selected layer's path and its ghosts.
+    Q_PROPERTY(bool showMotion READ showMotion WRITE setShowMotion NOTIFY showMotionChanged)
     Q_PROPERTY(QString aiPrompt READ aiPrompt NOTIFY aiPromptChanged)
     Q_PROPERTY(bool downloading READ downloading NOTIFY downloadChanged)
     Q_PROPERTY(double downloadProgress READ downloadProgress NOTIFY downloadChanged)
@@ -96,6 +98,13 @@ public:
     QStringList blends() const { return Scene::blends(); }
     // What the AI is busy with, in words, or empty.
     QString busy() const { return m_busy; }
+    bool showMotion() const { return m_showMotion; }
+    void setShowMotion(bool show) {
+        if (show != m_showMotion) {
+            m_showMotion = show;
+            emit showMotionChanged();
+        }
+    }
     // An offer waiting for Enter: "download" the models, or "install" the runtime.
     QString aiPrompt() const { return m_aiPrompt; }
     bool downloading() const { return m_download.busy(); }
@@ -258,6 +267,7 @@ signals:
     void exportChanged();
     void keySelectionChanged();
     void busyChanged();
+    void showMotionChanged();
     void aiPromptChanged();
     void downloadChanged();
 
@@ -337,6 +347,7 @@ private:
     void runAiSelect();
     void setBusy(const QString &busy);
     QString m_busy;
+    bool m_showMotion = false;
     QString m_aiPrompt;
     QString m_wandMode = "ai";
     QList<QPointF> m_aiTake;

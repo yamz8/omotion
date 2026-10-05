@@ -106,6 +106,7 @@ ApplicationWindow {
     Shortcut { sequence: "F2"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: timeline.rename(backend.selected) }
     Shortcut { sequence: "Ctrl+D"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.duplicateLayer() }
     Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.selectCamera() }
+    Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.showMotion = !backend.showMotion }
     Shortcut { sequence: "Ctrl+Shift+K"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.cleanUp() }
     Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.cycleBlend() }
 

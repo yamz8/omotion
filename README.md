@@ -75,6 +75,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `,` `.` | Previous / next frame |
 | `<` `>` | Previous / next keyframe |
 | `Home` `End` | Start / end |
+| `L` | Show the selected layer's path through the scene, and faint ghosts of it at the keyframes either side |
 | Click, drag | Select the layer under the mouse and move it (Shift+drag keeps the selection) |
 | Mouse wheel | Scale the selected layer (Ctrl+wheel rotates) |
 | `Tab` / `Shift+Tab` | Select the layer below / above |

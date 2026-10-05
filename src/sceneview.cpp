@@ -28,6 +28,7 @@ void SceneView::setBackend(Backend *backend) {
         connect(m_backend, &Backend::selectedChanged, this, repaint);
         connect(m_backend, &Backend::toolChanged, this, repaint);
         connect(m_backend, &Backend::playingChanged, this, repaint);
+        connect(m_backend, &Backend::showMotionChanged, this, repaint);
     }
     emit backendChanged();
     update();
@@ -74,17 +75,76 @@ void SceneView::paint(QPainter *painter) {
         painter->restore();
     }
 
+    const int selected = m_backend->selected();
+    const bool motion = m_backend->showMotion() && !m_backend->playing() && selected >= 0 &&
+                        selected < scene.layers.size() && scene.layers.at(selected).particles.isEmpty();
+    const double now = m_backend->time();
+
     painter->save();
     painter->setTransform(view, true);
-    renderScene(*painter, scene, m_backend->assets(), m_backend->time());
+    renderScene(*painter, scene, m_backend->assets(), now);
     painter->restore();
+
+    // Onion skin: the layer faintly where it was and where it's going, at the
+    // keyframes either side (or a quarter second, between keys).
+    if (motion) {
+        const Layer &layer = scene.layers.at(selected);
+        const QList<double> keys = scene.keyTimes(selected);
+        double before = std::max(0.0, now - .25), after = std::min(scene.duration, now + .25);
+        for (double t : keys) {
+            if (t < now - .5 / scene.fps)
+                before = t;
+            else if (t > now + .5 / scene.fps) {
+                after = t;
+                break;
+            }
+        }
+        const QSizeF size = m_backend->assets().size(layer.source);
+        for (const auto &[t, tint] : {std::pair{before, QColor(255, 120, 120)}, std::pair{after, QColor(120, 200, 255)}}) {
+            if (std::abs(t - now) < .5 / scene.fps)
+                continue;
+            const QTransform ghost = layerTransform(scene, m_backend->assets(), selected, t) * view;
+            double factor = 1;
+            const double scale = std::max(std::hypot(ghost.m11(), ghost.m12()), std::hypot(ghost.m21(), ghost.m22()));
+            const QImage image = m_backend->assets().mip(layer.source, scale, &factor);
+            if (image.isNull())
+                continue;
+            painter->save();
+            painter->setTransform(QTransform::fromScale(1 / factor, 1 / factor) * ghost);
+            painter->setOpacity(.28);
+            painter->drawImage(QPointF(0, 0), image);
+            painter->setOpacity(.8);
+            painter->setPen(QPen(tint, 1.5 / std::max(1e-6, std::sqrt(std::abs((QTransform::fromScale(1 / factor, 1 / factor) * ghost).determinant()))),
+                                 Qt::DashLine));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRect(QRectF(QPointF(0, 0), size * factor));
+            painter->restore();
+        }
+
+        // The path the pivot travels through the whole scene, with the keys.
+        const QPointF pivot(layer.anchor.x() * size.width(), layer.anchor.y() * size.height());
+        QPolygonF path;
+        const int steps = std::clamp(int(scene.duration * scene.fps), 2, 2000);
+        for (int i = 0; i <= steps; ++i)
+            path.append((layerTransform(scene, m_backend->assets(), selected, scene.duration * i / steps) * view).map(pivot));
+        QColor line = m_accent;
+        line.setAlpha(170);
+        painter->setPen(QPen(line, 1.5));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPolyline(path);
+        painter->setPen(QPen(QColor("#0e0e10"), 1));
+        painter->setBrush(m_accent);
+        for (double t : keys) {
+            const QPointF at = (layerTransform(scene, m_backend->assets(), selected, t) * view).map(pivot);
+            painter->drawEllipse(at, 3.5, 3.5);
+        }
+    }
 
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setPen(QPen(QColor(255, 255, 255, 40), 1));
     painter->setBrush(Qt::NoBrush);
     painter->drawRect(canvas);
 
-    const int selected = m_backend->selected();
     if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
         scene.layers.at(selected).particles.isEmpty()) {
         const Layer &layer = scene.layers.at(selected);

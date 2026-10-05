@@ -13,7 +13,7 @@ Rectangle {
         ["Project", [["O", "Animate an image"], ["Shift+O", "Open an animation folder"], ["I", "Add an image as a layer"], ["Shift+I", "Add particles: snow, rain, dust, fireflies, leaves, embers"],
                      ["Ctrl+E", "Export MP4, WebM, GIF or PNG frames"], ["Ctrl+Shift+K", "Move unused images to the trash"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
                      ["?", "This list"], ["Q", "Quit"]]],
-        ["Time", [["Space", "Play / pause"], [", .", "Previous / next frame"], ["< >", "Previous / next keyframe"],
+        ["Time", [["Space", "Play / pause"], ["L", "Show the layer's path and ghosts of it at the keys either side"], [", .", "Previous / next frame"], ["< >", "Previous / next keyframe"],
                   ["Home End", "Start / end"]]],
         ["Layers", [["Click", "Select the layer under the mouse"], ["Drag", "Move it (Shift+drag keeps the selection)"],
                     ["Tab", "Select the layer below / Shift+Tab above"], ["Ctrl+↑ ↓", "Move it up / down the stack"],
