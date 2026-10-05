@@ -183,6 +183,9 @@ public:
     // easing curve, with handles at (x1,y1) and (x2,y2). Drags call it many
     // times between beginGesture and endGesture, for one undo step.
     Q_INVOKABLE void setCurve(double x1, double y1, double x2, double y2);
+    // Gives the same keyframes an easing by name, physical ones included:
+    // "spring(3)", "bounce(2)", "arc(200)". False, with an error, if unknown.
+    Q_INVOKABLE bool setEase(const QString &ease);
     Q_INVOKABLE void setSceneValue(const QString &name, const QVariant &value);
 
     // Selecting keyframe columns on the timeline, retiming them by dragging,

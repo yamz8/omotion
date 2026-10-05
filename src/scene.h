@@ -44,6 +44,10 @@ struct Link {
     double lag = 0;           // Seconds behind the source.
     double smooth = 0;        // Seconds speed is measured over; 0 is a frame.
     bool abs = false;         // Ignore the direction: backwards counts too.
+    // Follow on a spring this many times a second (0: follow exactly), so
+    // what's driven lags, overshoots and settles like a weight on a spring.
+    double spring = 0;
+    double damping = .5;      // 1 settles without overshoot, near 0 rings.
     double min = -std::numeric_limits<double>::infinity();
     double max = std::numeric_limits<double>::infinity();
     QJsonObject raw;          // As read, so unknown fields survive a save.
@@ -110,6 +114,12 @@ struct Scene {
     // Every property a layer can animate: the usual ones, and its pins'.
     static QStringList propertiesOf(const Layer &layer);
     static double ease(const QString &name, double progress);
+    // Physical easings with an amount: spring(n) overshoots and settles in n
+    // wobbles, bounce(n) lands and bounces n times, arc(h) is a jump that
+    // rises h pixels at the middle (on y; other properties go straight).
+    static bool physical(const QString &ease, QString *kind, double *amount);
+    // How far an arc lifts y at progress p, in pixels; 0 for other easings.
+    static double arcLift(const QString &ease, double progress);
     // Custom easing: "cubic(x1,y1,x2,y2)", a curve from (0,0) to (1,1) with
     // those two handles, as in CSS. y can go past 0..1, to overshoot.
     static bool cubic(const QString &ease, double *x1, double *y1, double *x2, double *y2);

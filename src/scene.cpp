@@ -39,7 +39,7 @@ const QStringList &Scene::blends() {
 }
 
 const QStringList &Scene::eases() {
-    static const QStringList list{"linear", "in", "out", "inOut", "outBack", "hold"};
+    static const QStringList list{"linear", "in", "out", "inOut", "outBack", "spring", "bounce", "hold"};
     return list;
 }
 
@@ -121,6 +121,40 @@ double Scene::ease(const QString &name, double p) {
     }
     if (name == "hold")
         return p < 1 ? 0 : 1;
+    QString kind;
+    double amount = 0;
+    if (physical(name, &kind, &amount)) {
+        if (kind == "spring") {
+            // Rings down to a thousandth by the next key; the last term takes
+            // that thousandth back, so it arrives exactly.
+            const double n = std::clamp(amount, .5, 20.0), k = std::log(1000.0);
+            return 1 - std::exp(-k * p) * std::cos(2 * M_PI * n * p) + p * std::exp(-k) * std::cos(2 * M_PI * n);
+        }
+        if (kind == "bounce") {
+            // A dropped ball: it falls under gravity, then each bounce keeps
+            // half its speed, so it rises a quarter as high and lasts half as
+            // long. The fall and the bounces share the time to the next key.
+            const int n = std::clamp(int(std::lround(amount)), 0, 10);
+            const double r = .5;
+            double total = 1;
+            for (int i = 1; i <= n; ++i)
+                total += 2 * std::pow(r, i);
+            const double fall = 1 / total;
+            if (p < fall)
+                return (p / fall) * (p / fall);
+            double start = fall;
+            for (int i = 1; i <= n; ++i) {
+                const double length = 2 * fall * std::pow(r, i);
+                if (p < start + length) {
+                    const double u = (p - start) / length;
+                    return 1 - std::pow(r, 2 * i) * 4 * u * (1 - u);
+                }
+                start += length;
+            }
+            return 1;
+        }
+        return p;  // An arc goes straight; its lift is added on y.
+    }
     double x1, y1, x2, y2;
     if (cubic(name, &x1, &y1, &x2, &y2)) {
         // A curve from (0,0) to (1,1) with handles at (x1,y1) and (x2,y2): find
@@ -172,7 +206,36 @@ bool Scene::cubic(const QString &ease, double *x1, double *y1, double *x2, doubl
 
 bool Scene::validEase(const QString &ease) {
     double a, b, c, d;
-    return eases().contains(ease) || cubic(ease, &a, &b, &c, &d);
+    QString kind;
+    return eases().contains(ease) || cubic(ease, &a, &b, &c, &d) || physical(ease, &kind, &a);
+}
+
+bool Scene::physical(const QString &ease, QString *kind, double *amount) {
+    if (ease == "spring" || ease == "bounce") {
+        *kind = ease;
+        *amount = ease == "spring" ? 2 : 3;
+        return true;
+    }
+    static const QRegularExpression pattern(R"(^(spring|bounce|arc)\(\s*([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s*\)$)");
+    const auto match = pattern.match(ease);
+    bool ok = false;
+    const double v = match.hasMatch() ? match.captured(2).toDouble(&ok) : 0;
+    if (!ok || !std::isfinite(v))
+        return false;
+    *kind = match.captured(1);
+    *amount = v;
+    return true;
+}
+
+double Scene::arcLift(const QString &ease, double p) {
+    QString kind;
+    double height = 0;
+    if (!ease.startsWith("arc") || !physical(ease, &kind, &height))
+        return 0;
+    // Straight across plus a parabola in time: what gravity does to a thing
+    // thrown from one key to land on the next.
+    p = clamp01(p);
+    return height * 4 * p * (1 - p);
 }
 
 QString Scene::cubicEase(double x1, double y1, double x2, double y2) {
@@ -194,6 +257,10 @@ QList<double> Scene::curveOf(const QString &ease) {
         return {.65, 0, .35, 1};
     if (ease == "outBack")
         return {.34, 1.56, .64, 1};
+    // Physical easings and hold aren't curves the handles could shape.
+    QString kind;
+    if (ease == "hold" || physical(ease, &kind, &x1))
+        return {};
     return {0, 0, 1, 1};
 }
 
@@ -221,9 +288,10 @@ bool readLinks(const QJsonObject &object, Layer &layer, const QStringList &prope
             return false;
         }
         if (!std::isfinite(link.times) || !std::isfinite(link.lag) || !std::isfinite(link.smooth) ||
-            link.smooth < 0 || std::isnan(link.min) || std::isnan(link.max) || link.min > link.max) {
+            link.smooth < 0 || !std::isfinite(link.spring) || link.spring < 0 || !std::isfinite(link.damping) ||
+            link.damping <= 0 || std::isnan(link.min) || std::isnan(link.max) || link.min > link.max) {
             *error = QString("%1 links \"%2\" with numbers that don't work: times and lag are any number, "
-                             "smooth from 0, and min no more than max.")
+                             "smooth and spring from 0, damping over 0, and min no more than max.")
                          .arg(who, it.key());
             return false;
         }
@@ -310,7 +378,7 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
                 Key key{k.value("t").toDouble(), k.value("v").toDouble(), k.value("ease").toString("linear")};
                 if (!validEase(key.ease))
                     return fail(QString("Layer \"%1\" uses easing \"%2\"; use one of %3.")
-                                    .arg(layer.name, key.ease, eases().join(", ") + ", or cubic(x1,y1,x2,y2)"));
+                                    .arg(layer.name, key.ease, eases().join(", ") + ", spring(n), bounce(n), arc(h), or cubic(x1,y1,x2,y2)"));
                 list.append(key);
             }
             std::stable_sort(list.begin(), list.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
@@ -344,7 +412,7 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
                 const QJsonObject k = entry.toObject();
                 Key key{k.value("t").toDouble(), k.value("v").toDouble(), k.value("ease").toString("linear")};
                 if (!validEase(key.ease))
-                    return fail(QString("The camera uses easing \"%1\"; use one of %2.").arg(key.ease, eases().join(", ") + ", or cubic(x1,y1,x2,y2)"));
+                    return fail(QString("The camera uses easing \"%1\"; use one of %2.").arg(key.ease, eases().join(", ") + ", spring(n), bounce(n), arc(h), or cubic(x1,y1,x2,y2)"));
                 list.append(key);
             }
             std::stable_sort(list.begin(), list.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
@@ -543,7 +611,9 @@ double Scene::ownValue(const Layer &layer, const QString &property, double t) co
         if (t < b.t) {
             const double span = b.t - a.t;
             const double p = span <= 0 ? 1 : (t - a.t) / span;
-            return a.v + (b.v - a.v) * ease(a.ease, p);
+            // Up is less y, on the canvas as in the camera's view.
+            const double lift = property == "y" ? arcLift(a.ease, p) : 0;
+            return a.v + (b.v - a.v) * ease(a.ease, p) - lift;
         }
     }
     return keys.last().v;
@@ -566,27 +636,49 @@ double Scene::linkValue(const Layer &layer, const QString &property, double t) c
     ++depth;
     auto read = [&](double when) { return index == -1 ? when : value(*at(index), source, when); };
     const double h = link.smooth > 0 ? link.smooth : 1 / fps;
-    const double when = t - link.lag;
-    double measure = 0;
-    if (link.of == "speed") {
-        // Measured inside the scene, so a car already moving at the first
-        // frame isn't taken to be half as fast there.
-        double lo = when - h, hi = when + h;
-        if (lo < 0)
-            hi -= lo, lo = 0;
-        if (hi > duration)
-            lo -= hi - duration, hi = duration;
-        lo = std::max(0.0, lo);
-        measure = hi > lo ? (read(hi) - read(lo)) / (hi - lo) : 0;
-    } else if (link.of == "acceleration") {
-        measure = (read(when + h) - 2 * read(when) + read(when - h)) / (h * h);
+    // What the link gives at a moment, before any spring or limits.
+    auto drive = [&](double moment) {
+        const double when = moment - link.lag;
+        double measure = 0;
+        if (link.of == "speed") {
+            // Measured inside the scene, so a car already moving at the first
+            // frame isn't taken to be half as fast there.
+            double lo = when - h, hi = when + h;
+            if (lo < 0)
+                hi -= lo, lo = 0;
+            if (hi > duration)
+                lo -= hi - duration, hi = duration;
+            lo = std::max(0.0, lo);
+            measure = hi > lo ? (read(hi) - read(lo)) / (hi - lo) : 0;
+        } else if (link.of == "acceleration") {
+            measure = (read(when + h) - 2 * read(when) + read(when - h)) / (h * h);
+        } else {
+            measure = read(when);
+        }
+        return (link.abs ? std::abs(measure) : measure) * link.times;
+    };
+    double v = 0;
+    if (link.spring > 0) {
+        // A weight on a spring chasing what the link gives. It starts at rest
+        // where it's pulled, a little before t: long enough before that how
+        // it started has rung out, so frames agree without simulating the
+        // whole scene each time.
+        const double w = 2 * M_PI * link.spring, zeta = std::clamp(link.damping, .05, 4.0);
+        const double window = std::min({t, std::log(1000.0) / (zeta * w), 20.0});
+        const int steps = std::max(1, int(std::ceil(window / std::min(.25 / fps, .1 / w))));
+        const double dt = window / steps;
+        double moment = t - window, x = drive(moment), speed = 0;
+        for (int i = 0; i < steps; ++i) {
+            moment += dt;
+            speed += (w * w * (drive(moment) - x) - 2 * zeta * w * speed) * dt;
+            x += speed * dt;
+        }
+        v = x;
     } else {
-        measure = read(when);
+        v = drive(t);
     }
     --depth;
-    if (link.abs)
-        measure = std::abs(measure);
-    const double v = std::clamp(measure * link.times, link.min, link.max);
+    v = std::clamp(v, link.min, link.max);
     return std::isfinite(v) ? v : 0;
 }
 
@@ -722,6 +814,10 @@ QString Scene::linkText(const Link &link) {
         text += ", lag " + formatNumber(link.lag);
     if (link.smooth != 0)
         text += ", smooth " + formatNumber(link.smooth);
+    if (link.spring != 0)
+        text += ", spring " + formatNumber(link.spring);
+    if (link.spring != 0 && link.damping != .5)
+        text += ", damping " + formatNumber(link.damping);
     if (link.abs)
         text += ", abs";
     if (std::isfinite(link.min))
@@ -765,20 +861,26 @@ bool Scene::parseLink(const QString &text, Link *link, QString *error) {
         bool ok = false;
         const double v = words.size() == 2 ? words.at(1).toDouble(&ok) : 0;
         const QString name = words.value(0);
-        if (!ok || !QStringList{"lag", "smooth", "min", "max"}.contains(name))
-            return fail(QString("\"%1\" isn't something a link takes: lag, smooth, min or max with a number, or abs.")
+        if (!ok || !QStringList{"lag", "smooth", "spring", "damping", "min", "max"}.contains(name))
+            return fail(QString("\"%1\" isn't something a link takes: lag, smooth, spring, damping, min or max "
+                                "with a number, or abs.")
                             .arg(parts.at(i).trimmed()));
         if (name == "lag")
             parsed.lag = v;
         else if (name == "smooth")
             parsed.smooth = v;
+        else if (name == "spring")
+            parsed.spring = v;
+        else if (name == "damping")
+            parsed.damping = v;
         else if (name == "min")
             parsed.min = v;
         else
             parsed.max = v;
     }
-    if (!std::isfinite(parsed.times) || !std::isfinite(parsed.lag) || parsed.smooth < 0 || parsed.min > parsed.max)
-        return fail("Smooth can't be below 0, and min can't be over max.");
+    if (!std::isfinite(parsed.times) || !std::isfinite(parsed.lag) || parsed.smooth < 0 || parsed.spring < 0 ||
+        parsed.damping <= 0 || parsed.min > parsed.max)
+        return fail("Smooth and spring can't be below 0, damping must be over 0, and min can't be over max.");
     *link = parsed;
     return true;
 }
@@ -792,6 +894,8 @@ Link Scene::linkFromJson(const QJsonObject &json) {
     link.lag = json.value("lag").toDouble(0);
     link.smooth = json.value("smooth").toDouble(0);
     link.abs = json.value("abs").toBool(false);
+    link.spring = json.value("spring").toDouble(0);
+    link.damping = json.value("damping").toDouble(.5);
     if (json.contains("min"))
         link.min = json.value("min").toDouble(std::numeric_limits<double>::quiet_NaN());
     if (json.contains("max"))
@@ -816,6 +920,8 @@ QJsonObject Scene::linkToJson(const Link &link) {
     put("times", link.times, link.times != 1);
     put("lag", link.lag, link.lag != 0);
     put("smooth", link.smooth, link.smooth != 0);
+    put("spring", link.spring, link.spring != 0);
+    put("damping", link.damping, link.spring != 0 && link.damping != .5);
     if (link.abs)
         json.insert("abs", true);
     else

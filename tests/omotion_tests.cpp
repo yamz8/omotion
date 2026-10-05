@@ -118,6 +118,86 @@ private slots:
         QCOMPARE(scene.value(layer, "scale", 2), 1.0);
     }
 
+    void physicalEasesSettleBounceAndArc() {
+        for (const QString &ease : {QString("spring"), QString("spring(3)"), QString("bounce"), QString("bounce(0)"),
+                                    QString("arc(200)")}) {
+            QVERIFY2(Scene::validEase(ease), qPrintable(ease));
+            QCOMPARE(Scene::ease(ease, 0), 0.0);
+            QVERIFY2(std::abs(Scene::ease(ease, 1) - 1) < 1e-9, qPrintable(ease));
+            QVERIFY(Scene::curveOf(ease).isEmpty());
+        }
+        QVERIFY(!Scene::validEase("spring(lots)"));
+        QVERIFY(!Scene::validEase("wobble(2)"));
+        double highest = 0, lowest = 1;
+        int landings = 0;
+        double before = 0;
+        for (int i = 1; i <= 1000; ++i) {
+            const double p = i / 1000.0;
+            highest = std::max(highest, Scene::ease("spring(2)", p));
+            const double ball = Scene::ease("bounce(3)", p);
+            QVERIFY(ball <= 1 + 1e-12);
+            lowest = std::min(lowest, p > .5 ? ball : 1.0);
+            // Counted where it turns from falling to rising: a landing.
+            if (i > 1 && ball < before && before > Scene::ease("bounce(3)", (i - 2) / 1000.0))
+                ++landings;
+            before = ball;
+        }
+        QVERIFY(highest > 1.1);  // A spring overshoots...
+        QVERIFY(std::abs(Scene::ease("spring(2)", .95) - 1) < .01);  // ...and settles.
+        QCOMPARE(landings, 3);
+        QVERIFY(lowest < 1);
+        // Bounce(0) is a fall from rest: gravity, a square in time.
+        QCOMPARE(Scene::ease("bounce(0)", .5), .25);
+
+        // An arc rises on y only: a parabola between the keys, its height at the middle.
+        Scene scene;
+        Layer layer;
+        layer.keys["y"] = {Key{0, 500, "arc(200)"}, Key{2, 500, "linear"}};
+        layer.keys["x"] = {Key{0, 0, "arc(200)"}, Key{2, 100, "linear"}};
+        scene.layers.append(layer);
+        QCOMPARE(scene.value(scene.layers[0], "y", 1), 300.0);
+        QCOMPARE(scene.value(scene.layers[0], "y", .5), 500.0 - 150);
+        QCOMPARE(scene.value(scene.layers[0], "x", 1), 50.0);
+        QCOMPARE(scene.value(scene.layers[0], "y", 2), 500.0);
+    }
+
+    void springyLinksLagOvershootAndSettle() {
+        QString error;
+        const Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({
+            "duration": 6, "fps": 30,
+            "layers": [
+                {"name": "wheels", "source": "w.png",
+                 "keys": {"y": [{"t": 0, "v": 0, "ease": "hold"}, {"t": 1, "v": 100}]}},
+                {"name": "body", "source": "b.png",
+                 "links": {"y": {"from": "wheels.y", "spring": 2, "damping": 0.3}}},
+                {"name": "stiff", "source": "b.png",
+                 "links": {"y": {"from": "wheels.y", "spring": 2, "damping": 1.5}}}
+            ]
+        })").object(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const Layer &body = scene.layers[1], &stiff = scene.layers[2];
+        // Before the jump it rests where it's pulled; just after, it lags.
+        QCOMPARE(scene.value(body, "y", .9), 0.0);
+        QVERIFY(scene.value(body, "y", 1.05) < 50);
+        double highest = 0, stiffest = 0;
+        for (double t = 1; t < 3; t += 1 / 60.0) {
+            highest = std::max(highest, scene.value(body, "y", t));
+            stiffest = std::max(stiffest, scene.value(stiff, "y", t));
+        }
+        QVERIFY(highest > 120);        // Light damping overshoots...
+        QVERIFY(stiffest < 100.5);     // ...heavy damping doesn't.
+        QVERIFY(std::abs(scene.value(body, "y", 5) - 100) < 1);  // Both settle.
+        QVERIFY(std::abs(scene.value(stiff, "y", 5) - 100) < 1);
+
+        Link link;
+        QVERIFY(Scene::parseLink("wheels.y, spring 2, damping 0.3", &link, &error));
+        QCOMPARE(link.spring, 2.0);
+        QCOMPARE(link.damping, .3);
+        QCOMPARE(Scene::linkText(link), QString("wheels.y, spring 2, damping 0.3"));
+        QCOMPARE(Scene::linkToJson(link)["spring"].toDouble(), 2.0);
+        QVERIFY(!Scene::parseLink("wheels.y, damping 0", &link, &error));
+    }
+
     void linksAddTheirSourceToTheirOwnValue() {
         QString error;
         const Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({

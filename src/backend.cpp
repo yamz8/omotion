@@ -667,6 +667,26 @@ void Backend::cycleEase() {
     setNotice("Easing out of these keyframes: " + ease);
 }
 
+bool Backend::setEase(const QString &wanted) {
+    const QString ease = wanted.simplified().remove(' ');
+    const QList<KeyRef> refs = targetKeys();
+    if (refs.isEmpty()) {
+        setNotice("No keyframes at the playhead to ease.");
+        return false;
+    }
+    if (!Scene::validEase(ease)) {
+        setError(QString("\"%1\" isn't an easing; use one of %2, spring(n), bounce(n), arc(h), or cubic(x1,y1,x2,y2).")
+                     .arg(wanted, Scene::eases().join(", ")));
+        return false;
+    }
+    checkpoint();
+    for (const KeyRef &ref : refs)
+        m_scene.setEaseAt(ref.layer, ref.t, ease);
+    changed();
+    setNotice("Easing out of these keyframes: " + ease);
+    return true;
+}
+
 void Backend::setCurve(double x1, double y1, double x2, double y2) {
     const QList<KeyRef> refs = targetKeys();
     if (refs.isEmpty() || !std::isfinite(x1 + y1 + x2 + y2))

@@ -354,16 +354,33 @@ Rectangle {
                 wrapMode: Text.Wrap
                 color: inspector.v.keyEase ? theme.accent : win.muted
                 text: inspector.v.keyEase
-                      ? "On a keyframe · eases " + (inspector.v.keyEase.indexOf("cubic") === 0 ? "on its own curve" : inspector.v.keyEase)
-                        + " (E changes; drag the curve's handles below)"
+                      ? "On a keyframe · E changes its easing; drag the curve's handles, or type one: "
+                        + "spring(3) settles, bounce(2) lands, arc(200) jumps"
                       : "K keyframes every property here"
+            }
+            RowLayout {
+                visible: inspector.hasLayer && !!inspector.v.keyEase
+                Layout.fillWidth: true
+                spacing: 8
+                Item { width: 14; height: 1 }
+                Label { text: "Easing"; color: win.text; Layout.preferredWidth: 90 }
+                SmallField {
+                    id: easeField
+                    Layout.fillWidth: true
+                    property string value: inspector.v.keyEase || ""
+                    onValueChanged: if (!activeFocus) text = value
+                    onActiveFocusChanged: if (!activeFocus) text = value
+                    Component.onCompleted: text = value
+                    Keys.onEscapePressed: inspector.done()
+                    onAccepted: { backend.setEase(text); inspector.done() }
+                }
             }
 
             // The easing out of the keyframe here, as a curve: drag its two
             // handles to shape it. Up past the top overshoots.
             Item {
                 id: curve
-                visible: inspector.hasLayer && !!inspector.v.keyEase && inspector.v.keyEase !== "hold"
+                visible: inspector.hasLayer && !!inspector.v.keyEase && (inspector.v.keyCurve || []).length === 4
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.round(width * .66)
                 Layout.topMargin: 4
