@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QTimer>
+#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -27,7 +28,7 @@ QString Exporter::formatFor(const QString &output) {
     return formats().contains(suffix) && suffix != "png" ? suffix : QString();
 }
 
-bool Exporter::start(const Scene &scene, const QString &directory, const QString &output) {
+bool Exporter::start(const Scene &scene, const QString &directory, const QString &output, double scale) {
     m_error.clear();
     if (m_busy) {
         m_error = "An export is already running.";
@@ -46,7 +47,13 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
     m_next = 0;
     m_cancelled = false;
     // H.264 wants even dimensions; the others don't care, so match it everywhere.
-    m_size = QSize(scene.width - scene.width % 2, scene.height - scene.height % 2);
+    if (!(scale > 0 && scale <= 4)) {
+        m_error = "Scale exports between 0 and 4 times the canvas.";
+        return false;
+    }
+    const int width = std::max(2, int(std::lround(scene.width * scale))),
+              height = std::max(2, int(std::lround(scene.height * scale)));
+    m_size = QSize(width - width % 2, height - height % 2);
 
     if (m_format == "png") {
         if (!QDir().mkpath(m_output)) {
@@ -177,9 +184,9 @@ void Exporter::done(bool ok, const QString &message) {
     emit finished(ok, message);
 }
 
-bool Exporter::run(const Scene &scene, const QString &directory, const QString &output, QString *error) {
+bool Exporter::run(const Scene &scene, const QString &directory, const QString &output, QString *error, double scale) {
     Exporter exporter;
-    if (!exporter.start(scene, directory, output)) {
+    if (!exporter.start(scene, directory, output, scale)) {
         if (error)
             *error = exporter.error();
         return false;

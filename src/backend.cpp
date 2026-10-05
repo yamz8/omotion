@@ -1170,7 +1170,7 @@ void Backend::redo() {
     changed();
 }
 
-void Backend::exportAs(const QString &format) {
+void Backend::exportAs(const QString &format, double scale) {
     if (!hasProject() || m_exporter.busy())
         return;
     if (m_diskBroken)
@@ -1178,9 +1178,9 @@ void Backend::exportAs(const QString &format) {
     if (m_playing)
         togglePlay();
     const QDir renders(QDir(m_directory).filePath("renders"));
-    const QString output = format == "png" ? renders.filePath(projectName() + "-frames")
-                                           : renders.filePath(projectName() + "." + format);
-    if (!m_exporter.start(m_scene, m_directory, output))
+    const QString name = projectName() + (scale < 1 ? "-small" : "");
+    const QString output = format == "png" ? renders.filePath(name + "-frames") : renders.filePath(name + "." + format);
+    if (!m_exporter.start(m_scene, m_directory, output, scale))
         return setError(m_exporter.error());
     m_exportProgress = 0;
     emit exportChanged();

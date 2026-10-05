@@ -22,7 +22,9 @@ namespace {
 
 const char *Usage = R"(Usage:
   omotion [image | folder]               Open the editor
-  omotion render <project> <output>      Render to .mp4, .webm, .gif, or a folder of PNG frames
+  omotion render <project> <output> [--scale <factor>]
+                                         Render to .mp4, .webm, .gif, or a folder of PNG frames,
+                                         at the canvas size or scaled (0.5 for half)
   omotion frame <project> <seconds> <output.png>
                                          Render one frame as a PNG
   omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--no-fill] [--name <name>] [--soft <px>] [--at <seconds>]
@@ -228,9 +230,12 @@ int command(const QStringList &args) {
         return 0;
     }
 
-    if (args.size() != 4)
-        return fail("render takes a project and an output.");
-    if (!Exporter::run(scene, directory, args.at(3), &error))
+    double scale = 1;
+    if (args.size() == 6 && args.at(4) == "--scale")
+        scale = args.at(5).toDouble();
+    else if (args.size() != 4)
+        return fail("render takes a project, an output, and maybe --scale <factor>.");
+    if (!Exporter::run(scene, directory, args.at(3), &error, scale))
         return fail(error);
     QTextStream(stdout) << args.at(3) << "\n";
     return 0;

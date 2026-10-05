@@ -1120,6 +1120,9 @@ private slots:
         QString error;
         QVERIFY2(Exporter::run(scene, project, dir.filePath("frames"), &error), qPrintable(error));
         QCOMPARE(QDir(dir.filePath("frames")).entryList(QDir::Files).size(), 5);
+        QVERIFY(Exporter::run(scene, project, dir.filePath("small"), &error, .5));
+        QCOMPARE(QImage(dir.filePath("small/0001.png")).size(), QSize(100, 50));
+        QVERIFY(!Exporter::run(scene, project, dir.filePath("none"), &error, 0));
         QVERIFY(!Exporter::run(scene, project, dir.filePath("out.mov"), &error));
         QVERIFY(error.contains(".mp4"));
     }

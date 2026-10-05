@@ -202,7 +202,7 @@ public:
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
 
-    Q_INVOKABLE void exportAs(const QString &format);
+    Q_INVOKABLE void exportAs(const QString &format, double scale = 1);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void openRenders();
     Q_INVOKABLE void dismissError();

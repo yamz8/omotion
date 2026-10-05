@@ -24,6 +24,7 @@ ApplicationWindow {
 
     property bool helpVisible: false
     property bool exportMenuVisible: false
+    property bool exportHalf: false
     property bool quitConfirmVisible: false
     // Editing shortcuts go quiet while an overlay is up.
     readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible
@@ -482,6 +483,7 @@ ApplicationWindow {
         Shortcut { sequences: ["3", "G"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("gif") }
         Shortcut { sequences: ["4", "F"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("png") }
         Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: { win.exportMenuVisible = false; backend.openRenders() } }
+        Shortcut { sequence: "H"; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: win.exportHalf = !win.exportHalf }
 
         Rectangle {
             id: exportChoice
@@ -494,7 +496,7 @@ ApplicationWindow {
 
             function pick(format) {
                 win.exportMenuVisible = false;
-                backend.exportAs(format);
+                backend.exportAs(format, win.exportHalf ? 0.5 : 1);
             }
 
             Column {
@@ -504,8 +506,10 @@ ApplicationWindow {
                 spacing: 6
                 Label { text: "Export"; font.pixelSize: 20; font.bold: true; color: win.text }
                 Label {
-                    text: "Into renders/ in the project folder. " + backend.sceneInfo.width + "×" + backend.sceneInfo.height
-                          + ", " + backend.sceneInfo.fps + " fps, " + backend.sceneInfo.frames + " frames."
+                    readonly property real factor: win.exportHalf ? 0.5 : 1
+                    text: "Into renders/ in the project folder. "
+                          + Math.round(backend.sceneInfo.width * factor) + "×" + Math.round(backend.sceneInfo.height * factor)
+                          + (win.exportHalf ? " (half size)" : "") + ", " + backend.sceneInfo.fps + " fps, " + backend.sceneInfo.frames + " frames."
                     color: win.muted
                     wrapMode: Text.Wrap
                     width: parent.width
@@ -535,7 +539,7 @@ ApplicationWindow {
                     }
                 }
                 Item { width: 1; height: 4 }
-                Label { text: "R opens the renders folder   ·   Esc closes"; color: win.muted }
+                Label { text: "H " + (win.exportHalf ? "full size" : "half size") + "   ·   R opens the renders folder   ·   Esc closes"; color: win.muted }
             }
         }
     }

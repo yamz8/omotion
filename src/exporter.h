@@ -24,12 +24,14 @@ public:
     bool busy() const { return m_busy; }
     // Returns false (and emits nothing) when it can't start, with the reason
     // in error().
-    bool start(const Scene &scene, const QString &directory, const QString &output);
+    // scale shrinks (or grows) the frames from the canvas size, for smaller files.
+    bool start(const Scene &scene, const QString &directory, const QString &output, double scale = 1);
     void cancel();
     QString error() const { return m_error; }
 
     // Runs an export to the end on a local event loop; for the command line.
-    static bool run(const Scene &scene, const QString &directory, const QString &output, QString *error);
+    static bool run(const Scene &scene, const QString &directory, const QString &output, QString *error,
+                    double scale = 1);
 
 signals:
     void progress(double fraction);
