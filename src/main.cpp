@@ -63,6 +63,8 @@ const char *Usage = R"(Usage:
                                          Turn the picture into a 3D world, with the AI: its
                                          distances, lens and ground (the bottom layer's
                                          picture unless named)
+  omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
+                                         (about 20 s): it can turn and has a back
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
@@ -325,6 +327,22 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "shape") {
+        if (args.size() != 4)
+            return fail("shape takes a project and a layer.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        if (!World::shapeObject(edited, assets, layer, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        const QJsonObject shape = edited.layers.at(layer).raw.value("shape").toObject();
+        QTextStream(stdout) << QString("%1 has a shape (fits its outline %2%).\n")
+                                   .arg(args.at(3))
+                                   .arg(int(shape.value("fit").toDouble() * 100));
+        return 0;
+    }
+
     if (args.at(1) == "link") {
         if (args.size() != 6)
             return fail("link takes a project, a layer (or camera), a property, and a link or --none.");
@@ -566,7 +584,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
-                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") ||
+                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

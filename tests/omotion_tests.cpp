@@ -1423,6 +1423,33 @@ private slots:
         QVERIFY(std::abs(place.rotation.rotatedVector(QVector3D(1, 0, 0)).z() - 1) < 1e-4);
     }
 
+    void surfacesWrapSolidsFacingOut() {
+        // A ball of radius 0.5: inside positive, as the shape model gives.
+        const int n = 40;
+        const double r = 1;
+        std::vector<float> field(size_t(n) * n * n);
+        for (int x = 0; x < n; ++x)
+            for (int y = 0; y < n; ++y)
+                for (int z = 0; z < n; ++z) {
+                    const QVector3D p(-r + 2 * r * x / (n - 1), -r + 2 * r * y / (n - 1), -r + 2 * r * z / (n - 1));
+                    field[(size_t(x) * n + y) * n + z] = .5f - p.length();
+                }
+        const Ai::Shape ball = Ai::surface(field, n, r);
+        QVERIFY(ball.triangles.size() > 1000);
+        for (size_t i = 0; i < ball.positions.size(); i += 3)
+            QVERIFY(std::abs(QVector3D(ball.positions[i], ball.positions[i + 1], ball.positions[i + 2]).length() - .5f) < .03f);
+        int outward = 0;
+        for (size_t t = 0; t < ball.triangles.size(); t += 3) {
+            QVector3D v[3];
+            for (int k = 0; k < 3; ++k) {
+                const size_t i = ball.triangles[t + k] * 3;
+                v[k] = QVector3D(ball.positions[i], ball.positions[i + 1], ball.positions[i + 2]);
+            }
+            outward += QVector3D::dotProduct(QVector3D::crossProduct(v[1] - v[0], v[2] - v[0]), v[0] + v[1] + v[2]) > 0;
+        }
+        QCOMPARE(outward, int(ball.triangles.size() / 3));
+    }
+
     void aiSaysWhatsMissing() {
         QTemporaryDir dir;
         Ai::setPaths(dir.filePath("no-such-library.so"), dir.path());

@@ -66,6 +66,22 @@ public:
     // scale into meters. False when too little of the picture is valid.
     static bool solveLens(Geometry &geometry, double scale, const QSize &picture);
 
+    // A thing's 3D shape from a cut-out of it (see-through around it), by
+    // TripoSR: a closed mesh in the model's own space (about a unit across,
+    // centred, y up, seen from -z as the cut-out shows it), with the colour
+    // the model guesses at each vertex. About 20 seconds here.
+    struct Shape {
+        std::vector<float> positions;  // x, y, z for each vertex.
+        std::vector<float> colors;     // r, g, b for each, 0 to 1.
+        std::vector<quint32> triangles;
+        bool isNull() const { return positions.empty(); }
+    };
+    Shape objectShape(const QImage &cutout, QString *error);
+    // The surface where a field on an n³ grid over [-r, r]³ crosses zero (the
+    // inside positive), as surface nets: a vertex in each cell it crosses, a
+    // quad for each crossed grid edge. Outward-facing triangles.
+    static Shape surface(const std::vector<float> &field, int n, double r);
+
     // The picture with the masked part (Alpha8, 255 to fill, same size)
     // painted in to match its surroundings. Worked at 512 pixels square, so
     // hand it the area around the hole rather than the whole picture.

@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QLibrary>
 #include <QMutexLocker>
+#include <QPainter>
 #include <QRect>
 #include <QStandardPaths>
 #include <QScopeGuard>
@@ -51,6 +52,12 @@ const QList<Ai::Model> &Ai::models() {
          16496559, "8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe"},
         {"lama.onnx", "https://huggingface.co/Carve/LaMa-ONNX/resolve/c3c0c9e468934d62e79c329e35d82dd09ff8c444/lama_fp32.onnx",
          208044816, "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"},
+        {"triposr-encoder-int8.onnx",
+         "https://huggingface.co/fernandotonon/QtMeshEditor-triposr-onnx/resolve/01b2f1add36601f964a89fd8a3159919ced4aa40/triposr_encoder_int8.onnx",
+         436065556, "0439dd35121fde195e73f93b0d81113be67ef9c1caa1db6498ae6c16e12fe089"},
+        {"triposr-decoder.onnx",
+         "https://huggingface.co/fernandotonon/QtMeshEditor-triposr-onnx/resolve/01b2f1add36601f964a89fd8a3159919ced4aa40/triposr_decoder.onnx",
+         180692, "68ab06fb5ed4646c6dc15293ec83de62ba11d50294030795e860bea96cd81706"},
         {"moge-2-vits-normal.onnx",
          "https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx/resolve/e50ffda41565591092adea54c6ac83d6212e1e23/model.onnx",
          140852051, "24eacb5dc7a2c54c7bc98f7de085ffbed79ad006ea5b664c2c2cdc02ff3a52f0"},
@@ -130,6 +137,79 @@ bool Ai::solveLens(Geometry &g, double scale, const QSize &picture) {
     }
     g.focal = focal / 2 * std::hypot(picture.width(), picture.height());
     return true;
+}
+
+Ai::Shape Ai::surface(const std::vector<float> &field, int n, double r) {
+    Shape shape;
+    if (n < 2 || field.size() != size_t(n) * n * n)
+        return shape;
+    auto at = [&](int x, int y, int z) { return field[(size_t(x) * n + y) * n + z]; };
+    auto where = [&](double i) { return -r + 2 * r * i / (n - 1); };
+    // A vertex in every cell the surface passes through: the average of
+    // where it crosses the cell's edges.
+    std::vector<qint32> vertexOf(size_t(n - 1) * (n - 1) * (n - 1), -1);
+    static const int corner[8][3] = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1}, {1, 1, 1}};
+    static const int edge[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+    for (int x = 0; x + 1 < n; ++x)
+        for (int y = 0; y + 1 < n; ++y)
+            for (int z = 0; z + 1 < n; ++z) {
+                float v[8];
+                int inside = 0;
+                for (int c = 0; c < 8; ++c) {
+                    v[c] = at(x + corner[c][0], y + corner[c][1], z + corner[c][2]);
+                    inside += v[c] > 0;
+                }
+                if (inside == 0 || inside == 8)
+                    continue;
+                double sum[3] = {0, 0, 0};
+                int crossings = 0;
+                for (const auto &e : edge) {
+                    const float a = v[e[0]], b = v[e[1]];
+                    if ((a > 0) == (b > 0))
+                        continue;
+                    const double t = a / (a - b);
+                    for (int k = 0; k < 3; ++k)
+                        sum[k] += corner[e[0]][k] + t * (corner[e[1]][k] - corner[e[0]][k]);
+                    ++crossings;
+                }
+                vertexOf[(size_t(x) * (n - 1) + y) * (n - 1) + z] = qint32(shape.positions.size() / 3);
+                shape.positions.push_back(float(where(x + sum[0] / crossings)));
+                shape.positions.push_back(float(where(y + sum[1] / crossings)));
+                shape.positions.push_back(float(where(z + sum[2] / crossings)));
+            }
+    // A quad across every grid edge the surface crosses, joining the four
+    // cells around that edge, wound to face out of the inside.
+    auto cell = [&](int x, int y, int z) -> qint32 {
+        if (x < 0 || y < 0 || z < 0 || x >= n - 1 || y >= n - 1 || z >= n - 1)
+            return -1;
+        return vertexOf[(size_t(x) * (n - 1) + y) * (n - 1) + z];
+    };
+    for (int x = 0; x < n; ++x)
+        for (int y = 0; y < n; ++y)
+            for (int z = 0; z < n; ++z)
+                for (int axis = 0; axis < 3; ++axis) {
+                    const int dx = axis == 0, dy = axis == 1, dz = axis == 2;
+                    if (x + dx >= n || y + dy >= n || z + dz >= n)
+                        continue;
+                    const bool a = at(x, y, z) > 0, b = at(x + dx, y + dy, z + dz) > 0;
+                    if (a == b)
+                        continue;
+                    // The four cells sharing this edge, around it.
+                    qint32 q[4];
+                    if (axis == 0)
+                        q[0] = cell(x, y - 1, z - 1), q[1] = cell(x, y, z - 1), q[2] = cell(x, y, z), q[3] = cell(x, y - 1, z);
+                    else if (axis == 1)
+                        q[0] = cell(x - 1, y, z - 1), q[1] = cell(x - 1, y, z), q[2] = cell(x, y, z), q[3] = cell(x, y, z - 1);
+                    else
+                        q[0] = cell(x - 1, y - 1, z), q[1] = cell(x, y - 1, z), q[2] = cell(x, y, z), q[3] = cell(x - 1, y, z);
+                    if (q[0] < 0 || q[1] < 0 || q[2] < 0 || q[3] < 0)
+                        continue;
+                    if (!a)
+                        std::swap(q[1], q[3]);
+                    shape.triangles.insert(shape.triangles.end(), {quint32(q[0]), quint32(q[1]), quint32(q[2]),
+                                                                   quint32(q[0]), quint32(q[2]), quint32(q[3])});
+                }
+    return shape;
 }
 
 qint64 Ai::modelBytes() {
@@ -301,6 +381,10 @@ Ai::Geometry Ai::geometry(const QImage &, QString *error) {
     load(error);
     return {};
 }
+Ai::Shape Ai::objectShape(const QImage &, QString *error) {
+    load(error);
+    return {};
+}
 bool Ai::canInpaint() { return false; }
 
 #else
@@ -316,6 +400,8 @@ struct Ai::Runtime {
     OrtSession *decoder = nullptr;
     OrtSession *inpainter = nullptr;
     OrtSession *shaper = nullptr;
+    OrtSession *objectEncoder = nullptr;
+    OrtSession *objectDecoder = nullptr;
 
     // Fills already worked out, by their input, so redrawing a layer's
     // pieces doesn't paint the same hole again.
@@ -333,7 +419,7 @@ struct Ai::Runtime {
     ~Runtime() {
         if (!api)
             return;
-        for (OrtSession *session : {depth, encoder, decoder, inpainter, shaper})
+        for (OrtSession *session : {depth, encoder, decoder, inpainter, shaper, objectEncoder, objectDecoder})
             if (session)
                 api->ReleaseSession(session);
         if (memory)
@@ -601,6 +687,110 @@ Ai::Geometry Ai::geometry(const QImage &picture, QString *error) {
         return {};
     }
     return geometry;
+}
+
+Ai::Shape Ai::objectShape(const QImage &cutout, QString *error) {
+    QMutexLocker lock(&m_mutex);
+    if (!load(error))
+        return {};
+    Runtime &rt = *m_runtime;
+    OrtSession *encoder = rt.session(rt.objectEncoder, "triposr-encoder-int8.onnx", error);
+    OrtSession *decoder = encoder ? rt.session(rt.objectDecoder, "triposr-decoder.onnx", error) : nullptr;
+    if (!decoder)
+        return {};
+
+    // As the model was taught: the thing over grey, centred in a square it
+    // fills 85% of, 512 pixels a side.
+    const QImage rgba = cutout.convertToFormat(QImage::Format_ARGB32);
+    QRect box;
+    for (int y = 0; y < rgba.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(rgba.constScanLine(y));
+        for (int x = 0; x < rgba.width(); ++x)
+            if (qAlpha(line[x]) > 16)
+                box |= QRect(x, y, 1, 1);
+    }
+    if (box.isEmpty()) {
+        if (error)
+            *error = "There's nothing in the cut-out to give a shape to.";
+        return {};
+    }
+    const int side = int(std::max(box.width(), box.height()) / .85);
+    QImage square(side, side, QImage::Format_ARGB32);
+    square.fill(QColor(128, 128, 128));
+    {
+        QPainter painter(&square);
+        painter.drawImage(QPoint((side - box.width()) / 2, (side - box.height()) / 2), rgba.copy(box));
+    }
+    const QImage input = square.scaled(512, 512, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB888);
+    std::vector<float> pixels(size_t(3) * 512 * 512);
+    for (int y = 0; y < 512; ++y) {
+        const uchar *line = input.constScanLine(y);
+        for (int x = 0; x < 512; ++x)
+            for (int c = 0; c < 3; ++c)
+                pixels[size_t(c) * 512 * 512 + size_t(y) * 512 + x] = line[x * 3 + c] / 255.f;
+    }
+    OrtValue *image = rt.tensor(pixels, {1, 3, 512, 512}, error);
+    std::vector<OrtValue *> encoded;
+    if (!image || !rt.run(encoder, {"image"}, {image}, {"scene_codes"}, encoded, error))
+        return {};
+    const std::vector<int64_t> codeShape = rt.shape(encoded[0]);
+    size_t codeCount = 1;
+    for (const int64_t d : codeShape)
+        codeCount *= size_t(d);
+    std::vector<float> codes(rt.data(encoded[0]), rt.data(encoded[0]) + codeCount);
+    rt.api->ReleaseValue(encoded[0]);
+
+    // The field's density and colour at points, a chunk at a time.
+    auto query = [&](const std::vector<float> &points, std::vector<float> *density, std::vector<float> *color) {
+        const size_t count = points.size() / 3;
+        for (size_t start = 0; start < count; start += 65536) {
+            const size_t chunk = std::min<size_t>(65536, count - start);
+            std::vector<float> part(points.begin() + start * 3, points.begin() + (start + chunk) * 3);
+            OrtValue *codeValue = rt.tensor(codes, codeShape, error);
+            OrtValue *pointValue = codeValue ? rt.tensor(part, {1, int64_t(chunk), 3}, error) : nullptr;
+            std::vector<OrtValue *> out;
+            if (!pointValue || !rt.run(decoder, {"scene_codes", "points"}, {codeValue, pointValue}, {"density", "color"}, out, error))
+                return false;
+            const float *d = rt.data(out[0]), *c = rt.data(out[1]);
+            if (density)
+                density->insert(density->end(), d, d + chunk);
+            if (color)
+                color->insert(color->end(), c, c + chunk * 3);
+            for (OrtValue *value : out)
+                rt.api->ReleaseValue(value);
+        }
+        return true;
+    };
+    constexpr int N = 128;
+    constexpr double R = .87;
+    std::vector<float> grid;
+    grid.reserve(size_t(N) * N * N * 3);
+    for (int x = 0; x < N; ++x)
+        for (int y = 0; y < N; ++y)
+            for (int z = 0; z < N; ++z)
+                grid.insert(grid.end(), {float(-R + 2 * R * x / (N - 1)), float(-R + 2 * R * y / (N - 1)), float(-R + 2 * R * z / (N - 1))});
+    std::vector<float> density;
+    if (!query(grid, &density, nullptr))
+        return {};
+    for (float &d : density)
+        d -= 25;  // Where the model's density passes 25 is the surface.
+    Shape shape = surface(density, N, R);
+    if (shape.isNull()) {
+        if (error)
+            *error = "The shape model saw no solid thing in the cut-out.";
+        return {};
+    }
+    if (!query(shape.positions, nullptr, &shape.colors))
+        return {};
+    for (float &c : shape.colors)
+        c = std::clamp(c, 0.f, 1.f);
+    // The model's space stood up: turned -90° about x, then 90° about y.
+    for (size_t i = 0; i < shape.positions.size(); i += 3) {
+        const float x = shape.positions[i], y = shape.positions[i + 1], z = shape.positions[i + 2];
+        const float x1 = x, y1 = z, z1 = -y;  // -90° about x.
+        shape.positions[i] = z1, shape.positions[i + 1] = y1, shape.positions[i + 2] = -x1;  // 90° about y.
+    }
+    return shape;
 }
 
 bool Ai::canInpaint() {

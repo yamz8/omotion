@@ -101,6 +101,12 @@ Frame frame(const Scene &scene, AssetCache &assets, double t);
 // to the depth images; a path in the project.
 QString texture(const Scene &scene, AssetCache &assets, int index);
 
+// Gives a piece of the world a 3D shape (the AI makes one from its cut-out,
+// about 20 seconds): kept in assets/world and named in the layer's "shape",
+// it stands in for the flat cut-out, fitted to it from the picture's camera
+// and wearing the picture, so it looks the same from there and has a back.
+bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error);
+
 // The picture under a layer turned into a world (the AI reads it, a few
 // seconds): writes the depth images and sets the scene's "world".
 bool build(Scene &scene, AssetCache &assets, int index, QString *error);

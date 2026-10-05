@@ -51,6 +51,10 @@ Item {
                             source: holder.modelData.picture
                             generateMipmaps: true
                             mipFilter: Texture.Linear
+                            // A shape can reach past its cut-out's rectangle;
+                            // out there it's see-through, not the far side.
+                            tilingModeHorizontal: Texture.ClampToEdge
+                            tilingModeVertical: Texture.ClampToEdge
                         }
                     }
                 }

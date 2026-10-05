@@ -1,6 +1,7 @@
 #include "world.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
@@ -204,6 +205,61 @@ QVector3D planeNormal(const QList<QVector3D> &points, const QVector3D &centre) {
     return QVector3D(v[0][least], v[1][least], v[2][least]).normalized();
 }
 
+// A shape as stored: the model's vertices (x, y, z) and triangles, and which
+// quarter turn about up faces it the way the cut-out shows it.
+struct StoredShape {
+    std::vector<float> positions;
+    std::vector<quint32> triangles;
+    int quarter = 0;
+    bool isNull() const { return positions.empty(); }
+};
+
+StoredShape readShape(const QString &path) {
+    static QHash<QString, StoredShape> cache;
+    const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    if (cache.contains(key))
+        return cache.value(key);
+    StoredShape shape;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return shape;
+    const QByteArray bytes = file.readAll();
+    if (bytes.size() < 16 || !bytes.startsWith("OMSHAPE1"))
+        return shape;
+    const quint32 vertices = *reinterpret_cast<const quint32 *>(bytes.constData() + 8);
+    const quint32 indices = *reinterpret_cast<const quint32 *>(bytes.constData() + 12);
+    if (bytes.size() != qsizetype(16 + vertices * 12 + indices * 4))
+        return shape;
+    const float *p = reinterpret_cast<const float *>(bytes.constData() + 16);
+    shape.positions.assign(p, p + vertices * 3);
+    const quint32 *t = reinterpret_cast<const quint32 *>(bytes.constData() + 16 + vertices * 12);
+    shape.triangles.assign(t, t + indices);
+    cache.insert(key, shape);
+    return shape;
+}
+
+// The model's vertex turned by quarter turns about up.
+QVector3D quarterTurn(const float *p, int quarter) {
+    float x = p[0], z = p[2];
+    for (int i = 0; i < ((quarter % 4) + 4) % 4; ++i) {
+        const float nx = z, nz = -x;
+        x = nx, z = nz;
+    }
+    return QVector3D(x, p[1], z);
+}
+
+// The see-through-or-not of a cut-out's image, and the box of what shows.
+QRectF shownBox(const QImage &image) {
+    QRect box;
+    for (int y = 0; y < image.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < image.width(); ++x)
+            if (qAlpha(line[x]) > 128)
+                box |= QRect(x, y, 1, 1);
+    }
+    return QRectF(box);
+}
+
 QQuaternion turn(double yaw, double pitch, double roll) {
     // Yaw to the right about up, then pitch up about the right, then roll
     // clockwise about ahead, as a driver or a camera turns.
@@ -217,7 +273,8 @@ QQuaternion turn(double yaw, double pitch, double roll) {
 // keeping only those it covers (its edge cells mix in what's behind it, as
 // far as the sky), held between the 5th and 95th percentile of them, and
 // the rest filled from those, so its edges stay on it.
-DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF &offset, const QSizeF &size) {
+DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF &offset, const QSizeF &size,
+                    double *middleOut = nullptr) {
     const double cell = double(picture.picture.width()) / picture.image.width();
     const int w = std::max(2, int(std::ceil(size.width() / cell))), h = std::max(2, int(std::ceil(size.height() / cell)));
     QImage local(w, h, QImage::Format_Grayscale16), hole(w, h, QImage::Format_Grayscale8);
@@ -241,6 +298,8 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
     // that see through to the ground don't push parts of it meters back.
     std::sort(inside.begin(), inside.end());
     const double middle = inside.at(inside.size() / 2), width = size.width() / picture.focal * middle;
+    if (middleOut)
+        *middleOut = middle;
     const double low = std::max(inside.at(inside.size() / 20), middle - .4 * width);
     const double high = std::min(inside.at(inside.size() * 19 / 20), middle + .4 * width);
     for (int y = 0; y < h; ++y)
@@ -266,6 +325,68 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
     return DepthMap{local, QSize(int(std::round(w * cell)), int(std::round(h * cell))), picture.focal};
 }
 
+namespace {
+
+// Where a shaped piece's model goes, from the picture's camera: centred on
+// what shows of the cut-out, as wide and tall as it at its middle distance,
+// facing the camera as the cut-out does. The model's x and y turn half
+// round about the view, as it was seen from its -z.
+struct ShapeFit {
+    StoredShape model;
+    QVector3D centre;      // In the picture's camera, meters.
+    QVector3D modelMiddle;
+    float scale = 1;
+    QPointF offset;
+    QSizeF size;
+    bool valid = false;
+    QVector3D place(const float *p) const {
+        const QVector3D v = quarterTurn(p, model.quarter) - modelMiddle;
+        return centre + scale * QVector3D(-v.x(), -v.y(), v.z());
+    }
+};
+
+ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
+    ShapeFit fit;
+    const Info world = info(scene);
+    const int root = scene.indexOf(world.picture);
+    const Layer &layer = scene.layers.at(index);
+    const QString file = layer.raw.value("shape").toObject().value("file").toString();
+    if (!world.valid || index == root || file.isEmpty())
+        return fit;
+    fit.model = readShape(QDir(assets.directory()).filePath(file));
+    fit.model.quarter = layer.raw.value("shape").toObject().value("quarter").toInt();
+    fit.size = assets.size(layer.source);
+    const QSizeF picture = assets.size(pictureFile(scene, root));
+    const DepthMap depth = depthMap(assets, world.depth, picture.toSize(), world.focal);
+    double factor = 1;
+    const QImage image = assets.mip(layer.source, std::min(1.0, 512 / fit.size.width()), &factor);
+    if (fit.model.isNull() || depth.image.isNull() || image.isNull())
+        return fit;
+    fit.offset = offsetInPicture(scene, index);
+    double middle = 0;
+    pieceDepth(depth, image, fit.offset, fit.size, &middle);
+    const QRectF shown = shownBox(image);
+    if (!(middle > 0) || shown.isEmpty())
+        return fit;
+    const double k = fit.size.width() / image.width();
+    const QRectF box(fit.offset + shown.topLeft() * k, shown.size() * k);
+    QVector3D low(1e9f, 1e9f, 1e9f), high = -low;
+    for (size_t i = 0; i < fit.model.positions.size(); i += 3) {
+        const QVector3D v = quarterTurn(&fit.model.positions[i], fit.model.quarter);
+        low = QVector3D(std::min(low.x(), v.x()), std::min(low.y(), v.y()), std::min(low.z(), v.z()));
+        high = QVector3D(std::max(high.x(), v.x()), std::max(high.y(), v.y()), std::max(high.z(), v.z()));
+    }
+    fit.modelMiddle = (low + high) / 2;
+    const double perPixel = middle / world.focal;
+    fit.scale = float((box.width() * perPixel / std::max(1e-6f, high.x() - low.x()) +
+                       box.height() * perPixel / std::max(1e-6f, high.y() - low.y())) / 2);
+    fit.centre = depth.point(box.center().x(), box.center().y(), middle);
+    fit.valid = true;
+    return fit;
+}
+
+}
+
 Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     const Info world = info(scene);
     const int root = scene.indexOf(world.picture);
@@ -276,6 +397,35 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     const QSizeF picture = assets.size(pictureFile(scene, root));
     if (size.isEmpty() || picture.isEmpty())
         return {};
+
+    // A shaped piece: its model, placed on the cut-out, wearing the picture
+    // as seen from its camera (the side away from it wears it too, through).
+    const ShapeFit fit = fitShape(scene, assets, index);
+    if (fit.valid) {
+        const QMatrix4x4 toWorld = pictureToWorld(world);
+        const size_t count = fit.model.positions.size() / 3;
+        Mesh mesh;
+        mesh.vertices.resize(qsizetype(count) * 5 * sizeof(float));
+        float *v = reinterpret_cast<float *>(mesh.vertices.data());
+        mesh.minimum = QVector3D(1e9f, 1e9f, 1e9f);
+        mesh.maximum = -mesh.minimum;
+        for (size_t i = 0; i < count; ++i) {
+            const QVector3D seen = fit.place(&fit.model.positions[i * 3]);
+            const QVector3D p = toWorld.map(seen);
+            const double px = picture.width() / 2.0 + world.focal * seen.x() / seen.z();
+            const double py = picture.height() / 2.0 + world.focal * seen.y() / seen.z();
+            *v++ = p.x(), *v++ = p.y(), *v++ = p.z();
+            *v++ = float((px - fit.offset.x()) / fit.size.width());
+            *v++ = float(1 - (py - fit.offset.y()) / fit.size.height());
+            mesh.minimum = QVector3D(std::min(mesh.minimum.x(), p.x()), std::min(mesh.minimum.y(), p.y()), std::min(mesh.minimum.z(), p.z()));
+            mesh.maximum = QVector3D(std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()), std::max(mesh.maximum.z(), p.z()));
+        }
+        mesh.indices = QByteArray(reinterpret_cast<const char *>(fit.model.triangles.data()),
+                                  qsizetype(fit.model.triangles.size() * sizeof(quint32)));
+        mesh.pivot = toWorld.map(fit.centre);
+        return mesh;
+    }
+
     // The picture lies on what's behind its pieces; pieces on the picture's
     // own depth. Carried on past its edges, the picture covers more.
     DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
@@ -347,6 +497,9 @@ QVector3D pivot(const Scene &scene, AssetCache &assets, int index) {
     const DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
     if (depth.image.isNull() || size.isEmpty())
         return {};
+    const ShapeFit fit = fitShape(scene, assets, index);
+    if (fit.valid)
+        return pictureToWorld(world).map(fit.centre);
     const QPointF offset = index == root ? QPointF() : offsetInPicture(scene, index);
     // The anchor's spot at its distance. Where the anchor is on sky or
     // empty, the middle of the piece's own distances stands in.
@@ -413,12 +566,102 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     return frame;
 }
 
+bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    const Info world = info(scene);
+    if (!world.valid)
+        return fail("Make the world first (omotion world), then give its pieces shapes.");
+    if (index < 0 || index >= scene.layers.size() || index == scene.indexOf(world.picture) ||
+        !layers(scene).contains(index))
+        return fail("Shapes are for pieces cut out of the world's picture.");
+    const QImage image = assets.image(scene.layers.at(index).source);
+    if (image.isNull())
+        return fail(QString("Couldn't read %1.").arg(scene.layers.at(index).source));
+    const Ai::Shape shape = Ai::instance().objectShape(image, error);
+    if (shape.isNull())
+        return false;
+
+    // Which way round: the quarter turn whose outline, seen from the model's
+    // -z, best covers the cut-out's (the model's own way round wins ties).
+    const QRectF shown = shownBox(image);
+    constexpr int Grid = 96;
+    QImage target(Grid, Grid, QImage::Format_Grayscale8);
+    {
+        target.fill(0);
+        QPainter painter(&target);
+        painter.drawImage(QRectF(0, 0, Grid, Grid), image.copy(shown.toRect()).createAlphaMask(), QRectF());
+    }
+    auto coverage = [&](int quarter) {
+        QVector3D low(1e9f, 1e9f, 1e9f), high = -low;
+        std::vector<QPointF> flat(shape.positions.size() / 3);
+        for (size_t i = 0; i < flat.size(); ++i) {
+            const QVector3D v = quarterTurn(&shape.positions[i * 3], quarter);
+            flat[i] = QPointF(-v.x(), -v.y());
+            low = QVector3D(std::min(low.x(), -v.x()), std::min(low.y(), -v.y()), 0);
+            high = QVector3D(std::max(high.x(), -v.x()), std::max(high.y(), -v.y()), 0);
+        }
+        QImage drawn(Grid, Grid, QImage::Format_Grayscale8);
+        drawn.fill(0);
+        QPainter painter(&drawn);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::white);
+        const double sx = Grid / std::max(1e-6f, high.x() - low.x()), sy = Grid / std::max(1e-6f, high.y() - low.y());
+        for (size_t t = 0; t < shape.triangles.size(); t += 3) {
+            QPointF corners[3];
+            for (int k = 0; k < 3; ++k) {
+                const QPointF p = flat[shape.triangles[t + k]];
+                corners[k] = QPointF((p.x() - low.x()) * sx, (p.y() - low.y()) * sy);
+            }
+            painter.drawPolygon(corners, 3);
+        }
+        painter.end();
+        int both = 0, either = 0;
+        for (int y = 0; y < Grid; ++y)
+            for (int x = 0; x < Grid; ++x) {
+                const bool a = drawn.constScanLine(y)[x] > 127, b = target.constScanLine(y)[x] < 128;
+                both += a && b;
+                either += a || b;
+            }
+        return either ? double(both) / either : 0.0;
+    };
+    int quarter = 0;
+    double best = coverage(0) + .02;
+    for (int q = 1; q < 4; ++q) {
+        const double c = coverage(q);
+        if (c > best)
+            best = c, quarter = q;
+    }
+
+    const QDir dir(assets.directory());
+    dir.mkpath("assets/world");
+    const QString file = "assets/world/" + QFileInfo(scene.layers.at(index).source).completeBaseName() + "-shape.bin";
+    QByteArray bytes("OMSHAPE1");
+    const quint32 vertices = quint32(shape.positions.size() / 3), indices = quint32(shape.triangles.size());
+    bytes.append(reinterpret_cast<const char *>(&vertices), 4);
+    bytes.append(reinterpret_cast<const char *>(&indices), 4);
+    bytes.append(reinterpret_cast<const char *>(shape.positions.data()), qsizetype(shape.positions.size() * 4));
+    bytes.append(reinterpret_cast<const char *>(shape.triangles.data()), qsizetype(shape.triangles.size() * 4));
+    QSaveFile out(dir.filePath(file));
+    if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit())
+        return fail(QString("Couldn't write %1.").arg(file));
+    scene.layers[index].raw["shape"] = QJsonObject{{"file", file}, {"quarter", quarter}, {"fit", std::round(best * 100) / 100}};
+    return true;
+}
+
 QString texture(const Scene &scene, AssetCache &assets, int index) {
     const QString source = scene.layers.at(index).source;
     const QDir dir(assets.directory());
     const QString file = "assets/world/" + QFileInfo(source).completeBaseName() + "-3d.png";
     const QFileInfo made(dir.filePath(file)), from(dir.filePath(source));
-    if (made.exists() && made.lastModified() >= from.lastModified())
+    const Info about = info(scene);
+    const bool isPicture = index == scene.indexOf(about.picture) && !about.wide.isEmpty();
+    const QFileInfo wideFile(dir.filePath(about.wide));
+    if (made.exists() && made.lastModified() >= from.lastModified() &&
+        (!isPicture || made.lastModified() >= wideFile.lastModified()))
         return file;
     QImage image = assets.image(source).convertToFormat(QImage::Format_ARGB32);
     if (image.isNull())
@@ -426,6 +669,7 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
     // The picture the world was made from wears its margins too: the layer
     // in the middle, the painted margins round it, at most 6144 across.
     const Info world = info(scene);
+    bool widened = false;
     if (index == scene.indexOf(world.picture) && !world.wide.isEmpty() && !world.margin.isEmpty()) {
         const QImage wide(dir.filePath(world.wide));
         if (!wide.isNull()) {
@@ -438,6 +682,7 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
             painter.drawImage(QRectF(world.margin.width() * s, world.margin.height() * s, image.width() * s, image.height() * s), image);
             painter.end();
             image = both;
+            widened = true;
         }
     }
     bool seeThrough = false;
@@ -446,7 +691,7 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
         for (int x = 0; x < image.width() && !seeThrough; ++x)
             seeThrough = qAlpha(line[x]) < 255;
     }
-    if (!seeThrough)
+    if (!seeThrough && !widened)
         return source;
     // Push-pull on colour weighted by alpha: shrink until every cell has some
     // colour, then grow back, filling the empty pixels from the level above.
