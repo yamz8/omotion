@@ -820,6 +820,27 @@ void Backend::dismissAiPrompt() {
 
 void Backend::cancelDownload() { m_download.cancel(); }
 
+void Backend::cleanUp() {
+    if (!hasProject() || m_job.isRunning())
+        return;
+    flush();
+    QList<QJsonObject> scenes{m_scene.toJson()};
+    scenes += m_undo;
+    scenes += m_redo;
+    int count = 0;
+    QString error;
+    const qint64 freed = Project::cleanAssets(m_directory, scenes, &count, &error);
+    if (freed < 0)
+        return setError(error);
+    if (!error.isEmpty())
+        setError(error);
+    setNotice(count == 0 ? QString("Every image in the project is in use.")
+                         : QString("Moved %1 unused image%2 (%3 MB) to the trash.")
+                               .arg(count)
+                               .arg(count == 1 ? "" : "s")
+                               .arg(freed / 1e6, 0, 'f', 1));
+}
+
 void Backend::toggleWandMode() {
     m_wandMode = m_wandMode == "ai" ? "colour" : "ai";
     m_seeds.clear();

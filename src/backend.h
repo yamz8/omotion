@@ -184,6 +184,8 @@ public:
     Q_INVOKABLE void acceptAiPrompt();
     Q_INVOKABLE void dismissAiPrompt();
     Q_INVOKABLE void cancelDownload();
+    // Moves images nothing uses any more (not even undo) to the trash.
+    Q_INVOKABLE void cleanUp();
     // Waits for any background work (the AI, big cuts) to finish; for tests.
     void waitForJobs();
     // Smart select (the "wand" tool): the area of similar colour around a

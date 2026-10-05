@@ -11,7 +11,7 @@ Rectangle {
 
     readonly property var groups: [
         ["Project", [["O", "Animate an image"], ["Shift+O", "Open an animation folder"], ["I", "Add an image as a layer"],
-                     ["Ctrl+E", "Export MP4, WebM, GIF or PNG frames"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
+                     ["Ctrl+E", "Export MP4, WebM, GIF or PNG frames"], ["Ctrl+Shift+K", "Move unused images to the trash"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
                      ["?", "This list"], ["Q", "Quit"]]],
         ["Time", [["Space", "Play / pause"], [", .", "Previous / next frame"], ["< >", "Previous / next keyframe"],
                   ["Home End", "Start / end"]]],

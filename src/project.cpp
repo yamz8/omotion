@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSaveFile>
+#include <QSet>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -985,6 +986,54 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
         piece.keys["x"] = loop(px, px - shift * perPixel);
     }
     return true;
+}
+
+namespace {
+// Every "assets/..." string anywhere in some JSON, so fields omotion doesn't
+// know about keep their files too.
+void collectAssets(const QJsonValue &value, QSet<QString> &into) {
+    if (value.isString() && value.toString().startsWith("assets/"))
+        into.insert(QDir::cleanPath(value.toString()));
+    else if (value.isArray())
+        for (const QJsonValue &item : value.toArray())
+            collectAssets(item, into);
+    else if (value.isObject())
+        for (const QJsonValue &item : value.toObject())
+            collectAssets(item, into);
+}
+}
+
+QStringList unusedAssets(const QString &directory, const QList<QJsonObject> &scenes) {
+    QSet<QString> used;
+    for (const QJsonObject &scene : scenes)
+        collectAssets(scene, used);
+    QStringList unused;
+    const QDir assets(QDir(directory).filePath("assets"));
+    for (const QString &name : assets.entryList(QDir::Files, QDir::Name))
+        if (isImage(name) && !used.contains("assets/" + name))
+            unused.append("assets/" + name);
+    return unused;
+}
+
+qint64 cleanAssets(const QString &directory, const QList<QJsonObject> &scenes, int *count, QString *error) {
+    qint64 freed = 0;
+    int moved = 0;
+    for (const QString &file : unusedAssets(directory, scenes)) {
+        const QString path = QDir(directory).filePath(file);
+        const qint64 size = QFileInfo(path).size();
+        if (!QFile::moveToTrash(path)) {
+            if (error)
+                *error = QString("Couldn't move %1 to the trash.").arg(file);
+            if (count)
+                *count = moved;
+            return moved ? freed : -1;
+        }
+        freed += size;
+        ++moved;
+    }
+    if (count)
+        *count = moved;
+    return freed;
 }
 
 void renameCutSource(Scene &scene, const QString &from, const QString &to) {

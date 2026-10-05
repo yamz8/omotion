@@ -49,6 +49,7 @@ Your original image is copied into the project and never touched.
 | `O` / `Shift+O` | Animate an image / open an animation folder |
 | `I` | Add an image as a layer |
 | `Ctrl+E` | Export MP4, WebM, GIF or PNG frames |
+| `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
 | `Space` | Play / pause |
 | `,` `.` | Previous / next frame |
 | `<` `>` | Previous / next keyframe |
@@ -120,7 +121,8 @@ missing when you ask for an AI feature.
 ```text
 photo.omotion/
   scene.json        the animation
-  assets/           every image a layer uses; cuts add new files here, never overwrite
+  assets/           every image a layer uses; cuts add new files here, never overwrite,
+                    so undo works; Ctrl+Shift+K clears out the ones nothing uses
   renders/          exports
 ```
 
@@ -196,6 +198,7 @@ omotion cut photo.omotion photo --ai-pick 316,703 --name deer
 omotion split photo.omotion --layers 4 --animate
                                           # D then A: depth layers, moving
 omotion models --download                 # fetch the AI models
+omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```
 
 ## Building

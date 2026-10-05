@@ -40,6 +40,7 @@ const char *Usage = R"(Usage:
                                          Split a layer (the bottom one unless named) into
                                          layers by depth, with the AI; --animate adds a
                                          looping parallax camera move
+  omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 145 MB, checked against their hashes)
 
@@ -151,6 +152,22 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "clean") {
+        const QList<QJsonObject> scenes{scene.toJson()};
+        if (args.contains("--dry-run")) {
+            for (const QString &file : Project::unusedAssets(directory, scenes))
+                QTextStream(stdout) << file << "\n";
+            return 0;
+        }
+        int count = 0;
+        const qint64 freed = Project::cleanAssets(directory, scenes, &count, &error);
+        if (freed < 0)
+            return fail(error);
+        QTextStream(stdout) << QString("Moved %1 unused image%2 (%3 MB) to the trash.\n")
+                                   .arg(count).arg(count == 1 ? "" : "s").arg(freed / 1e6, 0, 'f', 1);
+        return error.isEmpty() ? 0 : 1;
+    }
+
     if (args.at(1) == "split") {
         Scene edited = scene;
         int layer = edited.layers.isEmpty() ? -1 : 0;
@@ -223,7 +240,7 @@ int command(const QStringList &args) {
 
 int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
-                                       !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") ||
+                                       !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -257,7 +274,7 @@ int main(int argc, char *argv[]) {
         return problem.isEmpty() ? 0 : 1;
     }
     if (headless) {
-        if (args.size() < (args.at(1) == "split" ? 3 : 4))
+        if (args.size() < (args.at(1) == "split" || args.at(1) == "clean" ? 3 : 4))
             return fail(QString("missing arguments.\n\n") + Usage);
         return command(args);
     }

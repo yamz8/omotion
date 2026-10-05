@@ -934,6 +934,26 @@ private slots:
         QCOMPARE(backend.scene().layers.size(), 1);
     }
 
+    void findsImagesNothingUses() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        Project::cutOut(scene, assets, 0, {{5, 5}, {80, 5}, {80, 60}, {5, 60}}, 0, true, &error, "a");
+        const QJsonObject once = scene.toJson();
+        Project::reshapeCut(scene, assets, 1, {{5, 5}, {90, 5}, {90, 70}, {5, 70}}, 0, 0, &error);
+        // Its first shape's files are only in the history now.
+        const QStringList unused = Project::unusedAssets(project, {scene.toJson()});
+        QCOMPARE(unused.size(), 2);
+        QVERIFY(!unused.contains("assets/p.png"));  // The original, kept as "uncut".
+        QVERIFY(Project::unusedAssets(project, {scene.toJson(), once}).isEmpty());
+        // Something omotion doesn't know about keeps its file too.
+        QJsonObject noted = scene.toJson();
+        noted["notes"] = QJsonObject{{"reference", unused.first()}};
+        QCOMPARE(Project::unusedAssets(project, {noted}).size(), 1);
+    }
+
     void cuttingNothingFails() {
         QTemporaryDir dir;
         const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);

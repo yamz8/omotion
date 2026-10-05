@@ -5,6 +5,7 @@
 // line renderer and the tests share them.
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QPolygonF>
 #include <QString>
 
@@ -78,6 +79,12 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImag
 // pushes in, and nearer layers slide further, strength canvas pixels for the
 // nearest, as a loop over the scene's duration.
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
+
+// Image files in the project's assets folder that none of the given scenes
+// (say, the scene and its undo history) mentions anywhere.
+QStringList unusedAssets(const QString &directory, const QList<QJsonObject> &scenes);
+// Moves those files to the trash; returns how many bytes that freed, or -1.
+qint64 cleanAssets(const QString &directory, const QList<QJsonObject> &scenes, int *count, QString *error);
 
 // Keeps pieces pointing at their source when it's renamed.
 void renameCutSource(Scene &scene, const QString &from, const QString &to);
