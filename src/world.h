@@ -47,6 +47,9 @@ struct Info {
     // picture's pixels go) and how high the camera stood above it.
     QVector3D up{0, -1, 0};
     double height = 1.6;
+    // Everything's distance times this: what the AI reads from a picture,
+    // a painting above all, is only roughly to scale.
+    double scale = 1;
 };
 Info info(const Scene &scene);
 
@@ -71,6 +74,7 @@ struct Mesh {
     QVector3D minimum;
     QVector3D maximum;
     QVector3D pivot;  // Its anchor, in the world, where it turns.
+    int columns = 0;  // For a grid, its vertices across; 0 for a shape.
     bool isNull() const { return vertices.isEmpty(); }
 };
 Mesh mesh(const Scene &scene, AssetCache &assets, int index);
@@ -107,9 +111,34 @@ QString texture(const Scene &scene, AssetCache &assets, int index);
 // and wearing the picture, so it looks the same from there and has a back.
 bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error);
 
+// The ground's height (world y) at a world point (x, z), from what the
+// picture shows of it: its surfaces binned by where they stand, the gaps
+// (behind a crest, say) filled between what's seen around them and kept
+// under the camera's line of sight. NaN outside what the world knows.
+double groundAt(const Scene &scene, AssetCache &assets, double x, double z);
+
+// Which way a piece faces in the world, as a yaw (degrees, 0 looking away
+// from the camera, right positive): its shape's long axis, the end toward
+// the camera's side, or straight at the camera for a flat piece.
+double heading(const Scene &scene, AssetCache &assets, int index);
+
+// Drives a piece over the ground from one world point to another at a
+// speed (meters a second), from time t: it keeps to the ground, flies off
+// where the ground falls away faster than gravity, lands where the ground
+// is, and pitches with its path. It keeps facing as the picture shows it
+// (a picture has only that side of it) unless face turns it to the way. Baked as keyframes
+// of its world properties; the landings, in seconds, come back.
+bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, const QPointF &to, double speed,
+           double t, QList<double> *landings, QString *error, bool face = false);
+
+// Sizes the world so a piece of it is as tall as it really is (meters).
+bool setSize(Scene &scene, AssetCache &assets, int index, double meters, QString *error);
+
 // The picture under a layer turned into a world (the AI reads it, a few
 // seconds): writes the depth images and sets the scene's "world".
-bool build(Scene &scene, AssetCache &assets, int index, QString *error);
+// horizon, when known (0 to 1, down the picture), sets which way is level:
+// better than the ground in sight, which may slope, as a road up to a crest.
+bool build(Scene &scene, AssetCache &assets, int index, QString *error, double horizon = -1);
 
 // The picture carried on past each edge by margin pixels, painted in by the
 // AI a square at a time around the border, each square seeing what's

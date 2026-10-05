@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QImage>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
 #include <QSaveFile>
@@ -14,6 +15,7 @@
 #include <QSet>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 
 #include "ai.h"
@@ -48,6 +50,9 @@ Info info(const Scene &scene) {
             info.up = v.normalized();
     }
     info.height = ground.value("height").toDouble(info.height);
+    info.scale = world.value("scale").toDouble(1);
+    if (!(info.scale > 0))
+        info.scale = 1;
     info.wide = world.value("wide").toString();
     const QJsonArray margin = world.value("margin").toArray();
     info.margin = QSize(margin.at(0).toInt(), margin.at(1).toInt());
@@ -108,7 +113,7 @@ QMatrix4x4 pictureToWorld(const Info &info) {
     const QVector3D x = QVector3D::crossProduct(y, z).normalized();
     QMatrix4x4 m;
     m.setRow(0, QVector4D(x, 0));
-    m.setRow(1, QVector4D(y, info.height));
+    m.setRow(1, QVector4D(y, info.height * info.scale));
     m.setRow(2, QVector4D(z, 0));
     m.setRow(3, QVector4D(0, 0, 0, 1));
     return m;
@@ -130,12 +135,14 @@ struct DepthMap {
     // more, for one carried on past its edges.
     QPointF origin;
     QSizeF span;
+    double scale = 1;
     // Distance at a point of the picture, nearest cell.
     double at(double x, double y) const {
         const QSizeF covers = span.isEmpty() ? QSizeF(picture) : span;
         const int gx = std::clamp(int((x - origin.x()) / covers.width() * image.width()), 0, image.width() - 1);
         const int gy = std::clamp(int((y - origin.y()) / covers.height() * image.height()), 0, image.height() - 1);
-        return decodeDepth(reinterpret_cast<const quint16 *>(image.constScanLine(gy))[gx]);
+        const quint16 code = reinterpret_cast<const quint16 *>(image.constScanLine(gy))[gx];
+        return code >= Sky ? Far : decodeDepth(code) * scale;
     }
     QVector3D point(double x, double y, double distance) const {
         return QVector3D((x - picture.width() / 2.0) * distance / focal, (y - picture.height() / 2.0) * distance / focal,
@@ -144,13 +151,15 @@ struct DepthMap {
 };
 
 // Depth images are read once per file and kept, as meshes ask often.
-DepthMap depthMap(AssetCache &assets, const QString &file, const QSize &picture, double focal) {
+DepthMap depthMap(AssetCache &assets, const QString &file, const QSize &picture, double focal, double scale = 1) {
     static QHash<QString, QImage> cache;
     const QString path = QDir(assets.directory()).filePath(file);
     const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
     if (!cache.contains(key))
         cache.insert(key, QImage(path).convertToFormat(QImage::Format_Grayscale16));
-    return DepthMap{cache.value(key), picture, focal};
+    DepthMap map{cache.value(key), picture, focal};
+    map.scale = scale;
+    return map;
 }
 
 bool writeDepth(const QImage &image, const QString &path, QString *error) {
@@ -286,6 +295,7 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
             const int iy = std::clamp(int(py / size.height() * piece.height()), 0, piece.height() - 1);
             const double d = picture.at(offset.x() + px, offset.y() + py);
             const bool covered = qAlpha(piece.pixel(ix, iy)) > 200 && d < Far;
+            // Kept in meters as they are here; the local map isn't scaled again.
             reinterpret_cast<quint16 *>(local.scanLine(y))[x] = encodeDepth(d);
             hole.scanLine(y)[x] = covered ? 0 : 255;
             if (covered)
@@ -357,7 +367,7 @@ ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
     fit.model.quarter = layer.raw.value("shape").toObject().value("quarter").toInt();
     fit.size = assets.size(layer.source);
     const QSizeF picture = assets.size(pictureFile(scene, root));
-    const DepthMap depth = depthMap(assets, world.depth, picture.toSize(), world.focal);
+    const DepthMap depth = depthMap(assets, world.depth, picture.toSize(), world.focal, world.scale);
     double factor = 1;
     const QImage image = assets.mip(layer.source, std::min(1.0, 512 / fit.size.width()), &factor);
     if (fit.model.isNull() || depth.image.isNull() || image.isNull())
@@ -428,7 +438,7 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
 
     // The picture lies on what's behind its pieces; pieces on the picture's
     // own depth. Carried on past its edges, the picture covers more.
-    DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
+    DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal, world.scale);
     if (depth.image.isNull())
         return {};
     QPointF offset = index == root ? QPointF() : offsetInPicture(scene, index);
@@ -474,6 +484,7 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
             mesh.maximum = QVector3D(std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()),
                                      std::max(mesh.maximum.z(), p.z()));
         }
+    mesh.columns = cols + 1;
     mesh.indices.resize(qsizetype(cols) * rows * 6 * sizeof(quint32));
     quint32 *i = reinterpret_cast<quint32 *>(mesh.indices.data());
     for (int r = 0; r < rows; ++r)
@@ -494,7 +505,7 @@ QVector3D pivot(const Scene &scene, AssetCache &assets, int index) {
     const Layer &layer = scene.layers.at(index);
     const QSizeF size = assets.size(layer.source);
     const QSizeF picture = assets.size(pictureFile(scene, root));
-    const DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal);
+    const DepthMap depth = depthMap(assets, index == root ? world.behind : world.depth, picture.toSize(), world.focal, world.scale);
     if (depth.image.isNull() || size.isEmpty())
         return {};
     const ShapeFit fit = fitShape(scene, assets, index);
@@ -564,6 +575,313 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         frame.layers.append(place);
     }
     return frame;
+}
+
+namespace {
+
+// How steeply unseen ground behind a crest is taken to fall away.
+constexpr double Fall = .08;
+
+// The ground as heights on a grid over (x, ahead), half a meter a cell.
+struct Heightfield {
+    double x0 = -80, ahead0 = -20, cell = .5;
+    int w = 320, h = 340;
+    std::vector<float> height;
+};
+
+const Heightfield &heightfield(const Scene &scene, AssetCache &assets) {
+    static QHash<QByteArray, Heightfield> cache;
+    const QByteArray key = QJsonDocument(scene.raw.value("world").toObject()).toJson(QJsonDocument::Compact) +
+                           assets.directory().toUtf8();
+    if (cache.contains(key))
+        return cache[key];
+    Heightfield field;
+    const Info world = info(scene);
+    const int root = scene.indexOf(world.picture);
+    const Mesh ground = mesh(scene, assets, root);
+    std::vector<float> top(size_t(field.w) * field.h, -1e9f);
+    const float *v = reinterpret_cast<const float *>(ground.vertices.constData());
+    const size_t count = size_t(ground.vertices.size()) / (5 * sizeof(float));
+    // What's seen of the ground: from the bottom of the picture up, the
+    // surfaces that face up and carry on without a jump in distance (the
+    // road and its verges up to a crest's lip; not hills beyond, nor the
+    // face of a dust cloud), the highest in each cell.
+    const int columns = std::max(2, ground.columns);
+    const int rowsOf = int(count / columns);
+    auto vertex = [&](size_t i) { return QVector3D(v[i * 5], v[i * 5 + 1], v[i * 5 + 2]); };
+    const QVector3D eyeAt = pictureToWorld(world).map(QVector3D(0, 0, 0));
+    std::vector<uchar> isGround(count, 0), reached(count, 0);
+    for (size_t i = 0; i < count; ++i) {
+        const QVector3D p = vertex(i);
+        if (p.length() > 1000)
+            continue;
+        const size_t right = (i % columns) + 1 < size_t(columns) ? i + 1 : i - 1, below = i + columns < count ? i + columns : i - columns;
+        QVector3D normal = QVector3D::crossProduct(vertex(right) - p, vertex(below) - p).normalized();
+        if (normal.y() < 0)
+            normal = -normal;
+        isGround[i] = normal.y() > .5f;
+    }
+    QList<size_t> queue;
+    for (int c = 0; c < columns; ++c) {
+        const size_t i = size_t(rowsOf - 1) * columns + c;
+        if (isGround[i])
+            reached[i] = 1, queue.append(i);
+    }
+    while (!queue.isEmpty()) {
+        const size_t i = queue.takeLast();
+        const double here = (vertex(i) - eyeAt).length();
+        const int r = int(i / columns), c = int(i % columns);
+        for (const auto [dr, dc] : {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
+            if (r + dr < 0 || r + dr >= rowsOf || c + dc < 0 || c + dc >= columns)
+                continue;
+            const size_t j = size_t(r + dr) * columns + c + dc;
+            if (reached[j] || !isGround[j])
+                continue;
+            const double there = (vertex(j) - eyeAt).length();
+            if (std::abs(there - here) / std::min(here, there) > .12)
+                continue;
+            reached[j] = 1;
+            queue.append(j);
+        }
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (!reached[i])
+            continue;
+        const QVector3D p = vertex(i);
+        const int cx = int((p.x() - field.x0) / field.cell), cz = int((-p.z() - field.ahead0) / field.cell);
+        if (cx >= 0 && cx < field.w && cz >= 0 && cz < field.h)
+            top[size_t(cz) * field.w + cx] = std::max(top[size_t(cz) * field.w + cx], p.y());
+    }
+    // The gaps between, filled from around (push-pull, as for depth).
+    QImage fakeDepth(field.w, field.h, QImage::Format_Grayscale16), hole(field.w, field.h, QImage::Format_Grayscale8);
+    const double base = 500;  // Heights carried as distances above a floor, so they stay positive.
+    for (int z = 0; z < field.h; ++z)
+        for (int x = 0; x < field.w; ++x) {
+            const float t = top[size_t(z) * field.w + x];
+            reinterpret_cast<quint16 *>(fakeDepth.scanLine(z))[x] = encodeDepth(t > -1e8f ? base + t : base);
+            hole.scanLine(z)[x] = t > -1e8f ? 0 : 255;
+        }
+    fillDepth(fakeDepth, hole);
+    field.height.resize(size_t(field.w) * field.h);
+    for (int z = 0; z < field.h; ++z)
+        for (int x = 0; x < field.w; ++x)
+            field.height[size_t(z) * field.w + x] = float(decodeDepth(reinterpret_cast<const quint16 *>(fakeDepth.constScanLine(z))[x]) - base);
+    // Ground nobody sees lies below the line of sight past what hides it:
+    // walking out from the camera, it stays under the steepest view so far.
+    const double eye = world.height * world.scale;
+    for (int z = 0; z < field.h; ++z)
+        for (int x = 0; x < field.w; ++x) {
+            if (!hole.constScanLine(z)[x])
+                continue;
+            const double px = field.x0 + (x + .5) * field.cell, pz = field.ahead0 + (z + .5) * field.cell;
+            const double distance = std::hypot(px, pz);
+            double steepest = -1e9, lastSeen = -1;
+            for (double d = field.cell; d < distance; d += field.cell) {
+                const int sx = int((px * d / distance - field.x0) / field.cell), sz = int((pz * d / distance - field.ahead0) / field.cell);
+                if (sx < 0 || sx >= field.w || sz < 0 || sz >= field.h || hole.constScanLine(sz)[sx])
+                    continue;
+                steepest = std::max(steepest, (top[size_t(sz) * field.w + sx] - eye) / d);
+                lastSeen = d;
+            }
+            if (steepest > -1e8) {
+                // Behind what hides it, the ground falls away gently (as a
+                // road past a crest), and always under the line of sight.
+                float &here = field.height[size_t(z) * field.w + x];
+                const double fallen = double(here) - Fall * std::max(0.0, distance - lastSeen);
+                here = float(std::min(fallen, eye + steepest * distance));
+            }
+        }
+    return cache[key] = field;
+}
+
+}
+
+double groundAt(const Scene &scene, AssetCache &assets, double x, double z) {
+    if (!info(scene).valid)
+        return std::numeric_limits<double>::quiet_NaN();
+    const Heightfield &field = heightfield(scene, assets);
+    const double fx = (x - field.x0) / field.cell - .5, fz = (-z - field.ahead0) / field.cell - .5;
+    if (fx < 0 || fz < 0 || fx >= field.w - 1 || fz >= field.h - 1)
+        return std::numeric_limits<double>::quiet_NaN();
+    const int ix = int(fx), iz = int(fz);
+    const double tx = fx - ix, tz = fz - iz;
+    auto at = [&](int a, int b) { return double(field.height[size_t(b) * field.w + a]); };
+    return (at(ix, iz) * (1 - tx) + at(ix + 1, iz) * tx) * (1 - tz) + (at(ix, iz + 1) * (1 - tx) + at(ix + 1, iz + 1) * tx) * tz;
+}
+
+double heading(const Scene &scene, AssetCache &assets, int index) {
+    const Info world = info(scene);
+    const QVector3D pivot = World::pivot(scene, assets, index);
+    const QVector3D camera = pictureToWorld(world).map(QVector3D(0, 0, 0));
+    QVector3D toCamera = camera - pivot;
+    toCamera.setY(0);
+    QVector3D facing = toCamera.normalized();
+    const Mesh shape = mesh(scene, assets, index);
+    if (!scene.layers.at(index).raw.value("shape").toObject().isEmpty() && !shape.isNull()) {
+        // The long axis of its footprint: the main direction its points
+        // spread in across the ground.
+        const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
+        const size_t count = size_t(shape.vertices.size()) / (5 * sizeof(float));
+        double sxx = 0, szz = 0, sxz = 0, mx = 0, mz = 0;
+        for (size_t i = 0; i < count; ++i)
+            mx += v[i * 5], mz += v[i * 5 + 2];
+        mx /= count, mz /= count;
+        for (size_t i = 0; i < count; ++i) {
+            const double dx = v[i * 5] - mx, dz = v[i * 5 + 2] - mz;
+            sxx += dx * dx, szz += dz * dz, sxz += dx * dz;
+        }
+        const double angle = .5 * std::atan2(2 * sxz, sxx - szz);
+        QVector3D axis(float(std::cos(angle)), 0, float(std::sin(angle)));
+        if (QVector3D::dotProduct(axis, toCamera) < 0)
+            axis = -axis;
+        facing = axis;
+    }
+    // Yaw 0 looks away from the camera (-z); right is positive.
+    return std::atan2(facing.x(), -facing.z()) * 180 / M_PI;
+}
+
+bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, const QPointF &to, double speed, double t,
+           QList<double> *landings, QString *error, bool face) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (!info(scene).valid || !layers(scene).contains(index) || index == scene.indexOf(info(scene).picture))
+        return fail("Driving is for pieces of a world.");
+    if (!(speed > 0))
+        return fail("The speed must be more than 0.");
+    const QVector3D rest = World::pivot(scene, assets, index);
+    const Mesh shape = mesh(scene, assets, index);
+    const double clearance = rest.y() - shape.minimum.y();  // From its lowest point up to its pivot.
+    // World points: x right, z negative ahead.
+    const QVector3D start(float(from.x()), 0, float(-from.y())), end(float(to.x()), 0, float(-to.y()));
+    const double length = (end - start).length();
+    if (length < .1)
+        return fail("From and to are the same place.");
+    const QVector3D direction = (end - start) / float(length);
+    // The ground along the way, smoothed over about a wheelbase, as a car
+    // rides over the grain of it rather than into every dip.
+    const double step = .25;
+    const int samples = int(length / step) + 1;
+    std::vector<double> ground(samples);
+    for (int i = 0; i < samples; ++i) {
+        const QVector3D p = start + direction * float(i * step);
+        const double g = groundAt(scene, assets, p.x(), p.z());
+        if (std::isnan(g))
+            return fail(QString("The way leaves the part of the world the picture shows (at %1 m right, %2 m ahead).")
+                            .arg(p.x(), 0, 'f', 1).arg(-p.z(), 0, 'f', 1));
+        ground[i] = g;
+    }
+    std::vector<double> smooth(samples);
+    for (int i = 0; i < samples; ++i) {
+        double sum = 0;
+        int n = 0;
+        for (int k = std::max(0, i - 6); k <= std::min(samples - 1, i + 6); ++k)
+            sum += ground[k], ++n;
+        smooth[i] = sum / n + clearance;
+    }
+    auto groundAlong = [&](double s) {
+        const double f = std::clamp(s / step, 0.0, double(samples - 1));
+        const int i = std::min(int(f), samples - 2);
+        return smooth[i] + (smooth[i + 1] - smooth[i]) * (f - i);
+    };
+
+    // Along the way at a steady speed; up and down, held to the ground
+    // until the ground falls away faster than gravity pulls, then thrown.
+    const double gravity = 9.81, dt = 1 / (scene.fps * 4), duration = length / speed;
+    struct Sample {
+        double t, s, y, vy;
+    };
+    std::vector<Sample> path;
+    double s = 0, y = groundAlong(0), vy = (groundAlong(speed * dt) - groundAlong(0)) / dt;
+    bool flying = false;
+    if (landings)
+        landings->clear();
+    QJsonArray landed;
+    for (double time = 0; time <= duration + dt / 2; time += dt) {
+        path.push_back({time, s, y, vy});
+        const double next = s + speed * dt, below = groundAlong(next);
+        if (!flying) {
+            const double vyNext = (below - y) / dt;
+            // Springs soak up a little; past that the ground drops away.
+            if ((vyNext - vy) / dt < -1.2 * gravity) {
+                flying = true;
+            } else {
+                y = below, vy = vyNext;
+            }
+        }
+        if (flying) {
+            vy -= gravity * dt;
+            y += vy * dt;
+            if (y <= below) {
+                // Down: whatever speed it had into the ground is spent.
+                if (vy < -1) {
+                    if (landings)
+                        landings->append(t + time + dt);
+                    landed.append(std::round((t + time + dt) * 1000) / 1000);
+                }
+                y = below;
+                vy = (groundAlong(next + speed * dt) - below) / dt;
+                flying = false;
+            }
+        }
+        s = next;
+    }
+
+    // Keyframes a frame apart, replacing what was there over that time.
+    Layer &layer = scene.layers[index];
+    double yaw = face ? std::atan2(direction.x(), -direction.z()) * 180 / M_PI - heading(scene, assets, index) : 0;
+    yaw = std::remainder(yaw, 360.0);
+    const double end_ = t + duration;
+    for (const QString &property : {QString("worldX"), QString("worldY"), QString("worldZ"), QString("yaw"), QString("pitch")}) {
+        QList<Key> kept;
+        for (const Key &key : layer.keys.value(property))
+            if (key.t < t - 1e-6 || key.t > end_ + 1e-6)
+                kept.append(key);
+        layer.keys[property] = kept;
+    }
+    const int frames = int(std::ceil(duration * scene.fps));
+    double pitch = 0;
+    for (int f = 0; f <= frames; ++f) {
+        const double time = std::min(duration, f / scene.fps);
+        const Sample &a = path[std::min(path.size() - 1, size_t(time / dt))];
+        const QVector3D p = start + direction * float(a.s);
+        // The nose follows the path, a little behind, as a car's weight does.
+        const double wanted = std::atan2(a.vy, speed) * 180 / M_PI;
+        pitch += (wanted - pitch) * std::min(1.0, 8.0 / scene.fps);
+        auto put = [&](const QString &property, double v) {
+            QList<Key> &keys = layer.keys[property];
+            keys.append(Key{t + time, v, "linear"});
+        };
+        put("worldX", p.x() - rest.x());
+        put("worldY", a.y - rest.y());
+        put("worldZ", -(p.z() - rest.z()));
+        put("yaw", yaw);
+        put("pitch", pitch);
+    }
+    for (const QString &property : {QString("worldX"), QString("worldY"), QString("worldZ"), QString("yaw"), QString("pitch")})
+        std::stable_sort(layer.keys[property].begin(), layer.keys[property].end(), [](const Key &a, const Key &b) { return a.t < b.t; });
+    layer.raw["landings"] = landed;
+    if (end_ > scene.duration)
+        scene.duration = std::ceil(end_ * 10) / 10;
+    return true;
+}
+
+bool setSize(Scene &scene, AssetCache &assets, int index, double meters, QString *error) {
+    const Info world = info(scene);
+    if (!world.valid || !layers(scene).contains(index))
+        return (error ? *error = "Sizing is for pieces of a world." : QString()), false;
+    if (!(meters > 0))
+        return (error ? *error = "The size must be more than 0 meters." : QString()), false;
+    const Mesh shape = mesh(scene, assets, index);
+    const double tall = shape.maximum.y() - shape.minimum.y();
+    if (shape.isNull() || !(tall > 1e-3))
+        return (error ? *error = "That piece has no height to measure." : QString()), false;
+    QJsonObject json = scene.raw.value("world").toObject();
+    json["scale"] = std::round(world.scale * meters / tall * 10000) / 10000;
+    scene.raw["world"] = json;
+    return true;
 }
 
 bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
@@ -912,7 +1230,7 @@ void fillDepth(QImage &depth, const QImage &hole) {
     }
 }
 
-bool build(Scene &scene, AssetCache &assets, int index, QString *error) {
+bool build(Scene &scene, AssetCache &assets, int index, QString *error, double horizon) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -996,6 +1314,20 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error) {
         }
     }
     height = std::max(.05, height);
+    if (horizon > 0 && horizon < 1) {
+        // Level is where the horizon says: tilted up by its distance below
+        // the middle, not rolled. The camera stands as high above the ground
+        // in sight as before, measured that way.
+        const double pitch = std::atan((horizon - .5) * picture.height() / shape.focal);
+        up = QVector3D(0, float(-std::cos(pitch)), float(std::sin(pitch)));
+        QList<double> heights;
+        for (const QVector3D &p : ground)
+            heights.append(-QVector3D::dotProduct(up, p));
+        if (!heights.isEmpty()) {
+            std::sort(heights.begin(), heights.end());
+            height = std::max(.05, heights.at(heights.size() / 2));
+        }
+    }
 
     // Past the edges: the picture carried on by the AI, and its distances by
     // the cells around, or the ground where a view down meets it, so a

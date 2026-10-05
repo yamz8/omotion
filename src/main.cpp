@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineF>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -59,12 +60,21 @@ const char *Usage = R"(Usage:
                                          "acceleration of car.x * -0.002, smooth 0.2",
                                          "time * 90"; extras: lag, smooth, spring, damping,
                                          min, max, abs
-  omotion world <project> [--layer <name>]
+  omotion world <project> [--layer <name>] [--horizon <0-1>]
                                          Turn the picture into a 3D world, with the AI: its
                                          distances, lens and ground (the bottom layer's
-                                         picture unless named)
+                                         picture unless named); --horizon says where the
+                                         horizon is, down the picture, for which way is level
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
+  omotion size <project> <layer> <meters>  Size the world so that piece is that tall (a car 1.4)
+  omotion drive <project> <layer> --from <x,ahead> --to <x,ahead> [--speed <km/h>] [--at <seconds>] [--face]
+                                         Drive a piece of the world over its ground, in meters
+                                         (x right of the camera, ahead of it): it keeps to the
+                                         ground, flies off crests and lands; baked as keyframes.
+                                         It keeps facing as painted unless --face
+  omotion ground <project> <x,ahead>...   The ground's height there, in meters (blank where the
+                                         world doesn't reach)
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
@@ -284,7 +294,10 @@ int command(const QStringList &args) {
             for (const int index : World::layers(scene)) {
                 const World::Mesh mesh = World::mesh(scene, assets, index);
                 parts.insert(scene.layers.at(index).name,
-                             QJsonObject{{"pivot", vector(mesh.pivot)}, {"low", vector(mesh.minimum)}, {"high", vector(mesh.maximum)}});
+                             QJsonObject{{"pivot", vector(mesh.pivot)},
+                                         {"low", vector(mesh.minimum)},
+                                         {"high", vector(mesh.maximum)},
+                                         {"heading", std::round(World::heading(scene, assets, index) * 10) / 10}});
             }
             worldInfo = QJsonObject{{"picture", world.picture},
                                     {"lens", world.focal},
@@ -307,16 +320,22 @@ int command(const QStringList &args) {
     if (args.at(1) == "world") {
         Scene edited = scene;
         int layer = 0;
+        double horizon = -1;
         for (int i = 3; i < args.size(); ++i) {
             if (args.at(i) == "--layer" && i + 1 < args.size()) {
                 layer = edited.indexOf(args.at(++i));
                 if (layer < 0)
                     return fail(QString("There's no layer named \"%1\".").arg(args.at(i)));
+            } else if (args.at(i) == "--horizon") {
+                if (!numberAfter(args, i, &horizon))
+                    return 1;
+                if (horizon <= 0 || horizon >= 1)
+                    return fail("--horizon is how far down the picture the horizon is, between 0 and 1.");
             } else {
                 return fail(QString("world doesn't know \"%1\".").arg(args.at(i)));
             }
         }
-        if (!World::build(edited, assets, layer, &error) || !Project::save(directory, edited, &error))
+        if (!World::build(edited, assets, layer, &error, horizon) || !Project::save(directory, edited, &error))
             return fail(error);
         const World::Info world = World::info(edited);
         QTextStream(stdout) << QString("World of %1: lens %2 px, camera %3 m above the ground, %4 layers.\n")
@@ -340,6 +359,90 @@ int command(const QStringList &args) {
         QTextStream(stdout) << QString("%1 has a shape (fits its outline %2%).\n")
                                    .arg(args.at(3))
                                    .arg(int(shape.value("fit").toDouble() * 100));
+        return 0;
+    }
+
+    if (args.at(1) == "size") {
+        if (args.size() != 5)
+            return fail("size takes a project, a layer, and how tall it really is in meters.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        bool ok = false;
+        const double meters = args.at(4).toDouble(&ok);
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        if (!ok || !World::setSize(edited, assets, layer, meters, &error) || !Project::save(directory, edited, &error))
+            return fail(ok ? error : QString("\"%1\" isn't a size in meters.").arg(args.at(4)));
+        QTextStream(stdout) << QString("The world is now %1 times as big as the AI read it.\n")
+                                   .arg(World::info(edited).scale, 0, 'f', 2);
+        return 0;
+    }
+
+    if (args.at(1) == "ground") {
+        if (!World::info(scene).valid)
+            return fail("There's no world yet; omotion world makes one.");
+        QTextStream out(stdout);
+        for (int i = 3; i < args.size(); ++i) {
+            const QStringList xz = args.at(i).split(',');
+            bool a = false, b = false;
+            const double x = xz.value(0).toDouble(&a), ahead = xz.value(1).toDouble(&b);
+            if (xz.size() != 2 || !a || !b)
+                return fail(QString("\"%1\" isn't a place like 3,40 (meters right, ahead).").arg(args.at(i)));
+            const double g = World::groundAt(scene, assets, x, -ahead);
+            out << args.at(i) << " " << (std::isnan(g) ? QString() : QString::number(g, 'f', 2)) << "\n";
+        }
+        return 0;
+    }
+
+    if (args.at(1) == "drive") {
+        if (args.size() < 4)
+            return fail("drive takes a project, a layer, --from and --to.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QPointF from, to;
+        bool hasFrom = false, hasTo = false;
+        double speed = 60, t = 0;
+        bool face = false;
+        auto point = [&](const QString &text, QPointF *into) {
+            const QStringList xy = text.split(',');
+            bool a = false, b = false;
+            if (xy.size() == 2)
+                *into = QPointF(xy.at(0).toDouble(&a), xy.at(1).toDouble(&b));
+            return a && b;
+        };
+        for (int i = 4; i < args.size(); ++i) {
+            if (args.at(i) == "--from" && i + 1 < args.size()) {
+                if (!(hasFrom = point(args.at(++i), &from)))
+                    return fail(QString("\"%1\" isn't a place like 3,40 (meters right, ahead).").arg(args.at(i)));
+            } else if (args.at(i) == "--to" && i + 1 < args.size()) {
+                if (!(hasTo = point(args.at(++i), &to)))
+                    return fail(QString("\"%1\" isn't a place like -2,5 (meters right, ahead).").arg(args.at(i)));
+            } else if (args.at(i) == "--speed") {
+                if (!numberAfter(args, i, &speed))
+                    return 1;
+            } else if (args.at(i) == "--at") {
+                if (!numberAfter(args, i, &t))
+                    return 1;
+            } else if (args.at(i) == "--face") {
+                face = true;
+            } else {
+                return fail(QString("drive doesn't know \"%1\".").arg(args.at(i)));
+            }
+        }
+        if (!hasFrom || !hasTo)
+            return fail("drive needs --from and --to.");
+        QList<double> landings;
+        if (!World::drive(edited, assets, layer, from, to, speed / 3.6, t, &landings, &error, face) ||
+            !Project::save(directory, edited, &error))
+            return fail(error);
+        QStringList times;
+        for (const double at : landings)
+            times << QString::number(at, 'f', 2);
+        QTextStream(stdout) << QString("Driven in %1 s%2.\n")
+                                   .arg(QLineF(from, to).length() / (speed / 3.6), 0, 'f', 2)
+                                   .arg(times.isEmpty() ? QString() : ", landing at " + times.join(", ") + " s");
         return 0;
     }
 
@@ -584,7 +687,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
-                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") ||
+                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.
