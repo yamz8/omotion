@@ -518,7 +518,7 @@ ApplicationWindow {
                 Repeater {
                     model: [["1", "MP4", "H.264, plays everywhere", "mp4"],
                             ["2", "WebM", "VP9, keeps transparency", "webm"],
-                            ["3", "GIF", "Loops, for chats and READMEs", "gif"],
+                            ["3", "GIF", "Loops at 15 fps, for chats and READMEs", "gif"],
                             ["4", "PNG frames", "A numbered image per frame", "png"]]
                     delegate: Rectangle {
                         required property var modelData

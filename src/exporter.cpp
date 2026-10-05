@@ -92,7 +92,10 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
     else if (m_format == "webm")
         args << "-c:v" << "libvpx-vp9" << "-pix_fmt" << "yuva420p" << "-crf" << "30" << "-b:v" << "0";
     else
-        args << "-vf" << "split[a][b];[a]palettegen=reserve_transparent=1:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a"
+        // GIFs go to chats and READMEs, where size counts: at most 15 fps.
+        args << "-vf"
+             << QString("%1split[a][b];[a]palettegen=reserve_transparent=1:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a")
+                    .arg(scene.fps > 15 ? "fps=15," : "")
              << "-loop" << "0";
     args << m_partial;
 
