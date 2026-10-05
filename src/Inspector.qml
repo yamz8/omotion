@@ -203,7 +203,20 @@ Rectangle {
                     wrapMode: Text.Wrap
                     color: win.muted
                     font.pixelSize: 12
-                    text: "X and Y are the point of the picture at the middle of the view. Layers follow the camera as much as their Follow camera says."
+                    text: backend.world.active
+                          ? "In the world: Zoom and Rotation work as a lens and a tilt; move and turn it below."
+                          : "X and Y are the point of the picture at the middle of the view. Layers follow the camera as much as their Follow camera says."
+                }
+                ColumnLayout {
+                    visible: backend.world.active
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label { text: "In the world"; color: win.text; font.bold: true; Layout.topMargin: 6 }
+                    PropertyRow { name: "worldX"; label: "Right m" }
+                    PropertyRow { name: "worldY"; label: "Up m" }
+                    PropertyRow { name: "worldZ"; label: "Ahead m" }
+                    PropertyRow { name: "yaw"; label: "Turn right°" }
+                    PropertyRow { name: "pitch"; label: "Look up°" }
                 }
             }
 
@@ -284,6 +297,27 @@ Rectangle {
                 PropertyRow { name: "scaleY"; label: "Stretch Y"; decimals: 3 }
                 PropertyRow { name: "rotation"; label: "Rotation°" }
                 PropertyRow { name: "opacity"; label: "Opacity %"; factor: 100; decimals: 0 }
+            }
+
+            // Where a layer of the world is, in meters and degrees.
+            ColumnLayout {
+                visible: inspector.hasLayer && !backend.cameraSelected && backend.world.active && !!inspector.v.inWorld
+                Layout.fillWidth: true
+                spacing: 4
+                Label { text: "In the world"; color: win.text; font.bold: true; Layout.topMargin: 8 }
+                PropertyRow { name: "worldX"; label: "Right m" }
+                PropertyRow { name: "worldY"; label: "Up m" }
+                PropertyRow { name: "worldZ"; label: "Ahead m" }
+                PropertyRow { name: "yaw"; label: "Turn right°" }
+                PropertyRow { name: "pitch"; label: "Nose up°" }
+                PropertyRow { name: "roll"; label: "Lean right°" }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "From where it is in the picture. Its X, Y and Scale above are flat and don't move it in the world."
+                }
             }
 
             Label {

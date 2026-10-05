@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "world.h"
 
 #include <QDesktopServices>
 #include <QStandardPaths>
@@ -32,6 +33,9 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     m_workAssets.setKeepFull(false);
     m_playTimer.setInterval(16);
     connect(&m_playTimer, &QTimer::timeout, this, &Backend::tick);
+    // The 3D view follows the scene and the playhead.
+    connect(this, &Backend::sceneChanged, this, [this] { m_world.setScene(m_scene, m_directory); });
+    connect(this, &Backend::timeChanged, this, [this] { m_world.setTime(m_time); });
 
     // Saves are batched, so a drag writes the file a few times, not per pixel.
     m_saveTimer.setSingleShot(true);
@@ -198,6 +202,7 @@ QVariantMap Backend::values() const {
     }
     map.insert("animated", animated);
     map.insert("links", linkTexts(layer));
+    map.insert("inWorld", World::layers(m_scene).contains(m_selected));
     map.insert("follow", followOf(m_scene, m_selected));
     if (!layer.particles.isEmpty()) {
         QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());

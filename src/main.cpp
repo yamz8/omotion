@@ -268,7 +268,29 @@ int command(const QStringList &args) {
             cameraLinks.insert(it.key(), Scene::linkText(it.value()));
         if (!cameraLinks.isEmpty())
             camera["links"] = cameraLinks;
+        // The world, for placing things in it: each layer's pivot and the box
+        // it fills, in meters (x right, y up from the ground, z toward the
+        // camera's side), at rest.
+        QJsonObject worldInfo;
+        const World::Info world = World::info(scene);
+        if (world.valid) {
+            auto vector = [](const QVector3D &v) {
+                auto round = [](float f) { return std::round(double(f) * 100) / 100; };
+                return QJsonArray{round(v.x()), round(v.y()), round(v.z())};
+            };
+            QJsonObject parts;
+            for (const int index : World::layers(scene)) {
+                const World::Mesh mesh = World::mesh(scene, assets, index);
+                parts.insert(scene.layers.at(index).name,
+                             QJsonObject{{"pivot", vector(mesh.pivot)}, {"low", vector(mesh.minimum)}, {"high", vector(mesh.maximum)}});
+            }
+            worldInfo = QJsonObject{{"picture", world.picture},
+                                    {"lens", world.focal},
+                                    {"cameraHeight", world.height},
+                                    {"layers", parts}};
+        }
         const QJsonObject info{{"directory", directory},
+                               {"world", worldInfo},
                                {"camera", camera},
                                {"width", scene.width},
                                {"height", scene.height},

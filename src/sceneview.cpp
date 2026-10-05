@@ -99,6 +99,13 @@ void SceneView::fit() {
     emit zoomChanged();
 }
 
+QRectF SceneView::canvasRect() const {
+    if (!m_backend || !m_backend->hasProject())
+        return {};
+    const Scene &scene = m_backend->scene();
+    return viewTransform().mapRect(QRectF(0, 0, scene.width, scene.height));
+}
+
 QPointF SceneView::toScene(double x, double y) const { return viewTransform().inverted().map(QPointF(x, y)); }
 
 void SceneView::paint(QPainter *painter) {
@@ -129,9 +136,10 @@ void SceneView::paint(QPainter *painter) {
                         selected < scene.layers.size() && scene.layers.at(selected).particles.isEmpty();
     const double now = m_backend->time();
 
+    // A world is shown in 3D underneath; the rest is drawn over it.
     painter->save();
     painter->setTransform(view, true);
-    renderScene(*painter, scene, m_backend->assets(), now);
+    renderScene(*painter, scene, m_backend->assets(), now, m_backend->world()->active());
     painter->restore();
 
     // Onion skin: the layer faintly where it was and where it's going, at the

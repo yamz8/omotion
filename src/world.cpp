@@ -203,6 +203,42 @@ QQuaternion turn(double yaw, double pitch, double roll) {
 
 }
 
+// A piece's own distances: the picture's depth cells under its rectangle,
+// keeping only those it covers (its edge cells mix in what's behind it, as
+// far as the sky), held between the 5th and 95th percentile of them, and
+// the rest filled from those, so its edges stay on it.
+DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF &offset, const QSizeF &size) {
+    const double cell = double(picture.picture.width()) / picture.image.width();
+    const int w = std::max(2, int(std::ceil(size.width() / cell))), h = std::max(2, int(std::ceil(size.height() / cell)));
+    QImage local(w, h, QImage::Format_Grayscale16), hole(w, h, QImage::Format_Grayscale8);
+    QList<double> inside;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const double px = (x + .5) * cell, py = (y + .5) * cell;
+            const int ix = std::clamp(int(px / size.width() * piece.width()), 0, piece.width() - 1);
+            const int iy = std::clamp(int(py / size.height() * piece.height()), 0, piece.height() - 1);
+            const double d = picture.at(offset.x() + px, offset.y() + py);
+            const bool covered = qAlpha(piece.pixel(ix, iy)) > 200 && d < Far;
+            reinterpret_cast<quint16 *>(local.scanLine(y))[x] = encodeDepth(d);
+            hole.scanLine(y)[x] = covered ? 0 : 255;
+            if (covered)
+                inside.append(d);
+        }
+    if (inside.isEmpty())
+        return picture;
+    std::sort(inside.begin(), inside.end());
+    const double low = inside.at(inside.size() / 20), high = inside.at(inside.size() * 19 / 20);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if (!hole.scanLine(y)[x]) {
+                quint16 &code = reinterpret_cast<quint16 *>(local.scanLine(y))[x];
+                code = encodeDepth(std::clamp(decodeDepth(code), low, high));
+            }
+    fillDepth(local, hole);
+    // Laid out as a picture of its own: the piece's rectangle, cell for cell.
+    return DepthMap{local, QSize(int(std::round(w * cell)), int(std::round(h * cell))), picture.focal};
+}
+
 Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     const Info world = info(scene);
     const int root = scene.indexOf(world.picture);
@@ -222,6 +258,11 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
 
     // About four picture pixels a cell, at most 320 across, at least 2.
     const int cols = std::clamp(int(size.width() / 4), 2, 320), rows = std::clamp(int(size.height() / 4), 2, 320);
+    // Its box counts only what shows: a piece's see-through margin reads
+    // whatever lies behind it, as far as the sky.
+    double factor = 1;
+    const QImage image = assets.mip(layer.source, std::min(1.0, 4 * cols / size.width()), &factor);
+    const DepthMap own = index == root || image.isNull() ? depth : pieceDepth(depth, image, offset, size);
     Mesh mesh;
     mesh.vertices.resize(qsizetype(cols + 1) * (rows + 1) * 5 * sizeof(float));
     float *v = reinterpret_cast<float *>(mesh.vertices.data());
@@ -231,12 +272,19 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
         for (int c = 0; c <= cols; ++c) {
             const double px = size.width() * c / cols, py = size.height() * r / rows;
             const double x = offset.x() + px, y = offset.y() + py;
-            const QVector3D p = toWorld.map(depth.point(x, y, depth.at(x, y)));
+            const double distance = index == root ? depth.at(x, y) : own.at(px, py);
+            const QVector3D p = toWorld.map(depth.point(x, y, distance));
             *v++ = p.x();
             *v++ = p.y();
             *v++ = p.z();
             *v++ = float(c) / cols;
             *v++ = 1 - float(r) / rows;
+            if (!image.isNull()) {
+                const int ix = std::clamp(int(double(c) / cols * image.width()), 0, image.width() - 1);
+                const int iy = std::clamp(int(double(r) / rows * image.height()), 0, image.height() - 1);
+                if (qAlpha(image.pixel(ix, iy)) < 16)
+                    continue;
+            }
             mesh.minimum = QVector3D(std::min(mesh.minimum.x(), p.x()), std::min(mesh.minimum.y(), p.y()),
                                      std::min(mesh.minimum.z(), p.z()));
             mesh.maximum = QVector3D(std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()),

@@ -267,6 +267,22 @@ ApplicationWindow {
                 focus: true
                 clip: true
 
+                // A world, in 3D, exactly where the canvas is; the canvas
+                // draws everything else over it.
+                Rectangle {
+                    visible: backend.hasProject && backend.world.active
+                    x: view.canvasRect.x
+                    y: view.canvasRect.y
+                    width: view.canvasRect.width
+                    height: view.canvasRect.height
+                    color: backend.sceneInfo.background || "black"
+                    clip: true
+                    WorldView {
+                        anchors.fill: parent
+                        source: backend.world
+                    }
+                }
+
                 SceneView {
                     id: view
                     anchors.fill: parent

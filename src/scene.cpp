@@ -663,9 +663,9 @@ double Scene::ownValue(const Layer &layer, const QString &property, double t) co
         if (t < b.t) {
             const double span = b.t - a.t;
             const double p = span <= 0 ? 1 : (t - a.t) / span;
-            // Up is less y, on the canvas as in the camera's view.
-            const double lift = property == "y" ? arcLift(a.ease, p) : 0;
-            return a.v + (b.v - a.v) * ease(a.ease, p) - lift;
+            // Up is less y on the canvas, more worldY in a world.
+            const double lift = property == "y" ? -arcLift(a.ease, p) : property == "worldY" ? arcLift(a.ease, p) : 0;
+            return a.v + (b.v - a.v) * ease(a.ease, p) + lift;
         }
     }
     return keys.last().v;

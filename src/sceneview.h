@@ -14,6 +14,8 @@ class SceneView : public QQuickPaintedItem {
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
     // Item pixels per canvas pixel, for things drawn over the canvas.
     Q_PROPERTY(double zoomFactor READ zoom NOTIFY zoomChanged)
+    // Where the canvas is in the item, for the 3D view that sits under it.
+    Q_PROPERTY(QRectF canvasRect READ canvasRect NOTIFY zoomChanged)
 
 public:
     explicit SceneView(QQuickItem *parent = nullptr);
@@ -27,6 +29,7 @@ public:
     Q_INVOKABLE QPointF toScene(double x, double y) const;
     // How many item pixels one canvas pixel takes up.
     Q_INVOKABLE double zoom() const { return viewTransform().m11(); }
+    QRectF canvasRect() const;
     // Looking closer: zoom about an item point, pan by item pixels, or fit
     // the canvas back in the window. Only the view; not the camera.
     Q_INVOKABLE void zoomBy(double factor, double x, double y);

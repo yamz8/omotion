@@ -18,6 +18,7 @@
 #include "exporter.h"
 #include "filepicker.h"
 #include "scene.h"
+#include "worldview.h"
 
 // Everything the window shows and does, around one open project. Every edit
 // is saved straight to scene.json, and edits made to scene.json from outside
@@ -26,6 +27,8 @@
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool hasProject READ hasProject NOTIFY projectChanged)
+    // The scene's world, for the 3D view under the canvas.
+    Q_PROPERTY(WorldSource *world READ world CONSTANT)
     Q_PROPERTY(QString projectPath READ projectPath NOTIFY projectChanged)
     Q_PROPERTY(QString projectName READ projectName NOTIFY projectChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
@@ -126,6 +129,7 @@ public:
 
     const Scene &scene() const { return m_scene; }
     AssetCache &assets() { return m_assets; }
+    WorldSource *world() { return &m_world; }
     QList<QPointF> cutPolygon() const { return m_cut; }
 
     // Opening.
@@ -338,6 +342,7 @@ private:
     QString m_directory;
     Scene m_scene;
     AssetCache m_assets;
+    WorldSource m_world;
     QList<QJsonObject> m_undo;
     QList<QJsonObject> m_redo;
     bool m_inGesture = false;
