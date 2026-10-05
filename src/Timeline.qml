@@ -81,19 +81,28 @@ Rectangle {
                 Layout.fillHeight: true
                 Layout.rightMargin: 14
 
+                // A tick every few seconds, as many as fit with room for labels.
+                readonly property real step: {
+                    const steps = [1, 2, 5, 10, 15, 30, 60];
+                    for (let i = 0; i < steps.length; ++i)
+                        if (steps[i] / timeline.duration * width >= 60)
+                            return steps[i];
+                    return 120;
+                }
                 Repeater {
-                    model: Math.floor(timeline.duration) + 1
+                    model: Math.floor(timeline.duration / ruler.step) + 1
                     delegate: Item {
                         required property int index
-                        x: index / timeline.duration * ruler.width
+                        readonly property real seconds: index * ruler.step
+                        x: seconds / timeline.duration * ruler.width
                         height: ruler.height
                         Rectangle { width: 1; height: 8; anchors.bottom: parent.bottom; color: win.muted }
                         Label {
                             x: 4
-                            text: index + "s"
+                            text: parent.seconds + "s"
                             color: win.muted
                             font.pixelSize: 11
-                            visible: index < timeline.duration
+                            visible: parent.seconds < timeline.duration
                         }
                     }
                 }
