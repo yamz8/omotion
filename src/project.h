@@ -51,6 +51,14 @@ bool isCut(const Scene &scene, int layer);
 // A piece's shape in canvas pixels at time t, and its edge softness.
 QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int piece, double t, double *feather = nullptr,
                      int *fill = nullptr);
+// A piece's shape as a mask over the image it was cut from (Alpha8, the
+// whole image's size, 255 inside), whether it was cut by an outline or a
+// mask, with the transform from that image's pixels to the canvas at t.
+QImage cutMask(const Scene &scene, AssetCache &assets, int piece, double t, QTransform *toCanvas);
+// Gives a piece a new shape, as a mask like cutMask's, saved into the
+// project; redraws it and its source's holes. Its animation stays.
+bool reshapeCutMask(Scene &scene, AssetCache &assets, int piece, const QImage &mask, QString *error);
+
 // Smart select on a layer: the area of colour within tolerance around each
 // canvas point, joined, as a cut shape in canvas pixels. A tolerance below 0
 // picks one for each point (see Select::autoTolerance), and *used says the

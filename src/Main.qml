@@ -132,6 +132,8 @@ ApplicationWindow {
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
+    Shortcut { sequence: "Shift+R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startBrush() }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "brush"; onActivated: backend.finishBrush() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.cycleFeather() }
     Shortcut { sequence: "G"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.toggleFill() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "wand"); onActivated: backend.finishCut(true) }
@@ -262,14 +264,16 @@ ApplicationWindow {
                 }
 
                 MouseArea {
+                    id: canvasMouse
                     anchors.fill: parent
                     enabled: backend.hasProject && backend.busy === ""
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    cursorShape: backend.tool === "move" ? (pressed && backend.selected >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor) : Qt.CrossCursor
+                    cursorShape: backend.tool === "brush" ? Qt.BlankCursor : backend.tool === "move" ? (pressed && backend.selected >= 0 ? Qt.ClosedHandCursor : Qt.ArrowCursor) : Qt.CrossCursor
                     property bool dragging: false
                     // In the cut tool: the point being dragged, or a lasso
                     // being drawn, and where it last dropped a point.
                     property int cutPoint: -1
+                    hoverEnabled: backend.tool === "brush"
                     property bool lassoing: false
                     property point lassoAt
 
@@ -290,6 +294,10 @@ ApplicationWindow {
                                 lassoing = true;
                                 lassoAt = Qt.point(mouse.x, mouse.y);
                             }
+                            return;
+                        }
+                        if (backend.tool === "brush") {
+                            backend.beginBrush(p.x, p.y, mouse.button === Qt.RightButton);
                             return;
                         }
                         if (backend.tool === "wand") {
@@ -314,6 +322,13 @@ ApplicationWindow {
                         }
                     }
                     onPositionChanged: function (mouse) {
+                        if (backend.tool === "brush") {
+                            if (pressed) {
+                                const b = view.toScene(mouse.x, mouse.y);
+                                backend.brushTo(b.x, b.y);
+                            }
+                            return;
+                        }
                         if (cutPoint >= 0) {
                             const q = view.toScene(mouse.x, mouse.y);
                             backend.moveCutPoint(cutPoint, q.x, q.y);
@@ -332,6 +347,8 @@ ApplicationWindow {
                         backend.dragTo(p.x, p.y);
                     }
                     onReleased: {
+                        if (backend.tool === "brush")
+                            backend.endBrush();
                         if (dragging)
                             backend.endDrag();
                         dragging = false;
@@ -339,6 +356,10 @@ ApplicationWindow {
                         lassoing = false;
                     }
                     onWheel: function (wheel) {
+                        if (backend.tool === "brush") {
+                            backend.adjustBrush(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15);
+                            return;
+                        }
                         if (backend.tool === "wand") {
                             backend.adjustTolerance(wheel.angleDelta.y > 0 ? 4 : -4);
                             return;
@@ -351,6 +372,20 @@ ApplicationWindow {
                         else
                             backend.multiply("scale", step > 0 ? 1.03 : 1 / 1.03);
                     }
+                }
+
+                // The brush's size, where it would paint.
+                Rectangle {
+                    visible: backend.tool === "brush" && canvasMouse.containsMouse
+                    readonly property real r: backend.brushRadius * view.zoomFactor
+                    width: 2 * r
+                    height: 2 * r
+                    radius: r
+                    x: canvasMouse.mouseX - r
+                    y: canvasMouse.mouseY - r
+                    color: "transparent"
+                    border.color: theme.accent
+                    border.width: 1.5
                 }
 
                 // The AI at work.
@@ -390,7 +425,9 @@ ApplicationWindow {
                         color: win.text
                         horizontalAlignment: Text.AlignHCenter
                         lineHeight: 1.3
-                        text: backend.tool === "pivot"
+                        text: backend.tool === "brush"
+                              ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
+                              : backend.tool === "pivot"
                               ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
                               : backend.tool === "wand" && backend.wandMode === "ai"
                               ? "AI select: click a thing on " + (backend.values.name || "the layer") + " (Shift+click adds, right-click leaves out)"

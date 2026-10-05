@@ -12,6 +12,8 @@ class SceneView : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(Backend *editor READ backend WRITE setBackend NOTIFY backendChanged)
     Q_PROPERTY(QColor accent READ accent WRITE setAccent NOTIFY accentChanged)
+    // Item pixels per canvas pixel, for things drawn over the canvas.
+    Q_PROPERTY(double zoomFactor READ zoom NOTIFY zoomChanged)
 
 public:
     explicit SceneView(QQuickItem *parent = nullptr);
@@ -31,6 +33,7 @@ public:
 signals:
     void backendChanged();
     void accentChanged();
+    void zoomChanged();
 
 private:
     QTransform viewTransform() const;

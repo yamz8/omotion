@@ -10,8 +10,8 @@ constexpr double Margin = 24;
 
 SceneView::SceneView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     setAntialiasing(true);
-    connect(this, &QQuickItem::widthChanged, this, [this] { update(); });
-    connect(this, &QQuickItem::heightChanged, this, [this] { update(); });
+    connect(this, &QQuickItem::widthChanged, this, [this] { update(); emit zoomChanged(); });
+    connect(this, &QQuickItem::heightChanged, this, [this] { update(); emit zoomChanged(); });
 }
 
 void SceneView::setBackend(Backend *backend) {
@@ -23,6 +23,7 @@ void SceneView::setBackend(Backend *backend) {
     if (m_backend) {
         auto repaint = [this] { update(); };
         connect(m_backend, &Backend::sceneChanged, this, repaint);
+        connect(m_backend, &Backend::sceneChanged, this, &SceneView::zoomChanged);
         connect(m_backend, &Backend::timeChanged, this, repaint);
         connect(m_backend, &Backend::selectedChanged, this, repaint);
         connect(m_backend, &Backend::toolChanged, this, repaint);
@@ -97,6 +98,23 @@ void SceneView::paint(QPainter *painter) {
         painter->drawEllipse(pivot, 5, 5);
         painter->drawLine(pivot - QPointF(9, 0), pivot + QPointF(9, 0));
         painter->drawLine(pivot - QPointF(0, 9), pivot + QPointF(0, 9));
+    }
+
+    // The shape being painted with the brush, tinted.
+    if (m_backend->tool() == "brush" && !m_backend->brushPreview().isNull()) {
+        const QImage shape = m_backend->brushPreview();
+        QImage tinted(shape.size(), QImage::Format_ARGB32_Premultiplied);
+        tinted.fill(m_accent);
+        {
+            QPainter tint(&tinted);
+            tint.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            tint.drawImage(0, 0, shape);
+        }
+        painter->save();
+        painter->setTransform(m_backend->brushPreviewToCanvas() * view);
+        painter->setOpacity(.45);
+        painter->drawImage(QPointF(0, 0), tinted);
+        painter->restore();
     }
 
     const QList<QPointF> cut = m_backend->cutPolygon();

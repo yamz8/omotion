@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLineF>
+#include <QPainter>
 #include <QProcess>
 #include <QCoreApplication>
 #include <QUrl>
@@ -793,8 +794,14 @@ void Backend::endDrag() {
 }
 
 void Backend::setTool(const QString &tool) {
-    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand")
+    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush")
         return;
+    if (tool != "brush") {
+        m_brushPiece.clear();
+        m_brushMask = QImage();
+        m_brushPreview = QImage();
+        m_brushing = false;
+    }
     if (tool != "move" && m_selected < 0) {
         setNotice(tool == "cut" ? "Select the layer to cut a piece out of first." : "Select a layer first.");
         return;
@@ -969,6 +976,122 @@ void Backend::toggleWandMode() {
     setNotice(m_wandMode == "ai" ? "AI select: click a thing." : "Colour select: click an area of colour.");
 }
 
+void Backend::startBrush() {
+    if (m_selected < 0)
+        return setNotice("Select a piece to paint its shape.");
+    const Layer &layer = m_scene.layers.at(m_selected);
+    QTransform toCanvas;
+    const QImage mask = Project::cutMask(m_scene, m_assets, m_selected, m_time, &toCanvas);
+    if (mask.isNull())
+        return setNotice(QString("%1 wasn't cut out here, so it has no shape to paint. Press C or W to cut from it.").arg(layer.name));
+    if (m_playing)
+        togglePlay();
+    setTool("brush");
+    m_brushPiece = layer.name;
+    m_brushMask = mask;
+    m_brushToCanvas = toCanvas;
+    // The preview is at most about a thousand pixels across.
+    m_brushPreviewScale = std::min(1.0, 1024.0 / std::max(mask.width(), mask.height()));
+    const QImage small = mask.scaled(mask.size() * m_brushPreviewScale, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_brushPreview = QImage(small.size(), QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < small.height(); ++y) {
+        const uchar *from = small.constScanLine(y);
+        QRgb *to = reinterpret_cast<QRgb *>(m_brushPreview.scanLine(y));
+        for (int x = 0; x < small.width(); ++x)
+            to[x] = qRgba(from[x], from[x], from[x], from[x]);
+    }
+    emit toolChanged();
+}
+
+QTransform Backend::brushPreviewToCanvas() const {
+    return QTransform::fromScale(1 / m_brushPreviewScale, 1 / m_brushPreviewScale) * m_brushToCanvas;
+}
+
+void Backend::paintBrush(const QPointF &fromCanvas, const QPointF &toCanvas) {
+    bool invertible = false;
+    const QTransform toImage = m_brushToCanvas.inverted(&invertible);
+    if (!invertible || m_brushMask.isNull())
+        return;
+    const QPointF a = toImage.map(fromCanvas), b = toImage.map(toCanvas);
+    const double radius = m_brushRadius / std::max(1e-6, std::sqrt(std::abs(m_brushToCanvas.determinant())));
+    // The same stroke on the shape and on its preview.
+    auto stroke = [&](QImage &image, double scale, const QColor &color) {
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        if (m_brushErase)
+            painter.setCompositionMode(QPainter::CompositionMode_Clear);
+        painter.setPen(QPen(color, 2 * radius * scale, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        if (a == b) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(color);
+            painter.drawEllipse(a * scale, radius * scale, radius * scale);
+        } else {
+            painter.drawLine(a * scale, b * scale);
+        }
+    };
+    stroke(m_brushMask, 1, Qt::black);
+    stroke(m_brushPreview, m_brushPreviewScale, Qt::white);
+    emit toolChanged();
+}
+
+void Backend::beginBrush(double x, double y, bool erase) {
+    if (m_tool != "brush")
+        return;
+    m_brushErase = erase;
+    m_brushing = true;
+    m_brushLast = QPointF(x, y);
+    paintBrush(m_brushLast, m_brushLast);
+}
+
+void Backend::brushTo(double x, double y) {
+    if (!m_brushing)
+        return;
+    paintBrush(m_brushLast, QPointF(x, y));
+    m_brushLast = QPointF(x, y);
+}
+
+void Backend::endBrush() { m_brushing = false; }
+
+void Backend::adjustBrush(double factor) {
+    m_brushRadius = std::clamp(m_brushRadius * factor, 2.0, 400.0);
+    emit toolChanged();
+}
+
+void Backend::finishBrush() {
+    if (m_tool != "brush" || m_job.isRunning())
+        return;
+    const QString piece = m_brushPiece;
+    const QImage mask = m_brushMask;
+    const QByteArray started = Project::serialize(m_scene);
+    auto result = std::make_shared<std::tuple<Scene, bool, QString>>(m_scene, false, QString());
+    const QString directory = m_directory;
+    setBusy("Reshaping…");
+    m_job.disconnect(this);
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, piece] {
+        setBusy({});
+        m_workAssets.clear();
+        const auto &[scene, ok, error] = *result;
+        if (!ok)
+            return setError(error);
+        if (Project::serialize(m_scene) != started)
+            return setError("The scene changed while reshaping, so it wasn't kept. Press Enter to apply it again.");
+        checkpoint();
+        m_scene = scene;
+        m_selected = m_scene.indexOf(piece);
+        setKeySelection({});
+        setTool("move");
+        emit selectedChanged();
+        changed();
+        rearmWatcher();
+        setNotice(QString("Repainted %1's shape.").arg(piece));
+    });
+    m_job.setFuture(QtConcurrent::run([this, result, directory, piece, mask] {
+        m_workAssets.setDirectory(directory);
+        auto &[scene, ok, error] = *result;
+        ok = Project::reshapeCutMask(scene, m_workAssets, scene.indexOf(piece), mask, &error);
+    }));
+}
+
 void Backend::excludeAt(double x, double y) {
     if (m_tool != "wand" || m_wandMode != "ai" || m_aiTake.isEmpty())
         return;
@@ -1120,7 +1243,7 @@ void Backend::startReshape() {
     if (!Project::isCut(m_scene, m_selected)) {
         const Layer &layer = m_scene.layers.at(m_selected);
         if (layer.raw.value("cut").toObject().contains("mask"))
-            return setNotice(QString("%1 is shaped by depth rather than an outline, so R can't reshape it.").arg(layer.name));
+            return startBrush();
         return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.").arg(layer.name));
     }
     double feather = 0;

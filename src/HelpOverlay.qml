@@ -35,7 +35,7 @@ Rectangle {
                          ["C", "Cut tool: drag around a piece, or click points"], ["Drag a point", "Move it (click an edge to add one)"],
                          ["Right-click", "Remove a point"], ["F", "Soft edge: 0, 1, 3, 8, 20 px"], ["G", "Fill the hole it leaves: AI, smooth, or none"],
                          ["Enter", "Cut it out, leaving a hole"], ["Shift+Enter", "Copy it out, leaving the source whole"],
-                         ["R", "Reshape the selected piece"], ["P", "Pivot tool: click where the layer turns"],
+                         ["R", "Reshape the selected piece (a depth layer: paint it)"], ["Shift+R", "Paint a piece's shape: drag adds, right-drag takes away"], ["P", "Pivot tool: click where the layer turns"],
                          ["Esc", "Cancel / deselect"]]]
     ]
 

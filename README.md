@@ -98,7 +98,8 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
 | `G` | How the hole a cut leaves is filled: AI (the default, where it's set up), smooth, or not at all |
-| `R` | Reshape the selected piece; its animation and pivot stay |
+| `R` | Reshape the selected piece by its points; its animation and pivot stay (a depth layer opens the brush) |
+| `Shift+R` | Paint a piece's shape with a brush: drag adds, right-drag takes away, the wheel sizes it, `Enter` applies |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
 | `Ctrl+D` | Duplicate the layer |

@@ -689,6 +689,95 @@ bool reshapeCut(Scene &scene, AssetCache &assets, int index, const QPolygonF &po
     return true;
 }
 
+QImage cutMask(const Scene &scene, AssetCache &assets, int index, double t, QTransform *toCanvas) {
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
+    const int from = scene.indexOf(cut.value("from").toString());
+    if (from < 0)
+        return {};
+    const QSize size = assets.size(scene.layers.at(from).source).toSize();
+    if (size.isEmpty())
+        return {};
+    if (toCanvas)
+        *toCanvas = layerTransform(scene, assets, from, t);
+    QImage mask(size, QImage::Format_Alpha8);
+    mask.fill(0);
+    const QString file = cut.value("mask").toString();
+    if (!file.isEmpty()) {
+        const QImage stored = QImage(QDir(assets.directory()).filePath(file)).convertToFormat(QImage::Format_Grayscale8);
+        const QJsonArray at = cut.value("maskOrigin").toArray();
+        const QPoint origin(at.at(0).toInt(), at.at(1).toInt());
+        for (int y = 0; y < stored.height(); ++y) {
+            const int my = origin.y() + y;
+            if (my < 0 || my >= size.height())
+                continue;
+            const uchar *line = stored.constScanLine(y);
+            uchar *to = mask.scanLine(my);
+            for (int x = 0; x < stored.width(); ++x) {
+                const int mx = origin.x() + x;
+                if (mx >= 0 && mx < size.width())
+                    to[mx] = line[x];
+            }
+        }
+    } else {
+        QPainter painter(&mask);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::black);
+        painter.drawPolygon(polygonFrom(cut.value("polygon")));
+    }
+    return mask;
+}
+
+bool reshapeCutMask(Scene &scene, AssetCache &assets, int index, const QImage &shape, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("Select the piece to reshape.");
+    QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
+    const int from = scene.indexOf(cut.value("from").toString());
+    if (from < 0)
+        return fail(QString("%1 was cut from \"%2\", which is gone, so it can't be reshaped.")
+                        .arg(scene.layers.at(index).name, cut.value("from").toString()));
+    const QImage mask = shape.convertToFormat(QImage::Format_Alpha8);
+    QRect bounds;
+    for (int y = 0; y < mask.height(); ++y) {
+        const uchar *line = mask.constScanLine(y);
+        int first = -1, last = -1;
+        for (int x = 0; x < mask.width(); ++x)
+            if (line[x] > 0) {
+                if (first < 0)
+                    first = x;
+                last = x;
+            }
+        if (first >= 0)
+            bounds |= QRect(first, y, last - first + 1, 1);
+    }
+    if (bounds.isEmpty())
+        return fail("The shape is empty; paint some of it back, or delete the piece.");
+    QImage stored(bounds.size(), QImage::Format_Grayscale8);
+    for (int y = 0; y < bounds.height(); ++y)
+        std::copy_n(mask.constScanLine(bounds.y() + y) + bounds.x(), bounds.width(), stored.scanLine(y));
+    const QDir dir(assets.directory());
+    dir.mkpath("assets");
+    const QString file = "assets/" + uniqueFile(QDir(dir.filePath("assets")), slug(scene.layers.at(index).name) + "-shape", "png");
+    if (!writeImage(stored, dir.filePath(file), error))
+        return false;
+    cut.remove("polygon");
+    cut["mask"] = file;
+    cut["maskOrigin"] = QJsonArray{bounds.x(), bounds.y()};
+    Scene edited = scene;
+    edited.layers[index].raw["cut"] = cut;
+    if (!rebuildCuts(edited, assets, from, error))
+        return false;
+    scene = edited;
+    return true;
+}
+
 bool isCut(const Scene &scene, int index) {
     return index >= 0 && index < scene.layers.size() &&
            scene.layers.at(index).raw.value("cut").toObject().contains("polygon");

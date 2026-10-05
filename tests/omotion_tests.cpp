@@ -1408,6 +1408,50 @@ private slots:
         QCOMPARE(backend.scene().layers[0].keys["x"][0].ease, QString("inOut"));
     }
 
+    void brushingReshapesAPiece() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));  // 200×100.
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(10, 10), QPointF(50, 10), QPointF(50, 40), QPointF(10, 40)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        QCOMPARE(backend.selected(), 1);
+        const QSizeF before = backend.assets().size(backend.scene().layers[1].source);
+
+        // Esc leaves it as it was.
+        backend.startBrush();
+        QCOMPARE(backend.tool(), QString("brush"));
+        backend.beginBrush(80, 25, false);
+        backend.endBrush();
+        backend.setTool("move");
+        QVERIFY(backend.scene().layers[1].raw["cut"].toObject().contains("polygon"));
+
+        // Paint more on to the right, rub some out at the top left, apply.
+        backend.startBrush();
+        backend.adjustBrush(.5);  // 12 px.
+        backend.beginBrush(50, 25, false);
+        backend.brushTo(90, 25);
+        backend.endBrush();
+        backend.beginBrush(12, 12, true);
+        backend.endBrush();
+        backend.finishBrush();
+        backend.waitForJobs();
+        QCOMPARE(backend.error(), QString());
+        const Layer &piece = backend.scene().layers[1];
+        const QJsonObject cut = piece.raw["cut"].toObject();
+        QVERIFY(cut.contains("mask") && !cut.contains("polygon"));  // Painted, it's a mask now.
+        QVERIFY(backend.assets().size(piece.source).width() > before.width() + 30);
+        const QJsonArray origin = cut["origin"].toArray();
+        const QImage image = backend.assets().image(piece.source);
+        QCOMPARE(qAlpha(image.pixel(12 - origin[0].toInt(), 12 - origin[1].toInt())), 0);  // Rubbed out.
+        QCOMPARE(qAlpha(image.pixel(85 - origin[0].toInt(), 25 - origin[1].toInt())), 255);  // Painted in.
+        QCOMPARE(backend.tool(), QString("move"));
+        backend.undo();
+        QVERIFY(backend.scene().layers[1].raw["cut"].toObject().contains("polygon"));
+    }
+
     void backendEditsTheCamera() {
         QTemporaryDir dir;
         Backend backend;

@@ -45,6 +45,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString fillMode READ fillMode NOTIFY toolChanged)
     Q_PROPERTY(int tolerance READ tolerance NOTIFY toolChanged)
     Q_PROPERTY(int usedTolerance READ usedTolerance NOTIFY toolChanged)
+    Q_PROPERTY(double brushRadius READ brushRadius NOTIFY toolChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
@@ -86,6 +87,10 @@ public:
     // The smart select tolerance; below 0 while it's picked automatically.
     int tolerance() const { return m_tolerance; }
     int usedTolerance() const { return m_usedTolerance; }
+    double brushRadius() const { return m_brushRadius; }
+    // The shape being painted, small, for the canvas to show, and where it goes.
+    QImage brushPreview() const { return m_brushPreview; }
+    QTransform brushPreviewToCanvas() const;
     QString reshaping() const { return m_reshaping; }
     QVariantList keySelection() const;
     QStringList blends() const { return Scene::blends(); }
@@ -186,6 +191,14 @@ public:
     Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
+    // The brush: paints the selected piece's shape (drag to add, with erase
+    // to take away), applied with finishBrush. Works on outlines and masks.
+    Q_INVOKABLE void startBrush();
+    Q_INVOKABLE void beginBrush(double x, double y, bool erase);
+    Q_INVOKABLE void brushTo(double x, double y);
+    Q_INVOKABLE void endBrush();
+    Q_INVOKABLE void adjustBrush(double factor);
+    Q_INVOKABLE void finishBrush();
     // In the wand tool, AI select leaves out what's under a point.
     Q_INVOKABLE void excludeAt(double x, double y);
     // Switches the wand between AI select and colour select.
@@ -300,6 +313,17 @@ private:
     QList<QPointF> m_seeds;
     QList<QImage> m_seedLevels;
     void reselect();
+
+    QString m_brushPiece;
+    QImage m_brushMask;     // Alpha8, the source image's size.
+    QImage m_brushPreview;  // ARGB, small, white where the shape is.
+    double m_brushPreviewScale = 1;
+    QTransform m_brushToCanvas;
+    double m_brushRadius = 24;  // In canvas pixels.
+    bool m_brushErase = false;
+    bool m_brushing = false;
+    QPointF m_brushLast;
+    void paintBrush(const QPointF &from, const QPointF &to);
 
     // Slow work (the AI, cutting big pictures) runs one job at a time off the
     // window's thread, with its own image cache, so the window stays responsive.
