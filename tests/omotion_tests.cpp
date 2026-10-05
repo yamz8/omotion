@@ -99,7 +99,7 @@ private slots:
         QCOMPARE(Scene::cubicEase(.25, .1, .25, 1), QString("cubic(0.25,0.1,0.25,1)"));
         QCOMPARE(Scene::curveOf("outBack").size(), 4);
         QString error;
-        Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "a", "source": "a", "keys": {"x": [{"t": 0, "v": 0, "ease": "cubic(0.1,0.2,0.3,0.4)"}]}}]})").object(), &error);
+        Scene::fromJson(QJsonDocument::fromJson(R"json({"layers": [{"name": "a", "source": "a", "keys": {"x": [{"t": 0, "v": 0, "ease": "cubic(0.1,0.2,0.3,0.4)"}]}}]})json").object(), &error);
         QVERIFY2(error.isEmpty(), qPrintable(error));
     }
 
