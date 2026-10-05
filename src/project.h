@@ -57,6 +57,28 @@ QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int piece, double t
 QPolygonF smartOutline(const Scene &scene, AssetCache &assets, int layer, const QList<QPointF> &points, double t,
                        int tolerance, int *regions = nullptr, int *used = nullptr, QList<QImage> *levels = nullptr);
 
+// AI select on a layer: the thing under the take points, less what's under
+// the leave-out ones, as a cut shape in canvas pixels. choices says how many
+// guesses the AI made; choice picks one (0 is its best).
+QPolygonF aiOutline(const Scene &scene, AssetCache &assets, int layer, const QList<QPointF> &take,
+                    const QList<QPointF> &leave, double t, int choice, int *choices, QString *error);
+
+// Depth for a layer's image, from the AI.
+QImage depthOf(const Scene &scene, AssetCache &assets, int layer, QString *error);
+
+// Splits a layer into count layers by depth, from a depth map of its image
+// (16-bit grey, larger nearer, any size). The source stays as the farthest
+// layer; the nearer ones are cut out of it as pieces, nearest on top, each
+// with the places of the ones in front of it filled in behind, so nothing
+// opens up when they move apart. Returns the new layers' indexes.
+QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImage &depth, int count, double feather,
+                        QString *error);
+
+// Animates a depth-split layer as a slow camera move: it drifts sideways and
+// pushes in, and nearer layers slide further, strength canvas pixels for the
+// nearest, as a loop over the scene's duration.
+bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
+
 // Keeps pieces pointing at their source when it's renamed.
 void renameCutSource(Scene &scene, const QString &from, const QString &to);
 

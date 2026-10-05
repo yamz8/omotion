@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <cstring>
 
+#include "ai.h"
 #include "backend.h"
 #include "exporter.h"
 #include "portalfilepicker.h"
@@ -31,6 +32,16 @@ const char *Usage = R"(Usage:
                                          the hole it leaves is filled unless --no-fill.
                                          --pick cuts the area of similar colour around a
                                          point instead, as the W tool does
+  omotion cut <project> <layer> --ai-pick <x,y>... [--ai-exclude <x,y>]... [--choice <n>] [same options]
+                                         Cut what the AI sees under the points, less what's
+                                         under the excluded ones; --choice 1, 2... takes its
+                                         other guesses (part, whole)
+  omotion split <project> [--layer <name>] [--layers <2-8>] [--soft <px>] [--animate [<px>]]
+                                         Split a layer (the bottom one unless named) into
+                                         layers by depth, with the AI; --animate adds a
+                                         looping parallax camera move
+  omotion models [--download]            Whether the AI is ready; --download fetches its
+                                         models (about 145 MB, checked against their hashes)
 
 A project is a folder holding scene.json. Opening an image makes
 "<image>.omotion" beside it; opening a folder of images makes a scene.json
@@ -71,10 +82,23 @@ int command(const QStringList &args) {
         double feather = 0;
         bool fill = true;
         int tolerance = -1;
-        QList<QPointF> picks;
+        QList<QPointF> picks, aiTake, aiLeave;
+        int choice = 0;
+        auto point = [&](int i, QList<QPointF> &into) {
+            const QStringList xy = args.at(i).split(',');
+            bool okX = false, okY = false;
+            if (xy.size() == 2)
+                into.append(QPointF(xy.at(0).toDouble(&okX), xy.at(1).toDouble(&okY)));
+            return okX && okY;
+        };
         for (int i = 4; i < args.size(); ++i) {
             const QString arg = args.at(i);
-            if (arg == "--copy") {
+            if ((arg == "--ai-pick" || arg == "--ai-exclude") && i + 1 < args.size()) {
+                if (!point(++i, arg == "--ai-pick" ? aiTake : aiLeave))
+                    return fail(QString("\"%1\" isn't a point like 120,340.").arg(args.at(i)));
+            } else if (arg == "--choice" && i + 1 < args.size()) {
+                choice = args.at(++i).toInt();
+            } else if (arg == "--copy") {
                 punch = false;
             } else if (arg == "--no-fill") {
                 fill = false;
@@ -100,6 +124,14 @@ int command(const QStringList &args) {
                     return fail(QString("\"%1\" isn't a point like 120,340.").arg(arg));
             }
         }
+        if (!aiTake.isEmpty()) {
+            if (!polygon.isEmpty() || !picks.isEmpty())
+                return fail("Give one of points to cut around, --pick, or --ai-pick.");
+            int choices = 0;
+            polygon = Project::aiOutline(edited, assets, layer, aiTake, aiLeave, t, choice, &choices, &error);
+            if (polygon.isEmpty())
+                return fail(error.isEmpty() ? QString("The AI found nothing of \"%1\" there.").arg(args.at(3)) : error);
+        }
         if (!picks.isEmpty()) {
             if (!polygon.isEmpty())
                 return fail("Give either points to cut around or --pick, not both.");
@@ -116,6 +148,53 @@ int command(const QStringList &args) {
         if (!Project::save(directory, edited, &error))
             return fail(error);
         QTextStream(stdout) << edited.layers.at(piece).name << "\n";
+        return 0;
+    }
+
+    if (args.at(1) == "split") {
+        Scene edited = scene;
+        int layer = edited.layers.isEmpty() ? -1 : 0;
+        int count = 4;
+        double feather = 2;
+        double strength = -1;
+        for (int i = 3; i < args.size(); ++i) {
+            const QString arg = args.at(i);
+            if (arg == "--layer" && i + 1 < args.size()) {
+                layer = edited.indexOf(args.at(++i));
+                if (layer < 0)
+                    return fail(QString("There's no layer named \"%1\".").arg(args.at(i)));
+            } else if (arg == "--layers" && i + 1 < args.size()) {
+                count = args.at(++i).toInt();
+            } else if (arg == "--soft" && i + 1 < args.size()) {
+                feather = args.at(++i).toDouble();
+            } else if (arg == "--animate") {
+                strength = 36;
+                bool ok = false;
+                if (i + 1 < args.size()) {
+                    const double given = args.at(i + 1).toDouble(&ok);
+                    if (ok) {
+                        strength = given;
+                        ++i;
+                    }
+                }
+            } else {
+                return fail(QString("split doesn't know \"%1\".").arg(arg));
+            }
+        }
+        if (layer < 0)
+            return fail("There's no layer to split.");
+        const QImage depth = Project::depthOf(edited, assets, layer, &error);
+        if (depth.isNull())
+            return fail(error);
+        const QList<int> created = Project::splitByDepth(edited, assets, layer, depth, count, feather, &error);
+        if (created.isEmpty())
+            return fail(error);
+        if (strength >= 0 && !Project::animateParallax(edited, assets, layer, strength, &error))
+            return fail(error);
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        for (const int i : created)
+            QTextStream(stdout) << edited.layers.at(i).name << "\n";
         return 0;
     }
 
@@ -144,7 +223,8 @@ int command(const QStringList &args) {
 
 int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
-                                       !std::strcmp(argv[1], "cut"));
+                                       !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") ||
+                                       !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
@@ -161,8 +241,23 @@ int main(int argc, char *argv[]) {
         QTextStream(stdout) << "omotion " << app.applicationVersion() << "\n";
         return 0;
     }
+    if (headless && args.at(1) == "models") {
+        QTextStream out(stdout);
+        if (args.size() > 2 && args.at(2) == "--download") {
+            const QList<Ai::Model> missing = Ai::missingModels();
+            if (!missing.isEmpty())
+                out << "Downloading the AI models into " << Ai::modelDirectory() << "\n";
+            out.flush();
+            QString error;
+            if (!ModelDownload::run(&error, true))
+                return fail(error);
+        }
+        const QString problem = Ai::instance().problem();
+        out << (problem.isEmpty() ? QString("The AI is ready (models in %1).").arg(Ai::modelDirectory()) : problem) << "\n";
+        return problem.isEmpty() ? 0 : 1;
+    }
     if (headless) {
-        if (args.size() < 4)
+        if (args.size() < (args.at(1) == "split" ? 3 : 4))
             return fail(QString("missing arguments.\n\n") + Usage);
         return command(args);
     }

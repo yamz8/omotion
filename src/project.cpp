@@ -1,4 +1,5 @@
 #include "project.h"
+#include "ai.h"
 #include "select.h"
 
 #include <QDir>
@@ -442,12 +443,46 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         const bool punch = cut.value("punch").toBool(true);
         const bool fill = punch && cut.value("fill").toBool(false);
         const int margin = int(std::ceil(feather));
-        const QRect area = polygon.boundingRect().toAlignedRect().adjusted(-margin, -margin, margin, margin) &
-                           remaining.rect();
-        if (polygon.size() < 3 || area.isEmpty())
+        // A shape is an outline, or for shapes like depth layers that come in
+        // many patches, a mask image in the source's pixels.
+        const QString maskFile = cut.value("mask").toString();
+        QImage stored;
+        QPoint storedAt;
+        QRect shape;
+        if (!maskFile.isEmpty()) {
+            stored = QImage(dir.filePath(maskFile)).convertToFormat(QImage::Format_Grayscale8);
+            if (stored.isNull())
+                return fail(QString("Can't read %1, the shape of %2.").arg(maskFile, piece.name));
+            const QJsonArray at = cut.value("maskOrigin").toArray();
+            storedAt = QPoint(at.at(0).toInt(), at.at(1).toInt());
+            shape = QRect(storedAt, stored.size());
+        } else if (polygon.size() >= 3) {
+            shape = polygon.boundingRect().toAlignedRect();
+        }
+        const QRect area = shape.adjusted(-margin, -margin, margin, margin) & remaining.rect();
+        if (area.isEmpty())
             return fail(QString("The shape of %1 doesn't cover any of %2.").arg(piece.name, source.name));
 
-        const QImage mask = maskFor(polygon, feather, area);
+        QImage mask;
+        if (!stored.isNull()) {
+            mask = QImage(area.size(), QImage::Format_Alpha8);
+            mask.fill(0);
+            for (int y = 0; y < stored.height(); ++y) {
+                const int ay = storedAt.y() + y - area.y();
+                if (ay < 0 || ay >= area.height())
+                    continue;
+                const uchar *from = stored.constScanLine(y);
+                uchar *to = mask.scanLine(ay);
+                for (int x = 0; x < stored.width(); ++x) {
+                    const int ax = storedAt.x() + x - area.x();
+                    if (ax >= 0 && ax < area.width())
+                        to[ax] = from[x];
+                }
+            }
+            soften(mask, feather);
+        } else {
+            mask = maskFor(polygon, feather, area);
+        }
         const QImage before = fill ? remaining.copy(area) : QImage();
         QImage image(area.size(), QImage::Format_ARGB32);
         bool opaque = false;
@@ -678,6 +713,278 @@ QPolygonF smartOutline(const Scene &scene, AssetCache &assets, int index, const 
     for (const QPointF &point : Select::outline(mask, 1.0))
         outline.append(toCanvas.map(point / factor));
     return outline;
+}
+
+QPolygonF aiOutline(const Scene &scene, AssetCache &assets, int index, const QList<QPointF> &take,
+                    const QList<QPointF> &leave, double t, int choice, int *choices, QString *error) {
+    if (choices)
+        *choices = 0;
+    if (index < 0 || index >= scene.layers.size() || take.isEmpty())
+        return {};
+    const QString source = scene.layers.at(index).source;
+    const QSizeF full = assets.size(source);
+    if (full.isEmpty())
+        return {};
+    // The AI looks at a copy around 2000 pixels across; its masks come back
+    // that size, which is detail enough for an outline.
+    double factor = 1;
+    const QImage image = assets.mip(source, std::min(1.0, 2048.0 / std::max(full.width(), full.height())), &factor);
+    const QTransform toCanvas = layerTransform(scene, assets, index, t);
+    bool invertible = false;
+    const QTransform toImage = toCanvas.inverted(&invertible);
+    if (!invertible)
+        return {};
+    QList<QPointF> points;
+    QList<int> labels;
+    for (const QPointF &point : take) {
+        points.append(toImage.map(point) * factor);
+        labels.append(1);
+    }
+    for (const QPointF &point : leave) {
+        points.append(toImage.map(point) * factor);
+        labels.append(0);
+    }
+    const QString key = QString("%1|%2|%3").arg(QDir(assets.directory()).filePath(source)).arg(
+        QFileInfo(QDir(assets.directory()).filePath(source)).lastModified().toMSecsSinceEpoch()).arg(factor);
+    const QList<QImage> masks = Ai::instance().segment(image, key, points, labels, error);
+    if (masks.isEmpty())
+        return {};
+    if (choices)
+        *choices = int(masks.size());
+    QImage mask = masks.at(std::clamp(choice, 0, int(masks.size()) - 1));
+    // The AI's edge sits a touch inside soft outlines; take the blend too.
+    Select::grow(mask, std::max(1, int(std::lround(1.5 * factor * pixelScale(toImage)))));
+    QPolygonF outline;
+    for (const QPointF &point : Select::outline(mask, 1.0))
+        outline.append(toCanvas.map(point / factor));
+    return outline;
+}
+
+QImage depthOf(const Scene &scene, AssetCache &assets, int index, QString *error) {
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const QString source = scene.layers.at(index).source;
+    const QSizeF full = assets.size(source);
+    if (full.isEmpty()) {
+        if (error)
+            *error = QString("Couldn't read %1.").arg(source);
+        return {};
+    }
+    // The model works at about 518 pixels; there's no need to hand it more
+    // than a few times that.
+    double factor = 1;
+    const QImage image = assets.mip(source, std::min(1.0, 1600.0 / std::max(full.width(), full.height())), &factor);
+    return Ai::instance().depth(image, error);
+}
+
+QList<int> splitByDepth(Scene &scene, AssetCache &assets, int index, const QImage &depthMap, int count, double feather,
+                        QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return QList<int>();
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("Select the layer to split.");
+    if (count < 2 || count > 8)
+        return fail("Split into between 2 and 8 layers.");
+    const Layer &source = scene.layers.at(index);
+    const QSize full = assets.size(source.source).toSize();
+    if (full.isEmpty())
+        return fail(QString("Couldn't read %1.").arg(source.source));
+    if (!piecesOf(scene, source.name).isEmpty())
+        return fail(QString("%1 already has pieces cut from it; split a layer that hasn't been cut yet.").arg(source.name));
+    const QImage depth = depthMap.convertToFormat(QImage::Format_Grayscale16);
+    const int w = depth.width(), h = depth.height();
+    if (depth.isNull())
+        return fail("There's no depth to split by.");
+
+    // Where to split: k-means on the depth histogram, so the cuts fall in
+    // the gaps between near, middle and far rather than at fixed steps.
+    std::vector<double> histogram(1024, 0);
+    for (int y = 0; y < h; ++y) {
+        const quint16 *line = reinterpret_cast<const quint16 *>(depth.constScanLine(y));
+        for (int x = 0; x < w; ++x)
+            ++histogram[line[x] >> 6];
+    }
+    std::vector<double> centres(count);
+    {
+        double total = 0, seen = 0;
+        for (double v : histogram)
+            total += v;
+        int next = 0;
+        for (int bin = 0; bin < 1024 && next < count; ++bin) {
+            seen += histogram[bin];
+            while (next < count && seen >= total * (next + .5) / count)
+                centres[next++] = bin;
+        }
+        for (int iteration = 0; iteration < 50; ++iteration) {
+            std::vector<double> sum(count, 0), weight(count, 0);
+            for (int bin = 0; bin < 1024; ++bin) {
+                int nearest = 0;
+                for (int c = 1; c < count; ++c)
+                    if (std::abs(bin - centres[c]) < std::abs(bin - centres[nearest]))
+                        nearest = c;
+                sum[nearest] += histogram[bin] * bin;
+                weight[nearest] += histogram[bin];
+            }
+            for (int c = 0; c < count; ++c)
+                if (weight[c] > 0)
+                    centres[c] = sum[c] / weight[c];
+        }
+        std::sort(centres.begin(), centres.end());
+    }
+
+    const QDir dir(assets.directory());
+    dir.mkpath("assets");
+    const QDir assetDir(dir.filePath("assets"));
+    const double sourceScale = std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)));
+    Scene edited = scene;
+    QList<int> created;
+    // Nearest first: each nearer layer is lifted out and its place filled
+    // before the next is cut, and each layer's shape takes in everything in
+    // front of it too, so it carries a filled-in background behind the nearer
+    // ones and nothing opens up when they move.
+    for (int band = count - 1, order = 0; band >= 1; --band, ++order) {
+        const double threshold = (centres[band - 1] + centres[band]) / 2 * 64;
+        QImage mask(w, h, QImage::Format_Alpha8);
+        for (int y = 0; y < h; ++y) {
+            const quint16 *line = reinterpret_cast<const quint16 *>(depth.constScanLine(y));
+            uchar *to = mask.scanLine(y);
+            for (int x = 0; x < w; ++x)
+                to[x] = line[x] >= threshold ? 255 : 0;
+        }
+        // Specks and pinholes make poor layers; drop the one, fill the other.
+        const int speck = std::max(4, w * h / 1000);
+        for (int pass = 0; pass < 2; ++pass) {
+            if (pass == 1)
+                mask.invertPixels();
+            // Flood each area of the current colour; small ones flip.
+            std::vector<uchar> seen(size_t(w) * h, 0);
+            for (int start = 0; start < w * h; ++start) {
+                if (seen[start] || !mask.constScanLine(start / w)[start % w])
+                    continue;
+                std::vector<int> area{start};
+                seen[start] = 1;
+                for (size_t k = 0; k < area.size(); ++k) {
+                    const int x = area[k] % w, y = area[k] / w;
+                    const int next[4][2] = {{x + 1, y}, {x - 1, y}, {x, y + 1}, {x, y - 1}};
+                    for (const auto &n : next) {
+                        if (n[0] < 0 || n[1] < 0 || n[0] >= w || n[1] >= h)
+                            continue;
+                        const int j = n[1] * w + n[0];
+                        if (!seen[j] && mask.constScanLine(n[1])[n[0]]) {
+                            seen[j] = 1;
+                            area.push_back(j);
+                        }
+                    }
+                }
+                if (int(area.size()) < speck)
+                    for (const int i : area)
+                        mask.scanLine(i / w)[i % w] = 0;
+            }
+            if (pass == 1)
+                mask.invertPixels();
+        }
+
+        // Up to the picture's size, smoothly, then crisp again; the soft edge
+        // comes from the cut's feather.
+        QImage grey(w, h, QImage::Format_Grayscale8);
+        for (int y = 0; y < h; ++y)
+            std::copy_n(mask.constScanLine(y), w, grey.scanLine(y));
+        QImage big = grey.scaled(full, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        QRect bounds;
+        for (int y = 0; y < big.height(); ++y) {
+            uchar *line = big.scanLine(y);
+            int first = -1, last = -1;
+            for (int x = 0; x < big.width(); ++x) {
+                line[x] = line[x] >= 128 ? 255 : 0;
+                if (line[x]) {
+                    if (first < 0)
+                        first = x;
+                    last = x;
+                }
+            }
+            if (first >= 0)
+                bounds |= QRect(first, y, last - first + 1, 1);
+        }
+        if (bounds.isEmpty())
+            continue;
+        static const QStringList names{"foreground", "middle ground", "background"};
+        const QString name = edited.uniqueName(order < names.size() ? names.at(order) : QString("depth %1").arg(band));
+        const QString maskFile = "assets/" + uniqueFile(assetDir, slug(name) + "-shape", "png");
+        if (!writeImage(big.copy(bounds), dir.filePath(maskFile), error))
+            return {};
+
+        Layer layer;
+        layer.name = name;
+        layer.parent = source.name;
+        for (const QString &property : Scene::properties())
+            layer.base.insert(property, Scene::defaultValue(property));
+        layer.raw["cut"] = QJsonObject{{"from", source.name},
+                                       {"mask", maskFile},
+                                       {"maskOrigin", QJsonArray{bounds.x(), bounds.y()}},
+                                       {"feather", std::round(feather / sourceScale * 100) / 100},
+                                       {"punch", true},
+                                       {"fill", true},
+                                       {"order", order},
+                                       {"depth", std::round(centres[band] / 1023 * 1000) / 1000}};
+        edited.layers.insert(index + 1, layer);
+        // Each new layer goes in just above the source, under the nearer ones.
+        created.append(index + 1 + int(created.size()));
+    }
+    if (created.isEmpty())
+        return fail("The picture is all one depth; there's nothing to split.");
+    edited.layers[index].raw["depth"] = std::round(centres[0] / 1023 * 1000) / 1000;
+    if (!rebuildCuts(edited, assets, index, error))
+        return {};
+    scene = edited;
+    if (error)
+        error->clear();
+    return created;
+}
+
+bool animateParallax(Scene &scene, AssetCache &assets, int index, double strength, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("Select the layer that was split by depth.");
+    // Pieces carry their source's name, so a piece selected means its source.
+    const QString from = scene.layers.at(index).raw.value("cut").toObject().value("from").toString();
+    if (!scene.layers.at(index).raw.contains("depth") && scene.indexOf(from) >= 0)
+        index = scene.indexOf(from);
+    Layer &source = scene.layers[index];
+    QList<int> pieces;
+    for (const int i : piecesOf(scene, source.name))
+        if (scene.layers.at(i).raw.value("cut").toObject().contains("depth"))
+            pieces.append(i);
+    if (pieces.isEmpty())
+        return fail(QString("%1 hasn't been split by depth (D), so there's no depth to move by.").arg(source.name));
+
+    const double far = source.raw.value("depth").toDouble(0);
+    const double d = scene.duration;
+    auto loop = [d](double a, double b) {
+        return QList<Key>{Key{0, a, "inOut"}, Key{d / 2, b, "inOut"}, Key{d, a, "inOut"}};
+    };
+    // The camera drifts and pushes in a little; it's scaled up enough that the
+    // nearest layer, which moves furthest, never shows an edge.
+    const double base = scene.value(source, "scale", 0);
+    const double x = scene.value(source, "x", 0);
+    const double overscan = 1 + 2 * (strength * 4 / 3) / scene.width + .01;
+    source.keys["scale"] = loop(base * overscan, base * overscan * 1.035);
+    source.keys["x"] = loop(x, x - strength / 3);
+    const double perPixel = 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)) * overscan);
+    for (const int i : pieces) {
+        Layer &piece = scene.layers[i];
+        const double depth = piece.raw.value("cut").toObject().value("depth").toDouble();
+        const double shift = strength * std::clamp((depth - far) / std::max(1e-6, 1 - far), 0.0, 1.0);
+        const double px = scene.value(piece, "x", 0);
+        piece.keys["x"] = loop(px, px - shift * perPixel);
+    }
+    return true;
 }
 
 void renameCutSource(Scene &scene, const QString &from, const QString &to) {

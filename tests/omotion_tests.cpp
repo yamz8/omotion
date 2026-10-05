@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "ai.h"
 #include "backend.h"
 #include "exporter.h"
 #include "project.h"
@@ -656,6 +657,161 @@ private slots:
         QCOMPARE(backend.cutPoints().size(), points);
         backend.adjustTolerance(10);  // Not the wand any more: no reselect.
         QCOMPARE(backend.cutPoints().size(), points);
+    }
+
+    // A picture in three horizontal bands, with a depth map to match: far at
+    // the top, near at the bottom.
+    static QString bandedPicture(QTemporaryDir &dir, QImage *depth) {
+        QImage picture(300, 150, QImage::Format_ARGB32);
+        QPainter painter(&picture);
+        painter.fillRect(0, 0, 300, 50, QColor(250, 120, 60));
+        painter.fillRect(0, 50, 300, 50, QColor(120, 40, 160));
+        painter.fillRect(0, 100, 300, 50, QColor(40, 20, 60));
+        painter.end();
+        picture.save(dir.filePath("bands.png"));
+        *depth = QImage(60, 30, QImage::Format_Grayscale16);
+        for (int y = 0; y < 30; ++y)
+            for (int x = 0; x < 60; ++x)
+                reinterpret_cast<quint16 *>(depth->scanLine(y))[x] = y < 10 ? 2000 : y < 20 ? 30000 : 60000;
+        return dir.filePath("bands.png");
+    }
+
+    void depthSplitsIntoLayersThatAddUp() {
+        QTemporaryDir dir;
+        QImage depth;
+        const QString project = Project::open(bandedPicture(dir, &depth), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const QImage before = renderFrame(scene, assets, 0);
+        QString error;
+        const QList<int> created = Project::splitByDepth(scene, assets, 0, depth, 3, 0, &error);
+        QVERIFY2(created.size() == 2, qPrintable(error));
+        QCOMPARE(scene.layers.size(), 3);
+        // Nearest on top, and named for it.
+        QCOMPARE(scene.layers[2].name, QString("foreground"));
+        QCOMPARE(scene.layers[1].name, QString("middle ground"));
+        QVERIFY(scene.layers[2].raw["cut"].toObject()["depth"].toDouble() >
+                scene.layers[1].raw["cut"].toObject()["depth"].toDouble());
+        // Put together, it's the picture; the shapes follow the depth.
+        QVERIFY(differences(renderFrame(scene, assets, 0), before) < 300 * 6);
+        const QImage near = assets.image(scene.layers[2].source);
+        const QJsonArray origin = scene.layers[2].raw["cut"].toObject()["origin"].toArray();
+        QVERIFY(origin[1].toInt() >= 90 && origin[1].toInt() <= 102);
+        QCOMPARE(near.height() + origin[1].toInt(), 150);
+        // Behind the nearer layers, each one is filled in: no holes to show.
+        for (Layer &layer : scene.layers)
+            layer.visible = layer.name == "middle ground";
+        const QImage middle = renderFrame(scene, assets, 0);
+        QCOMPARE(middle.pixelColor(150, 140).alpha(), 255);
+        QVERIFY(middle.pixelColor(150, 140).blue() > 100);  // The middle band's purple, carried down.
+        QCOMPARE(middle.pixelColor(150, 20), QColor(0, 0, 0));  // Above it, the background shows through.
+
+        // Splitting again isn't allowed; flat depth has nothing to split.
+        QVERIFY(Project::splitByDepth(scene, assets, 0, depth, 3, 0, &error).isEmpty());
+        QImage flat(10, 10, QImage::Format_Grayscale16);
+        flat.fill(Qt::gray);
+        Scene fresh = Project::load(project, nullptr);
+        fresh.layers.resize(1);
+        fresh.layers[0].source = "assets/bands.png";
+        QVERIFY(Project::splitByDepth(fresh, assets, 0, flat, 3, 0, &error).isEmpty());
+    }
+
+    void parallaxMovesNearerLayersFurther() {
+        QTemporaryDir dir;
+        QImage depth;
+        const QString project = Project::open(bandedPicture(dir, &depth), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        Project::splitByDepth(scene, assets, 0, depth, 3, 0, &error);
+        QVERIFY(Project::animateParallax(scene, assets, 2, 30, &error));  // A piece stands for its source.
+        auto canvasX = [&](int layer, double t) { return layerTransform(scene, assets, layer, t).map(QPointF(0, 0)).x(); };
+        const double half = scene.duration / 2;
+        const double far = canvasX(0, half) - canvasX(0, 0), middle = canvasX(1, half) - canvasX(1, 0),
+                     near = canvasX(2, half) - canvasX(2, 0);
+        QVERIFY2(near < middle && middle < far, qPrintable(QString("%1 %2 %3").arg(far).arg(middle).arg(near)));
+        // It loops: the end is the start.
+        QCOMPARE(canvasX(2, scene.duration), canvasX(2, 0));
+        // And never shows past the picture's edge.
+        for (double t = 0; t <= scene.duration; t += .25) {
+            const QRectF covered = layerTransform(scene, assets, 0, t).mapRect(QRectF(0, 0, 300, 150));
+            QVERIFY(covered.contains(QRectF(0, 0, scene.width, scene.height)));
+        }
+        QVERIFY(!Project::animateParallax(scene, assets, -1, 30, &error));
+    }
+
+    void masksCutLikeOutlines() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        // Two separate patches in one shape: something an outline can't be.
+        QImage mask(200, 100, QImage::Format_Grayscale8);
+        mask.fill(0);
+        QPainter painter(&mask);
+        painter.fillRect(10, 10, 60, 40, Qt::white);
+        painter.fillRect(120, 50, 50, 30, Qt::white);
+        painter.end();
+        mask.copy(5, 5, 170, 80).save(project + "/assets/two-shape.png");
+        Layer piece;
+        piece.name = "two";
+        piece.parent = "p";
+        for (const QString &property : Scene::properties())
+            piece.base.insert(property, Scene::defaultValue(property));
+        piece.raw["cut"] = QJsonObject{{"from", "p"}, {"mask", "assets/two-shape.png"}, {"maskOrigin", QJsonArray{5, 5}},
+                                       {"feather", 0}, {"punch", true}, {"fill", false}, {"order", 0}};
+        scene.layers.append(piece);
+        QString error;
+        // Reshaping anything of p's redraws it all, the mask piece included.
+        const QImage before = renderFrame(scene, assets, 0);
+        QVERIFY(Project::cutOut(scene, assets, 0, {{180, 5}, {195, 5}, {195, 20}, {180, 20}}, 0, true, &error, {}, 0, false) > 0);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const Layer &cut = scene.layers[scene.indexOf("two")];
+        QCOMPARE(assets.size(cut.source), QSizeF(170, 80));  // The stored mask's area.
+        QCOMPARE(qAlpha(assets.image(scene.layers[0].source).pixel(30, 30)), 0);   // Both patches left holes...
+        QCOMPARE(qAlpha(assets.image(scene.layers[0].source).pixel(140, 60)), 0);
+        QCOMPARE(qAlpha(assets.image(scene.layers[0].source).pixel(100, 30)), 255);  // ...and nothing between.
+        QVERIFY(differences(renderFrame(scene, assets, 0), before) < 10);
+    }
+
+    void aiSaysWhatsMissing() {
+        QTemporaryDir dir;
+        Ai::setPaths(dir.filePath("no-such-library.so"), dir.path());
+        // A fresh Ai can't be made, so this checks the model side, which
+        // doesn't need the runtime.
+        QCOMPARE(Ai::missingModels().size(), Ai::models().size());
+        QVERIFY(Ai::modelBytes() > 100000000);
+        Ai::setPaths({}, {});
+    }
+
+    void aiFindsDepthAndThings() {
+        if (!Ai::instance().problem().isEmpty())
+            QSKIP(qPrintable("The AI isn't set up here: " + Ai::instance().problem()));
+        // A dark disc on a light floor that fades with height, like a ball on a road.
+        QImage picture(400, 300, QImage::Format_RGB32);
+        QPainter painter(&picture);
+        QLinearGradient floor(0, 0, 0, 300);
+        floor.setColorAt(0, QColor(200, 220, 255));
+        floor.setColorAt(1, QColor(120, 110, 100));
+        painter.fillRect(picture.rect(), floor);
+        painter.setBrush(QColor(200, 30, 30));
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(200, 200), 50, 50);
+        painter.end();
+        QString error;
+        const QImage depth = Ai::instance().depth(picture, &error);
+        QVERIFY2(!depth.isNull(), qPrintable(error));
+        // The ball stands out nearer than the sky at the top.
+        const auto at = [&](double x, double y) {
+            return reinterpret_cast<const quint16 *>(depth.constScanLine(int(y * depth.height())))[int(x * depth.width())];
+        };
+        QVERIFY(at(.5, .66) > at(.5, .05));
+
+        const QList<QImage> masks = Ai::instance().segment(picture, "ball", {QPointF(200, 200)}, {1}, &error);
+        QVERIFY2(!masks.isEmpty(), qPrintable(error));
+        const QRectF bounds = Select::outline(masks.first()).boundingRect();
+        QVERIFY2(qAbs(bounds.center().x() - 200) < 10 && qAbs(bounds.width() - 100) < 16,
+                 qPrintable(QString("%1,%2 %3x%4").arg(bounds.x()).arg(bounds.y()).arg(bounds.width()).arg(bounds.height())));
     }
 
     void cuttingNothingFails() {
