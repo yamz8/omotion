@@ -163,6 +163,51 @@ against known hashes, kept in `~/.local/share/omotion/models`):
 Without them, everything else works as before, and omotion says what's
 missing when you ask for an AI feature.
 
+## Worlds
+
+A world turns the picture into a 3D place you direct: its ground, the
+things in it and a camera that can move. Everything still starts from the
+picture, and from its own camera the world looks exactly like it.
+
+```sh
+omotion world photo.omotion --horizon 0.59   # the AI reads distances, the lens and the ground (~1–2 min the first time)
+omotion shape photo.omotion car              # a cut-out piece becomes a 3D object (~20 s)
+omotion size photo.omotion car 1.4           # the world to scale: that piece is 1.4 m tall
+omotion drive photo.omotion car --from 8,22 --to -5,-1 --speed 50
+                                             # over the ground at 50 km/h: off crests, landing, dust
+omotion link photo.omotion camera yaw "car.worldX * 1.2, spring 1.2"
+                                             # a camera that follows
+```
+
+- **world** reads where every pixel is in meters, the lens it was seen
+  through and the ground, and builds a mesh of the picture (with what's
+  behind cut pieces filled in, and its edges painted on past the frame, so
+  the camera can turn a little). The ground in sight may slope (a road up
+  to a crest); `--horizon`, how far down the picture the horizon is, says
+  which way is level.
+- **shape** gives a piece a closed 3D shape (TripoSR), fitted to its
+  cut-out and wearing the picture, so it can turn and has a back. The side
+  the picture never showed is a guess, and shows when it turns far.
+- **size** sets the scale: what the AI reads from a picture, and a
+  painting above all, is only roughly to scale, and gravity looks right
+  only at the right size.
+- **drive** moves a piece over the ground at a speed: it keeps to the
+  ground, flies where the ground falls away faster than gravity, lands
+  where the ground is and pitches with its path, baked as keyframes. It
+  keeps facing as the picture shows it (`--face` turns it to its way).
+  Where it takes off and lands, dust is thrown up; under a shaped piece,
+  a shadow falls on the ground. Ground hidden behind a crest is taken to
+  fall gently away under the line of sight.
+- **ground** tells the ground's height at places; **info** gives each
+  world piece's pivot, the box it fills and its heading, in meters.
+
+In the window the world is shown in 3D under the canvas; the inspector has
+the world properties of the camera and of each piece.
+
+A world can't show what the picture never did: turned far, a shape's
+unseen side is the AI's guess; the camera can turn a little past the
+frame, and move a little before gaps open behind things.
+
 ## The project folder
 
 ```text
@@ -229,6 +274,19 @@ photo.omotion/
   meets the horizon (the canvas centre if left out), and the focal
   `distance` in pixels (the canvas width if left out; a layer that far back
   is half size).
+- **`world`**, made by `omotion world`: the `picture` (layer) it was made
+  from, its `depth` and the depth `behind` its pieces (16-bit images,
+  logarithmic from 5 cm to 2 km), the lens `focal` in the picture's pixels,
+  the `ground` (`up`, which way is up as the picture's camera sees it, x
+  right, y down, z ahead; and the camera's `height` above it in meters),
+  the picture carried past its edges (`wide`, by `margin` pixels each side),
+  its `scale` and the `dust` colour. A world layer's **world properties**
+  move it from where it is in the picture: `worldX` (right), `worldY` (up)
+  and `worldZ` (away), in meters, and `yaw` (right), `pitch` (nose up) and
+  `roll` (lean right), in degrees, turning about its pivot. The camera has
+  the same but `roll` (its `rotation` is that), and its `zoom` is the lens.
+  A layer's `shape` names its 3D shape and which `quarter` turn faces it;
+  `landings` and `takeoffs` (seconds) throw up dust.
 - **`camera`** is what part of the world the canvas shows: `x`, `y` (the
   world point at the canvas centre), `zoom` and `rotation`, constant or
   under `keys` like a layer's. A layer's **`follow`** says how much the
@@ -314,6 +372,7 @@ omotion link photo.omotion wheel rotation "car.x * 0.8"
                                           # after commas: lag, smooth, spring, damping,
                                           # min, max, abs;
                                           # --none unlinks
+omotion world photo.omotion --horizon 0.59   # see Worlds: world, shape, size, drive, ground
 omotion particles photo.omotion snow --count 400
                                           # Shift+I: a particle layer (any setting as --name value)
 omotion audio photo.omotion song.mp3 --offset 12
