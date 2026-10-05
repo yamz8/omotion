@@ -42,6 +42,8 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
 
     m_scene = scene;
     m_assets.setDirectory(directory);
+    // Frames draw big pictures small; their smaller copies are all it takes.
+    m_assets.setKeepFull(false);
     m_output = QFileInfo(output).absoluteFilePath();
     m_count = scene.frameCount();
     m_next = 0;
@@ -131,7 +133,9 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
 void Exporter::feed() {
     if (!m_busy || !m_process || m_cancelled || m_process->state() != QProcess::Running)
         return;
-    while (m_next < m_count && m_process->bytesToWrite() < MaxBuffered) {
+    // One frame a turn: the window keeps drawing between them, and ffmpeg
+    // asks for the next as it takes in this one.
+    if (m_next < m_count && m_process->bytesToWrite() < MaxBuffered) {
         const QImage frame = renderFrame(m_scene, m_assets, m_scene.frameTime(m_next), m_size)
                                  .convertToFormat(QImage::Format_ARGB32);
         // Rows can be padded, so write them one by one at their real width.
