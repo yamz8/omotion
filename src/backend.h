@@ -10,7 +10,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <QAudioOutput>
 #include <QFutureWatcher>
+#include <QMediaPlayer>
 
 #include "ai.h"
 #include "exporter.h"
@@ -50,6 +52,9 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList keySelection READ keySelection NOTIFY keySelectionChanged)
     Q_PROPERTY(QStringList blends READ blends CONSTANT)
     Q_PROPERTY(QString busy READ busy NOTIFY busyChanged)
+    // The scene's sound: source, offset, volume, and peaks along the scene
+    // for the timeline; empty without one.
+    Q_PROPERTY(QVariantMap audio READ audio NOTIFY audioChanged)
     // Whether the canvas shows the selected layer's path and its ghosts.
     Q_PROPERTY(bool showMotion READ showMotion WRITE setShowMotion NOTIFY showMotionChanged)
     Q_PROPERTY(QString aiPrompt READ aiPrompt NOTIFY aiPromptChanged)
@@ -99,6 +104,7 @@ public:
     // What the AI is busy with, in words, or empty.
     QString busy() const { return m_busy; }
     bool showMotion() const { return m_showMotion; }
+    QVariantMap audio() const;
     void setShowMotion(bool show) {
         if (show != m_showMotion) {
             m_showMotion = show;
@@ -228,6 +234,12 @@ public:
     Q_INVOKABLE void acceptAiPrompt();
     Q_INVOKABLE void dismissAiPrompt();
     Q_INVOKABLE void cancelDownload();
+    // Sound: pick a file to play along (and go into video exports), set where
+    // in it the scene starts and how loud, or take it away.
+    Q_INVOKABLE void importAudioDialog();
+    Q_INVOKABLE bool setAudioFile(const QString &path);
+    Q_INVOKABLE void setAudioValue(const QString &name, double value);
+    Q_INVOKABLE void removeAudio();
     // Moves images nothing uses any more (not even undo) to the trash.
     Q_INVOKABLE void cleanUp();
     // Waits for any background work (the AI, big cuts) to finish; for tests.
@@ -267,6 +279,7 @@ signals:
     void exportChanged();
     void keySelectionChanged();
     void busyChanged();
+    void audioChanged();
     void showMotionChanged();
     void aiPromptChanged();
     void downloadChanged();
@@ -348,6 +361,14 @@ private:
     void setBusy(const QString &busy);
     QString m_busy;
     bool m_showMotion = false;
+    QMediaPlayer *m_player = nullptr;
+    QAudioOutput *m_audioOutput = nullptr;
+    QString m_playerSource;
+    QList<double> m_peaks;
+    QString m_peaksFor;
+    QFutureWatcher<QList<double>> m_peaksJob;
+    // Puts the player on the scene's sound, at the playhead, playing or not.
+    void syncAudio(bool reseek);
     QString m_aiPrompt;
     QString m_wandMode = "ai";
     QList<QPointF> m_aiTake;

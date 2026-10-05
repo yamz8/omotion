@@ -424,6 +424,63 @@ Rectangle {
                 font.pixelSize: 12
                 text: "#00000000 is transparent, for WebM and GIF."
             }
+
+            Rectangle { Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 4; height: 1; color: win.line }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Sound"; color: win.text; font.bold: true; Layout.fillWidth: true }
+                ToolButton {
+                    text: backend.audio.source ? "Replace" : "Add"
+                    font.pixelSize: 12
+                    implicitHeight: 28
+                    onClicked: backend.importAudioDialog()
+                }
+                ToolButton {
+                    visible: !!backend.audio.source
+                    text: "Remove"
+                    font.pixelSize: 12
+                    implicitHeight: 28
+                    onClicked: backend.removeAudio()
+                }
+            }
+            Label {
+                visible: !!backend.audio.source
+                text: backend.audio.name || ""
+                color: win.muted
+                elide: Text.ElideMiddle
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                visible: !!backend.audio.source
+                Layout.fillWidth: true
+                spacing: 8
+                Label { text: "Starts at s"; color: win.text; Layout.preferredWidth: 90 }
+                NumberField {
+                    Layout.fillWidth: true
+                    decimals: 2
+                    value: backend.audio.offset || 0
+                    onCommitted: function (n) { backend.setAudioValue("offset", n) }
+                }
+            }
+            RowLayout {
+                visible: !!backend.audio.source
+                Layout.fillWidth: true
+                spacing: 8
+                Label { text: "Volume %"; color: win.text; Layout.preferredWidth: 90 }
+                NumberField {
+                    Layout.fillWidth: true
+                    decimals: 0
+                    value: (backend.audio.volume === undefined ? 1 : backend.audio.volume) * 100
+                    onCommitted: function (n) { backend.setAudioValue("volume", n / 100) }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 12
+                text: backend.audio.source ? "Plays along, and goes into MP4 and WebM exports." : "Ctrl+M adds music or sound to time things to."
+            }
         }
     }
 }

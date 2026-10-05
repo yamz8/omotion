@@ -1,5 +1,7 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QLinearGradient>
 #include <QDir>
 #include <QFile>
@@ -1508,6 +1510,44 @@ private slots:
         QVERIFY(!backend.error().contains("Can't find"));  // No picture isn't a missing picture.
         backend.undo();
         QCOMPARE(backend.scene().layers[1].particles["color"].toString(), QString("#c8d8ff"));
+    }
+
+    void soundPlaysAlongAndGoesIntoVideo() {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg isn't installed here.");
+        QTemporaryDir dir;
+        // Half a second of beep every second, for six seconds.
+        QProcess make;
+        make.start("ffmpeg", {"-loglevel", "error", "-f", "lavfi", "-i", "aevalsrc='sin(440*2*PI*t)*lt(mod(t,1),0.5)':s=22050:d=6",
+                              dir.filePath("beep.wav")});
+        QVERIFY(make.waitForFinished(20000));
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        QVERIFY(!backend.setAudioFile(dir.filePath("p.png")));  // Not a sound.
+        QVERIFY(backend.setAudioFile(dir.filePath("beep.wav")));
+        QCOMPARE(backend.audio()["source"].toString(), QString("assets/beep.wav"));
+        QTRY_VERIFY(backend.audio()["peaks"].toList().size() == 600);
+        const QVariantList peaks = backend.audio()["peaks"].toList();
+        QVERIFY(peaks.at(50).toDouble() > .5);   // 0.33 s in: beeping.
+        QVERIFY(peaks.at(110).toDouble() < .05); // 0.73 s in: quiet.
+        backend.setAudioValue("offset", .5);
+        QCOMPARE(backend.audio()["offset"].toDouble(), .5);
+        QTRY_VERIFY(backend.audio()["peaks"].toList().size() == 600 && backend.audio()["peaks"].toList().at(50).toDouble() < .05);
+        backend.flush();
+
+        // Into an MP4 with the scene's length of sound; a GIF has none.
+        const Scene scene = backend.scene();
+        QString error;
+        QVERIFY2(Exporter::run(scene, backend.projectPath(), dir.filePath("out.mp4"), &error, .5), qPrintable(error));
+        QProcess probe;
+        probe.start("ffprobe", {"-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", dir.filePath("out.mp4")});
+        QVERIFY(probe.waitForFinished(20000));
+        QCOMPARE(QString::fromUtf8(probe.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts), (QStringList{"video", "audio"}));
+
+        backend.removeAudio();
+        QVERIFY(backend.audio().isEmpty());
+        backend.undo();
+        QCOMPARE(backend.audio()["offset"].toDouble(), .5);
     }
 
     void backendEditsTheCamera() {

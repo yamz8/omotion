@@ -1,6 +1,7 @@
 // omotion — animates images: cut a picture into layers, keyframe them, and
 // export the result. The whole animation is a scene.json anyone can edit.
 
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -55,6 +56,8 @@ const char *Usage = R"(Usage:
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
                                          Add a particle layer; settings: count, size, speed,
                                          direction, spread, sway, twinkle, color, seed
+  omotion audio <project> <file|--none> [--offset <seconds>] [--volume <0-4>]
+                                         The scene's sound, for playing along and video exports
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 350 MB, checked against their hashes)
@@ -319,6 +322,31 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "audio") {
+        Scene edited = scene;
+        if (args.at(3) == "--none") {
+            edited.raw.remove("audio");
+        } else if (!Project::setAudio(edited, directory, QFileInfo(args.at(3)).absoluteFilePath(), &error)) {
+            return fail(error);
+        }
+        QJsonObject audio = edited.raw.value("audio").toObject();
+        for (int i = 4; i < args.size(); ++i) {
+            if (args.at(i) != "--offset" && args.at(i) != "--volume")
+                return fail(QString("audio doesn't know \"%1\".").arg(args.at(i)));
+            const QString name = args.at(i).mid(2);
+            double value = 0;
+            if (!numberAfter(args, i, &value))
+                return 1;
+            if (!audio.isEmpty())
+                audio[name] = value;
+        }
+        if (!audio.isEmpty())
+            edited.raw["audio"] = audio;
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        return 0;
+    }
+
     if (args.at(1) == "clean") {
         const QList<QJsonObject> scenes{scene.toJson()};
         if (args.contains("--dry-run")) {
@@ -412,7 +440,7 @@ int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
-                                       !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") ||
+                                       !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");

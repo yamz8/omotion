@@ -1,4 +1,4 @@
-QT += core gui quick quickcontrols2 testlib dbus network concurrent
+QT += core gui quick quickcontrols2 testlib dbus network concurrent multimedia
 CONFIG += c++17 testcase
 TARGET = omotion_tests
 TEMPLATE = app

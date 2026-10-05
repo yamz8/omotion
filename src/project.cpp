@@ -11,6 +11,8 @@
 #include <QJsonDocument>
 #include <QPainter>
 #include <QPainterPath>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QSaveFile>
 #include <QSet>
 #include <algorithm>
@@ -776,6 +778,56 @@ bool reshapeCutMask(Scene &scene, AssetCache &assets, int index, const QImage &s
         return false;
     scene = edited;
     return true;
+}
+
+bool isAudio(const QString &path) {
+    static const QStringList suffixes{"mp3", "wav", "ogg", "opus", "flac", "m4a", "aac"};
+    return suffixes.contains(QFileInfo(path).suffix().toLower());
+}
+
+bool setAudio(Scene &scene, const QString &directory, const QString &path, QString *error) {
+    if (!isAudio(path) || !QFileInfo::exists(path)) {
+        if (error)
+            *error = QString("%1 isn't a sound file omotion knows (mp3, wav, ogg, opus, flac, m4a).").arg(path);
+        return false;
+    }
+    const QDir dir(directory);
+    dir.mkpath("assets");
+    const QFileInfo info(path);
+    const QString source = "assets/" + uniqueFile(QDir(dir.filePath("assets")), info.completeBaseName(), info.suffix());
+    if (!QFile::copy(path, dir.filePath(source))) {
+        if (error)
+            *error = QString("Couldn't copy %1 into the project.").arg(path);
+        return false;
+    }
+    scene.raw["audio"] = QJsonObject{{"source", source}, {"offset", 0}, {"volume", 1}};
+    return true;
+}
+
+QList<double> audioPeaks(const QString &file, double offset, double duration, int count) {
+    QList<double> peaks;
+    const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+    if (ffmpeg.isEmpty() || count <= 0 || duration <= 0)
+        return peaks;
+    // Mono, a few thousand samples a second: plenty to see the beat.
+    constexpr int Rate = 4000;
+    QProcess process;
+    process.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-ss", QString::number(std::max(0.0, offset)), "-t",
+                           QString::number(duration), "-i", file, "-ac", "1", "-ar", QString::number(Rate), "-f", "s16le", "-"});
+    if (!process.waitForFinished(60000))
+        return peaks;
+    const QByteArray data = process.readAllStandardOutput();
+    const qint16 *samples = reinterpret_cast<const qint16 *>(data.constData());
+    const qint64 total = data.size() / 2;
+    const double perPeak = duration * Rate / count;
+    for (int i = 0; i < count; ++i) {
+        const qint64 from = qint64(i * perPeak), to = std::min(total, qint64((i + 1) * perPeak));
+        int most = 0;
+        for (qint64 k = from; k < to; ++k)
+            most = std::max(most, std::abs(int(samples[k])));
+        peaks.append(most / 32768.0);
+    }
+    return peaks;
 }
 
 bool isCut(const Scene &scene, int index) {

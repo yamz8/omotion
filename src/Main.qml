@@ -84,6 +84,7 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+O"; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: backend.openFolderDialog() }
     Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.importImageDialog() }
     Shortcut { sequence: "Shift+I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: win.particleMenuVisible = true }
+    Shortcut { sequence: "Ctrl+M"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.importAudioDialog() }
     Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; enabled: win.ready && !backend.exporting; onActivated: win.exportMenuVisible = true }
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.togglePlay() }

@@ -81,6 +81,25 @@ PortalFileFilter imageFilter() {
     };
 }
 
+PortalFileFilter audioFilter() {
+    return {
+        QStringLiteral("Sound"),
+        {
+            {1, QStringLiteral("audio/mpeg")},
+            {1, QStringLiteral("audio/x-wav")},
+            {1, QStringLiteral("audio/ogg")},
+            {1, QStringLiteral("audio/flac")},
+            {1, QStringLiteral("audio/mp4")},
+            {0, QStringLiteral("*.mp3")},
+            {0, QStringLiteral("*.wav")},
+            {0, QStringLiteral("*.ogg")},
+            {0, QStringLiteral("*.opus")},
+            {0, QStringLiteral("*.flac")},
+            {0, QStringLiteral("*.m4a")},
+        },
+    };
+}
+
 QString portalToken() {
     return QStringLiteral("omotion_%1").arg(QRandomGenerator::global()->generate());
 }
@@ -110,7 +129,14 @@ void PortalFilePicker::choose(Purpose purpose) {
     options.insert(QStringLiteral("multiple"), false);
     options.insert(QStringLiteral("current_folder"), portalPathBytes(startFolder()));
     QString title;
-    if (purpose == Purpose::OpenFolder) {
+    if (purpose == Purpose::ImportAudio) {
+        title = QStringLiteral("Add Sound");
+        options.insert(QStringLiteral("accept_label"), QStringLiteral("Add"));
+        options.insert(QStringLiteral("filters"),
+                       QVariant::fromValue(PortalFileFilters{audioFilter(),
+                                                             {QStringLiteral("All files"), {{0, QStringLiteral("*")}}}}));
+        options.insert(QStringLiteral("current_filter"), QVariant::fromValue(audioFilter()));
+    } else if (purpose == Purpose::OpenFolder) {
         title = QStringLiteral("Open Animation Folder");
         options.insert(QStringLiteral("accept_label"), QStringLiteral("Open"));
         options.insert(QStringLiteral("directory"), true);

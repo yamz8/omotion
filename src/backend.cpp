@@ -52,6 +52,11 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
         m_exportProgress = fraction;
         emit exportChanged();
     });
+    connect(&m_peaksJob, &QFutureWatcher<QList<double>>::finished, this, [this] {
+        m_peaks = m_peaksJob.result();
+        emit audioChanged();
+    });
+
     connect(&m_download, &ModelDownload::progress, this, [this](qint64 received, qint64 total) {
         m_downloadProgress = total > 0 ? double(received) / total : 0;
         emit downloadChanged();
@@ -81,6 +86,8 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
         connect(m_picker, &FilePicker::selected, this, [this](FilePicker::Purpose purpose, const QUrl &url) {
             if (purpose == FilePicker::Purpose::ImportImage)
                 importImage(url.toLocalFile());
+            else if (purpose == FilePicker::Purpose::ImportAudio)
+                setAudioFile(url.toLocalFile());
             else
                 open(url.toLocalFile());
         });
@@ -90,6 +97,7 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
 Backend::~Backend() {
     // The AI's job uses this backend's cache; let it finish first.
     m_job.waitForFinished();
+    m_peaksJob.waitForFinished();
     flush();
 }
 
@@ -293,6 +301,8 @@ void Backend::seek(double t) {
     if (t == m_time)
         return;
     m_time = t;
+    if (m_playing)
+        syncAudio(true);
     emit timeChanged();
     emit valuesChanged();
 }
@@ -310,13 +320,16 @@ void Backend::togglePlay() {
         m_playTimer.stop();
         seek(m_time);
     }
+    syncAudio(true);
     emit playingChanged();
 }
 
 void Backend::tick() {
     m_time += m_clock.restart() / 1000.0;
-    if (m_time >= m_scene.duration)
+    if (m_time >= m_scene.duration) {
         m_time = std::fmod(m_time, m_scene.duration);
+        syncAudio(true);  // Round again: the sound goes back with it.
+    }
     emit timeChanged();
     emit valuesChanged();
 }
@@ -989,6 +1002,94 @@ void Backend::dismissAiPrompt() {
 
 void Backend::cancelDownload() { m_download.cancel(); }
 
+QVariantMap Backend::audio() const {
+    const QJsonObject audio = m_scene.raw.value("audio").toObject();
+    if (audio.value("source").toString().isEmpty())
+        return {};
+    QVariantList peaks;
+    for (double peak : m_peaks)
+        peaks.append(peak);
+    return {{"source", audio.value("source").toString()},
+            {"name", QFileInfo(audio.value("source").toString()).fileName()},
+            {"offset", audio.value("offset").toDouble()},
+            {"volume", audio.value("volume").toDouble(1)},
+            {"peaks", peaks}};
+}
+
+void Backend::syncAudio(bool reseek) {
+    const QJsonObject audio = m_scene.raw.value("audio").toObject();
+    const QString source = audio.value("source").toString();
+    const QString path = source.isEmpty() ? QString() : QDir(m_directory).absoluteFilePath(source);
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        if (m_player)
+            m_player->stop();
+        return;
+    }
+    if (!m_player) {
+        m_player = new QMediaPlayer(this);
+        m_audioOutput = new QAudioOutput(this);
+        m_player->setAudioOutput(m_audioOutput);
+    }
+    if (m_playerSource != path) {
+        m_player->setSource(QUrl::fromLocalFile(path));
+        m_playerSource = path;
+        reseek = true;
+    }
+    m_audioOutput->setVolume(float(std::clamp(audio.value("volume").toDouble(1), 0.0, 1.0)));
+    if (reseek)
+        m_player->setPosition(qint64((m_time + audio.value("offset").toDouble()) * 1000));
+    if (m_playing)
+        m_player->play();
+    else
+        m_player->pause();
+}
+
+void Backend::importAudioDialog() {
+    if (!hasProject())
+        return;
+    if (m_picker)
+        m_picker->choose(FilePicker::Purpose::ImportAudio);
+    else
+        setError("There's no file chooser available.");
+}
+
+bool Backend::setAudioFile(const QString &path) {
+    if (!hasProject())
+        return false;
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setAudio(scene, m_directory, localPath(path), &error)) {
+        setError(error);
+        return false;
+    }
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice("Added the sound. It plays along, shows on the timeline, and goes into MP4 and WebM.");
+    return true;
+}
+
+void Backend::setAudioValue(const QString &name, double value) {
+    QJsonObject audio = m_scene.raw.value("audio").toObject();
+    if (audio.isEmpty() || (name != "offset" && name != "volume") || !std::isfinite(value))
+        return;
+    checkpoint();
+    audio[name] = name == "offset" ? std::max(0.0, value) : std::clamp(value, 0.0, 4.0);
+    m_scene.raw["audio"] = audio;
+    changed();
+    syncAudio(name == "offset");
+}
+
+void Backend::removeAudio() {
+    if (!m_scene.raw.contains("audio"))
+        return;
+    checkpoint();
+    m_scene.raw.remove("audio");
+    changed();
+    syncAudio(false);
+    setNotice("Took the sound away. Ctrl+Z brings it back.");
+}
+
 void Backend::cleanUp() {
     if (!hasProject() || m_job.isRunning())
         return;
@@ -1565,6 +1666,26 @@ void Backend::checkpoint() {
 
 void Backend::changed(bool saveSoon) {
     ++m_revision;
+    // The sound's waveform, worked out again when the sound or its window
+    // onto it changes.
+    const QJsonObject audio = m_scene.raw.value("audio").toObject();
+    const QString source = audio.value("source").toString();
+    const QString key = source.isEmpty() ? QString()
+                                         : QString("%1|%2|%3").arg(source).arg(audio.value("offset").toDouble()).arg(m_scene.duration);
+    if (key != m_peaksFor) {
+        m_peaksFor = key;
+        m_peaks.clear();
+        if (!key.isEmpty()) {
+            const QString path = QDir(m_directory).absoluteFilePath(source);
+            const double offset = audio.value("offset").toDouble(), duration = m_scene.duration;
+            m_peaksJob.setFuture(QtConcurrent::run([path, offset, duration] { return Project::audioPeaks(path, offset, duration, 600); }));
+        }
+        emit audioChanged();
+        if (m_player && source.isEmpty())
+            m_player->stop();
+    } else if (!key.isEmpty()) {
+        emit audioChanged();
+    }
     reportMissing();
     emit sceneChanged();
     emit valuesChanged();

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -88,6 +89,16 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
                      "-f", "rawvideo", "-pix_fmt", "bgra",
                      "-s", QString("%1x%2").arg(m_size.width()).arg(m_size.height()),
                      "-framerate", QString::number(scene.fps), "-i", "-"};
+    // The scene's sound, for video that can carry it: from its offset, as
+    // long as the scene.
+    const QJsonObject audio = scene.raw.value("audio").toObject();
+    const QString sound = audio.value("source").toString().isEmpty()
+                              ? QString()
+                              : QDir(directory).absoluteFilePath(audio.value("source").toString());
+    const bool withSound = m_format != "gif" && !sound.isEmpty() && QFileInfo::exists(sound);
+    if (withSound)
+        args << "-ss" << QString::number(std::max(0.0, audio.value("offset").toDouble())) << "-t"
+             << QString::number(scene.duration) << "-i" << sound;
     if (m_format == "mp4")
         args << "-c:v" << "libx264" << "-pix_fmt" << "yuv420p" << "-crf" << "18" << "-preset" << "medium"
              << "-movflags" << "+faststart";
@@ -99,6 +110,11 @@ bool Exporter::start(const Scene &scene, const QString &directory, const QString
              << QString("%1split[a][b];[a]palettegen=reserve_transparent=1:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a")
                     .arg(scene.fps > 15 ? "fps=15," : "")
              << "-loop" << "0";
+    if (withSound) {
+        args << "-map" << "0:v" << "-map" << "1:a" << "-c:a" << (m_format == "mp4" ? "aac" : "libopus") << "-b:a"
+             << "160k" << "-filter:a" << QString("volume=%1").arg(std::clamp(audio.value("volume").toDouble(1), 0.0, 4.0))
+             << "-shortest";
+    }
     args << m_partial;
 
     m_process = new QProcess(this);

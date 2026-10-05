@@ -68,6 +68,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
 | `I` | Add an image as a layer |
+| `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF or PNG frames (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
@@ -188,6 +189,8 @@ photo.omotion/
   `brightness` (−1 to 1, default 0), `contrast` and `saturation` (1 is
   unchanged), `blur` and `glow` (in canvas pixels, default 0). A property is
   either a number or animated under `keys`; keys win.
+- **`audio`** is the scene's sound: its `source`, the `offset` in seconds
+  into it where the scene starts, and `volume` (1 as it is).
 - **`particles`** makes a layer of rain, snow and the like instead of an
   image: `kind` (`snow`, `rain`, `dust`, `fireflies`, `leaves`, `embers`),
   `count`, `size`, `speed` (canvas pixels a second), `direction` (degrees,
@@ -250,6 +253,8 @@ omotion pivot photo.omotion pine 1460,780 # P: where it turns, here the foot of 
 omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
 omotion particles photo.omotion snow --count 400
                                           # Shift+I: a particle layer (any setting as --name value)
+omotion audio photo.omotion song.mp3 --offset 12
+                                          # Ctrl+M: the scene's sound, from 12 s in (--none takes it away)
 omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```
 

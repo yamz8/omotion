@@ -59,6 +59,14 @@ QImage cutMask(const Scene &scene, AssetCache &assets, int piece, double t, QTra
 // project; redraws it and its source's holes. Its animation stays.
 bool reshapeCutMask(Scene &scene, AssetCache &assets, int piece, const QImage &mask, QString *error);
 
+// Sound: copies an audio file into the project and makes it the scene's
+// track ("audio" in scene.json: source, offset into it in seconds, volume).
+bool setAudio(Scene &scene, const QString &directory, const QString &path, QString *error);
+bool isAudio(const QString &path);
+// How loud the track is along the scene, as count peaks from 0 to 1, read
+// with ffmpeg; empty when it can't be.
+QList<double> audioPeaks(const QString &file, double offset, double duration, int count);
+
 // Smart select on a layer: the area of colour within tolerance around each
 // canvas point, joined, as a cut shape in canvas pixels. A tolerance below 0
 // picks one for each point (see Select::autoTolerance), and *used says the

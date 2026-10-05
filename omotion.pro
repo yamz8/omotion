@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 dbus network concurrent
+QT += core gui qml quick quickcontrols2 dbus network concurrent multimedia
 
 CONFIG += c++17 release
 TARGET = omotion

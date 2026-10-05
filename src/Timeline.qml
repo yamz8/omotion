@@ -118,6 +118,52 @@ Rectangle {
 
         Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
 
+        // The sound, as its waveform along the scene, to time things to.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+            Layout.fillHeight: false
+            visible: !!backend.audio.source
+            spacing: 0
+            Label {
+                Layout.preferredWidth: timeline.nameWidth
+                leftPadding: 12
+                text: "♪  " + (backend.audio.name || "")
+                color: "#c4c4cc"
+                elide: Text.ElideRight
+            }
+            Canvas {
+                id: wave
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.rightMargin: 14
+                readonly property var peaks: backend.audio.peaks || []
+                onPeaksChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d");
+                    ctx.reset();
+                    const n = peaks.length;
+                    if (!n)
+                        return;
+                    ctx.fillStyle = String(theme.accent);
+                    ctx.globalAlpha = .55;
+                    const w = width / n, mid = height / 2;
+                    for (let i = 0; i < n; ++i) {
+                        const h = Math.max(1, peaks[i] * (height - 4));
+                        ctx.fillRect(i * w, mid - h / 2, Math.max(1, w - .5), h);
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    function scrub(x) { backend.seek(Math.max(0, x) / wave.width * timeline.duration) }
+                    onPressed: function (mouse) { if (backend.playing) backend.togglePlay(); scrub(mouse.x) }
+                    onPositionChanged: function (mouse) { scrub(mouse.x) }
+                    onReleased: timeline.done()
+                }
+            }
+        }
+
         ListView {
             id: rows
             Layout.fillWidth: true
