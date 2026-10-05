@@ -1211,9 +1211,11 @@ QImage AssetCache::mip(const QString &source, double scale, double *factor) {
     Entry *e = entry(source);
     if (!e)
         return {};
-    // How many halvings fit: down while half is still at least scale.
+    // How many halvings fit: down while half is still at least scale. Halved
+    // as the copies are made (QSize rounds), so a request for a copy's own
+    // factor, as look() makes, finds that copy and not the one above it.
     int levels = 0;
-    for (QSize next = e->size; double(next.width() / 2) / e->size.width() >= scale && next.width() > 16 &&
+    for (QSize next = e->size; double((next / 2).width()) / e->size.width() >= scale && next.width() > 16 &&
                                next.height() > 16;
          next /= 2)
         ++levels;
@@ -1325,6 +1327,7 @@ const AssetCache::Look &AssetCache::look(const QString &source, double factor, d
     // Blur and glow are in canvas pixels; here they're in this copy's pixels.
     const double blurPixels = blur / bucket, glowPixels = glow / bucket;
     Look look;
+    look.factor = f;
     look.margin = blurPixels > 0 || glowPixels > 0 ? 3 * (blurRadius(blurPixels) + blurRadius(glowPixels)) + 2 : 0;
     look.image = QImage(base.width() + 2 * look.margin, base.height() + 2 * look.margin,
                         QImage::Format_ARGB32_Premultiplied);
@@ -1767,6 +1770,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
             image = look.image;
             glow = look.glow;
             margin = look.margin;
+            factor = look.factor;
         }
 
         painter.setOpacity(opacity);

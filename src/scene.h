@@ -212,6 +212,9 @@ public:
         QImage image;
         QImage glow;
         int margin = 0;  // Padding added around the image, for blur to spread into.
+        // The size of the copy it was made from, relative to the full image:
+        // what it's drawn back up by.
+        double factor = 1;
     };
     const Look &look(const QString &source, double factor, double brightness, double contrast,
                      double saturation, double blur, double glow, double canvasPerPixel);

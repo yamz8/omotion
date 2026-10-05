@@ -775,6 +775,26 @@ private slots:
         QVERIFY(differences(small, reference) < 200 * 100 / 50);
     }
 
+    void oddSizedLooksDrawSmallInPlace() {
+        // An odd width halves to a rounded size; a look made from that copy
+        // once came out of the full picture and was drawn twice as big.
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {801, 401}), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        double factor = 0, again = 0;
+        assets.mip("assets/p.png", .3, &factor);
+        QVERIFY(factor < 1);
+        assets.mip("assets/p.png", factor, &again);
+        QCOMPARE(again, factor);
+        scene.layers[0].base["scale"] = .3;
+        const QImage plain = renderFrame(scene, assets, 0);
+        scene.layers[0].base["blur"] = .5;
+        const QImage blurred = renderFrame(scene, assets, 0);
+        // A touch of blur moves edges a pixel, not the whole picture.
+        QVERIFY(differences(plain, blurred) < plain.width() * plain.height() / 50);
+    }
+
     void duplicatesDontInheritCuts() {
         QTemporaryDir dir;
         Backend backend;
