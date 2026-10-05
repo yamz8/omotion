@@ -1,6 +1,40 @@
 # Roadmap
 
-## Realism (next)
+## The world (now)
+
+The goal: load a picture and it becomes a world you can control and animate,
+with its ground, environment and objects, filmed by a camera you can move.
+Each stage below has been tried on this laptop (i3-10110U, 7.6 GB, Intel
+UHD), with the timings measured there.
+
+1. **World from the picture.** MoGe-2 ViT-S (MIT, ONNX, 141 MB, 4 s) gives
+   every pixel's position in meters, the lens (focal length) and the ground
+   plane, and so the camera's height and tilt. The environment becomes 3D
+   meshes in layers: the background (with the AI fill behind cut objects,
+   depth filled too) and each object on its own, so a moving camera sees
+   real parallax without stretching. Rendered with Qt Quick 3D, in the
+   window and headless for export (QQuickRenderControl; Intel works).
+2. **Objects and camera in meters.** Each object has a position and turn in
+   the world, the camera a position, turn and lens, all keyframed and
+   linkable as today. The flat z/perspective of 0.3 becomes a special case.
+3. **Objects as 3D shapes.** TripoSR (MIT, ONNX int8, 430 MB, about 20 s an
+   object on this CPU) gives a rough shape; the painting is projected onto
+   it from the original camera, so it looks exactly like the picture from
+   there and keeps a believable volume when it turns. Optional cloud
+   models (Tripo has free credits) for better hidden sides.
+4. **Physics.** The ground from the depth as a collider, gravity in m/s²,
+   bodies and vehicles (Qt Quick 3D Physics, PhysX). Taking off, landing
+   and touching become events other things react to.
+5. **Contact and light.** Shadows on the real ground, dust emitted where
+   wheels touch (Qt Quick 3D particles), motion blur from movement, haze
+   with distance, light wrap and grain.
+6. **Directing it.** Orbit and fly the camera in the window, move objects
+   with handles, and the same in scene.json and the CLI for agents
+   ("drive along the road at 70 km/h from 80 m away").
+
+The 2D engine stays: scenes without a world work as they do.
+
+## Realism (folded into the world)
 
 The Quattro demo (a car flying into the wallpaper) looked like a sticker
 moving over a photo: the wheels didn't turn, the dust didn't react, the
