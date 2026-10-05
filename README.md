@@ -1,9 +1,9 @@
 # omotion
 
-Cut a picture into layers and bring it to life. Open one image, trace around
-the parts that should move, and each one becomes its own layer that you can
-move, turn, scale, stretch and fade with keyframes. Export to MP4, WebM, GIF,
-or a folder of PNG frames.
+Cut a picture into layers and bring it to life. Open one image, split it
+into layers by depth or pick out the parts that should move, and each one
+becomes its own layer that you can move, turn, scale, stretch, fade and
+restyle with keyframes. Export to MP4, WebM, GIF, or a folder of PNG frames.
 
 The whole animation is a plain `scene.json` in the project folder. omotion
 saves every edit there as you make it, and when anything else changes that
@@ -20,27 +20,36 @@ omotion my-animation/      # opens a project folder, or makes one from a folder 
 
 Your original image is copied into the project and never touched.
 
-1. Press **W** and click a part of the picture (an arm, a cloud, a logo):
-   smart select takes the area of similar colour around the click, picking
-   how similar by itself (the mouse wheel or **T** changes it, Shift+click
-   adds more). Or press **C** and drag around the part, or click around it
-   point by point. Drag the points to adjust the
-   shape, and press **F** to soften its edge. **Enter** makes the part its
-   own layer, and paints the hole it leaves from the colours around it, so
-   the piece can move away without leaving a gap (**G** leaves the hole
-   empty; **Shift+Enter** copies the part out instead). **R** reshapes a
-   piece later, keeping its animation.
-2. Press **P** and click where the new layer should turn, like a shoulder.
-3. Press **K** to set a keyframe, step ahead with **.**, change the layer
+**The quick way:** press **D** to split the picture into layers by depth,
+then **A** to give it a slow, looping camera move where near things slide
+past far ones. **Space** plays it, **Ctrl+E** exports it. (D and A use the
+[AI](#ai); omotion offers to set it up the first time.)
+
+**By hand:**
+
+1. Press **W** and click a part of the picture (an arm, a cloud, a logo);
+   the AI selects the thing you clicked. Shift+click takes more of it,
+   right-click leaves a part out, and **T** tries its other guesses. **M**
+   switches to colour select, which takes the area of similar colour around
+   the click and needs no AI. Or press **C** and drag around the part, or
+   click around it point by point. Drag the points to adjust the shape, and
+   press **F** to soften its edge.
+2. **Enter** makes the part its own layer, and paints the hole it leaves
+   from the colours around it, so it can move away without leaving a gap
+   (**G** leaves the hole empty; **Shift+Enter** copies the part out
+   instead). **R** reshapes a piece later, keeping its animation.
+3. Press **P** and click where the new layer should turn, like a shoulder.
+4. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
-4. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
+5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
    to change how they ease into the next one. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
-5. Give a layer a look in the inspector: brightness, contrast, saturation,
+6. Give a layer a look in the inspector: brightness, contrast, saturation,
    blur, glow, and a blend (**B**). They animate like everything else. A
    glowing light is a soft copy-cut of it (**Shift+Enter**), set to *add*,
    with the contrast up, the brightness down and some glow.
-6. **Ctrl+E** exports into `renders/` in the project folder.
+7. **Ctrl+E** exports into `renders/` in the project folder, at full size or
+   half (**H** in the export menu). GIFs play at 15 fps to stay small.
 
 ## Shortcuts
 
@@ -48,7 +57,7 @@ Your original image is copied into the project and never touched.
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
 | `I` | Add an image as a layer |
-| `Ctrl+E` | Export MP4, WebM, GIF or PNG frames |
+| `Ctrl+E` | Export MP4, WebM, GIF or PNG frames (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
 | `Space` | Play / pause |
 | `,` `.` | Previous / next frame |
@@ -187,7 +196,8 @@ file alone until it parses again.
 The command line uses the same renderer as the window, without opening one:
 
 ```sh
-omotion render photo.omotion out.mp4      # or .webm, .gif, or a folder for PNG frames
+omotion render photo.omotion out.mp4      # or .webm, .gif, or a folder for PNG frames;
+                                          # --scale 0.5 for half size
 omotion frame photo.omotion 1.5 f.png     # one frame, to check a moment
 omotion cut photo.omotion photo 0,640 900,800 1920,455 1920,1080 0,1080 --copy --soft 3 --name foreground
                                           # what the C tool does, with points in canvas pixels
@@ -212,4 +222,6 @@ bin/install    # builds the Arch package and installs it, so it's in the app lau
 ```
 
 It follows the Omarchy theme's accent color live, and needs `ffmpeg` to
-export video.
+export video. The AI is built in when ONNX Runtime's headers are there
+(`onnxruntime-cpu`); the library itself is only loaded when an AI feature is
+used, so the same build runs without it.
