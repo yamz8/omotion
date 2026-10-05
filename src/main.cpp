@@ -30,11 +30,12 @@ const char *Usage = R"(Usage:
                                          at the canvas size or scaled (0.5 for half)
   omotion frame <project> <seconds> <output.png>
                                          Render one frame as a PNG
-  omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--no-fill] [--name <name>] [--soft <px>] [--at <seconds>]
+  omotion cut <project> <layer> <x,y> <x,y> <x,y>... [--copy] [--fill ai|smooth|none] [--name <name>] [--soft <px>] [--at <seconds>]
   omotion cut <project> <layer> --pick <x,y> [--pick <x,y>]... [--tolerance <0-160>, picked when left out] [same options]
                                          Cut the part of a layer inside a polygon (canvas
                                          pixels) out into a new layer, as the C tool does;
-                                         the hole it leaves is filled unless --no-fill.
+                                         the hole it leaves is filled, by the AI where it's
+                                         set up, unless --fill smooth or --fill none.
                                          --pick cuts the area of similar colour around a
                                          point instead, as the W tool does
   omotion cut <project> <layer> --ai-pick <x,y>... [--ai-exclude <x,y>]... [--choice <n>] [same options]
@@ -53,7 +54,7 @@ const char *Usage = R"(Usage:
                                          The scene as JSON, with each layer's place on the canvas
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
-                                         models (about 145 MB, checked against their hashes)
+                                         models (about 350 MB, checked against their hashes)
 
 A project is a folder holding scene.json. Opening an image makes
 "<image>.omotion" beside it; opening a folder of images makes a scene.json
@@ -106,6 +107,7 @@ int command(const QStringList &args) {
         double t = 0;
         double feather = 0;
         bool fill = true;
+        bool aiFill = Ai::instance().canInpaint();
         int tolerance = -1;
         QList<QPointF> picks, aiTake, aiLeave;
         int choice = 0;
@@ -127,6 +129,14 @@ int command(const QStringList &args) {
                 punch = false;
             } else if (arg == "--no-fill") {
                 fill = false;
+            } else if (arg == "--fill" && i + 1 < args.size()) {
+                const QString how = args.at(++i);
+                if (how != "ai" && how != "smooth" && how != "none")
+                    return fail("--fill is ai, smooth or none.");
+                fill = how != "none";
+                aiFill = how == "ai";
+                if (aiFill && !Ai::instance().canInpaint())
+                    return fail("The AI's fill isn't set up here; omotion models --download fetches it.");
             } else if (arg == "--tolerance" && i + 1 < args.size()) {
                 tolerance = args.at(++i).toInt();
             } else if (arg == "--pick" && i + 1 < args.size()) {
@@ -167,7 +177,7 @@ int command(const QStringList &args) {
             if (regions > 1)
                 QTextStream(stderr) << "omotion: only areas that touch make one shape; cutting the biggest.\n";
         }
-        const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name, feather, fill);
+        const int piece = Project::cutOut(edited, assets, layer, polygon, t, punch, &error, name, feather, fill, aiFill);
         if (piece < 0)
             return fail(error);
         if (!Project::save(directory, edited, &error))

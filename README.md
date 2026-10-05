@@ -39,10 +39,9 @@ layer it stands in, so it rides the camera move with its surroundings, and
    the click and needs no AI. Or press **C** and drag around the part, or
    click around it point by point. Drag the points to adjust the shape, and
    press **F** to soften its edge.
-2. **Enter** makes the part its own layer, and paints the hole it leaves
-   from the colours around it, so it can move away without leaving a gap
-   (**G** leaves the hole empty; **Shift+Enter** copies the part out
-   instead). **R** reshapes a piece later, keeping its animation.
+2. **Enter** makes the part its own layer, and the AI paints in what was
+   behind it, so it can move away without leaving a gap (**G** switches to
+   a smooth fill, or none; **Shift+Enter** copies the part out instead). **R** reshapes a piece later, keeping its animation.
 3. Press **P** and click where the new layer should turn, like a shoulder,
    or the foot of a tree. **N** gives it a ready-made motion: sway, float,
    pulse, bounce or spin, which fit the scene so they loop with it, or a
@@ -93,7 +92,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `C` | Cut tool: drag around a piece or click points, `Enter` cuts it out, `Shift+Enter` copies it, `Backspace` drops the last point |
 | Drag a point | Move it; click an edge to add a point, right-click a point to remove it |
 | `F` | Soft edge for the cut: 0, 1, 3, 8 or 20 px |
-| `G` | Fill the hole the cut leaves from the colours around it: on (the default) / off |
+| `G` | How the hole a cut leaves is filled: AI (the default, where it's set up), smooth, or not at all |
 | `R` | Reshape the selected piece; its animation and pivot stay |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
@@ -111,7 +110,7 @@ starts animating just that property at the playhead.
 
 ## AI
 
-Two things are better with a little AI, which runs on your own computer:
+Three things are better with a little AI, which runs on your own computer:
 
 - **D splits a picture into layers by depth**: near, middle, far, and what's
   left as the background. Each layer carries a filled-in background behind
@@ -121,15 +120,21 @@ Two things are better with a little AI, which runs on your own computer:
 - **W selects things with AI**: click the thing, Shift+click to add more of
   it, right-click to leave a part out; **T** steps through its guesses (a
   part, the thing, the whole). **M** switches to colour select.
+- **Cuts are filled in with AI**: what's behind a piece you cut out is
+  painted in to match its surroundings (the hillside behind a tree, the
+  slope behind a deer), not just smoothed over. **G** in the cut tools
+  switches between AI, smooth and no fill. It takes a few seconds a cut,
+  in the background; `OMOTION_FILL=smooth` makes smooth the default.
 
-It needs ONNX Runtime (`omarchy-pkg-add onnxruntime-cpu`) and two models,
-which omotion offers to download the first time (about 145 MB, checked
+It needs ONNX Runtime (`omarchy-pkg-add onnxruntime-cpu`) and three models,
+which omotion offers to download the first time (about 350 MB, checked
 against known hashes, kept in `~/.local/share/omotion/models`):
 
 | Model | For | License |
 | --- | --- | --- |
 | [Depth Anything V2 Small](https://huggingface.co/onnx-community/depth-anything-v2-small) | depth | Apache-2.0 |
 | [MobileSAM](https://huggingface.co/Acly/MobileSAM) | selecting | MIT |
+| [LaMa](https://huggingface.co/Carve/LaMa-ONNX) | filling | Apache-2.0 |
 
 Without them, everything else works as before, and omotion says what's
 missing when you ask for an AI feature.
@@ -188,7 +193,8 @@ photo.omotion/
 - **`cut`** on a piece remembers how it was made: the layer it came `from`,
   its `polygon` (or for depth layers, a `mask` image placed at
   `maskOrigin`) and `feather` in that layer's image pixels, whether it
-  `punch`ed a hole and whether that hole is `fill`ed, its `order` among
+  `punch`ed a hole, whether that hole is `fill`ed and how (`fillWith`: `ai`
+  or `smooth`), its `order` among
   that layer's pieces, and for depth layers its `depth` (0 far, 1 near),
   which **A** moves it by. **`uncut`**
   on a layer that has holes is its image before any cuts. omotion redraws

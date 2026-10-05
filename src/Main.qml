@@ -392,17 +392,17 @@ ApplicationWindow {
                               ? "AI select: click a thing on " + (backend.values.name || "the layer") + " (Shift+click adds, right-click leaves out)"
                                 + (backend.aiChoices > 1 ? "   ·   T other guesses (" + (backend.aiChoice + 1) + " of " + backend.aiChoices + ")" : "")
                                 + "   ·   M colour select"
-                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off")
+                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + backend.fillMode
                                 + "   ·   Enter cut out   ·   Shift+Enter copy out   ·   Esc cancel"
                               : backend.tool === "wand"
                               ? "Colour select: click a part of " + (backend.values.name || "the layer") + " (Shift+click adds)   ·   M AI select   ·   wheel or T: tolerance "
                                 + (backend.tolerance < 0 ? (backend.cutPoints.length ? "auto, " + backend.usedTolerance : "auto") : backend.tolerance)
-                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off")
+                                + "\nC fine-tune the points   ·   F soft edge: " + backend.feather + " px   ·   G fill the hole: " + backend.fillMode
                                 + "   ·   Enter cut out   ·   Shift+Enter copy out   ·   Esc cancel"
                               : (backend.reshaping !== ""
                                  ? "Reshape " + backend.reshaping + ": drag points, click an edge to add one, right-click one to remove it"
                                  : "Cut: drag around the piece, or click point by point (" + backend.cutPoints.length + " so far)")
-                                + "\nF soft edge: " + backend.feather + " px   ·   G fill the hole: " + (backend.fill ? "on" : "off") + "   ·   "
+                                + "\nF soft edge: " + backend.feather + " px   ·   G fill the hole: " + backend.fillMode + "   ·   "
                                 + (backend.reshaping !== "" ? "Enter apply" : "Enter cut out   ·   Shift+Enter copy out")
                                 + "   ·   Backspace drops the last point   ·   Esc cancel"
                     }
@@ -669,8 +669,9 @@ ApplicationWindow {
                     wrapMode: Text.Wrap
                     color: win.muted
                     text: backend.aiPrompt === "download"
-                          ? "omotion's AI finds depth (Depth Anything V2 Small, Apache-2.0) and selects things (MobileSAM, MIT). "
-                            + "Their models are about 145 MB, from Hugging Face, checked against known hashes, and kept in ~/.local/share/omotion/models. "
+                          ? "omotion's AI finds depth (Depth Anything V2 Small, Apache-2.0), selects things (MobileSAM, MIT), "
+                            + "and paints in behind what you cut out (LaMa, Apache-2.0). "
+                            + "Their models are about 350 MB, from Hugging Face, checked against known hashes, and kept in ~/.local/share/omotion/models. "
                             + "Everything runs on this computer."
                           : "omotion's AI runs on ONNX Runtime (onnxruntime-cpu, from the Arch repositories). "
                             + "It installs in a terminal, where you can enter your password."

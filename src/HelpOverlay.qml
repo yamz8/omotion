@@ -31,7 +31,7 @@ Rectangle {
                 ["M", "In W: switch AI / colour select"]]],
         ["Break apart", [["W, M", "Colour select: click a part (Shift+click adds)"], ["Wheel / T", "Its tolerance (it picks one per click)"],
                          ["C", "Cut tool: drag around a piece, or click points"], ["Drag a point", "Move it (click an edge to add one)"],
-                         ["Right-click", "Remove a point"], ["F", "Soft edge: 0, 1, 3, 8, 20 px"], ["G", "Fill the hole it leaves: on / off"],
+                         ["Right-click", "Remove a point"], ["F", "Soft edge: 0, 1, 3, 8, 20 px"], ["G", "Fill the hole it leaves: AI, smooth, or none"],
                          ["Enter", "Cut it out, leaving a hole"], ["Shift+Enter", "Copy it out, leaving the source whole"],
                          ["R", "Reshape the selected piece"], ["P", "Pivot tool: click where the layer turns"],
                          ["Esc", "Cancel / deselect"]]]

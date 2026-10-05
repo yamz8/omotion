@@ -44,6 +44,13 @@ public:
     // the size the model worked at (around 518 pixels on the short side).
     QImage depth(const QImage &image, QString *error);
 
+    // The picture with the masked part (Alpha8, 255 to fill, same size)
+    // painted in to match its surroundings. Worked at 512 pixels square, so
+    // hand it the area around the hole rather than the whole picture.
+    QImage inpaint(const QImage &image, const QImage &mask, QString *error);
+    // Whether inpainting can run here (its model is downloaded).
+    bool canInpaint();
+
     // Masks for the thing under the points (image pixels; label 1 to take,
     // 0 to leave out), as Alpha8 images the size of image, best first. The
     // picture's analysis is kept under key, so the next click is quick.

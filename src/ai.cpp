@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QHash>
 #include <QEventLoop>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -46,6 +47,8 @@ const QList<Ai::Model> &Ai::models() {
          28157093, "580f5fb648ea1062c0aabc26217aed56921985f03f0cbbd852bba81d760cc749"},
         {"mobile-sam-decoder.onnx", "https://huggingface.co/Acly/MobileSAM/resolve/0d3b403339b4674a82493d5e97964dd78089ddc8/sam_mask_decoder_multi.onnx",
          16496559, "8976b90a87ba50a6a72217a5ff994f7d25ce16f2229fcc1ed259e1294c622ffe"},
+        {"lama.onnx", "https://huggingface.co/Carve/LaMa-ONNX/resolve/c3c0c9e468934d62e79c329e35d82dd09ff8c444/lama_fp32.onnx",
+         208044816, "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6"},
     };
     return list;
 }
@@ -211,6 +214,11 @@ QList<QImage> Ai::segment(const QImage &, const QString &, const QList<QPointF> 
     load(error);
     return {};
 }
+QImage Ai::inpaint(const QImage &, const QImage &, QString *error) {
+    load(error);
+    return {};
+}
+bool Ai::canInpaint() { return false; }
 
 #else
 
@@ -223,6 +231,12 @@ struct Ai::Runtime {
     OrtSession *depth = nullptr;
     OrtSession *encoder = nullptr;
     OrtSession *decoder = nullptr;
+    OrtSession *inpainter = nullptr;
+
+    // Fills already worked out, by their input, so redrawing a layer's
+    // pieces doesn't paint the same hole again.
+    QHash<QByteArray, QImage> fills;
+    QList<QByteArray> fillOrder;
 
     // The last pictures analysed for selecting, so further clicks only decode.
     struct Encoded {
@@ -235,7 +249,7 @@ struct Ai::Runtime {
     ~Runtime() {
         if (!api)
             return;
-        for (OrtSession *session : {depth, encoder, decoder})
+        for (OrtSession *session : {depth, encoder, decoder, inpainter})
             if (session)
                 api->ReleaseSession(session);
         if (memory)
@@ -434,6 +448,110 @@ QImage Ai::depth(const QImage &picture, QString *error) {
         *error = "The depth model gave back something unexpected.";
     }
     rt.api->ReleaseValue(outputs[0]);
+    return result;
+}
+
+bool Ai::canInpaint() {
+    QMutexLocker lock(&m_mutex);
+    if (!load(nullptr))
+        return false;
+    const QFileInfo model(QDir(modelDirectory()).filePath("lama.onnx"));
+    return model.exists() && model.size() == models().last().size;
+}
+
+QImage Ai::inpaint(const QImage &picture, const QImage &holes, QString *error) {
+    QMutexLocker lock(&m_mutex);
+    if (!load(error))
+        return {};
+    Runtime &rt = *m_runtime;
+    const QImage image = picture.convertToFormat(QImage::Format_RGB888);
+    const QImage mask = holes.convertToFormat(QImage::Format_Alpha8);
+    if (image.isNull() || mask.size() != image.size()) {
+        if (error)
+            *error = "Nothing to fill.";
+        return {};
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha1);
+    for (int y = 0; y < image.height(); ++y) {
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(image.constScanLine(y)), image.width() * 3));
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(mask.constScanLine(y)), mask.width()));
+    }
+    const QByteArray key = hash.result();
+    if (rt.fills.contains(key))
+        return rt.fills.value(key);
+    // Kept on disk too, so redrawing a layer's pieces later (another cut, a
+    // reshape, the command line) doesn't paint the same hole twice.
+    const QString cacheDirectory = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/omotion/fills";
+    const QString cached = QDir(cacheDirectory).filePath(QString::fromLatin1(key.toHex()) + ".png");
+    {
+        const QImage kept(cached);
+        if (kept.size() == image.size()) {
+            rt.fills.insert(key, kept.convertToFormat(QImage::Format_RGB888));
+            rt.fillOrder.append(key);
+            return rt.fills.value(key);
+        }
+    }
+    OrtSession *session = rt.session(rt.inpainter, "lama.onnx", error);
+    if (!session)
+        return {};
+
+    // The model works at 512 square, with what's under the hole blanked so
+    // none of what was cut out shows through.
+    constexpr int Side = 512;
+    const QImage small = image.scaled(Side, Side, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    const QImage smallMask = mask.scaled(Side, Side, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    std::vector<float> pixels(size_t(3) * Side * Side), hole(size_t(Side) * Side);
+    for (int y = 0; y < Side; ++y) {
+        const uchar *line = small.constScanLine(y);
+        const uchar *m = smallMask.constScanLine(y);
+        for (int x = 0; x < Side; ++x) {
+            const bool masked = m[x] > 0;
+            hole[size_t(y) * Side + x] = masked ? 1.f : 0.f;
+            for (int c = 0; c < 3; ++c)
+                pixels[size_t(c) * Side * Side + size_t(y) * Side + x] = masked ? 0.f : line[x * 3 + c] / 255.f;
+        }
+    }
+    OrtValue *imageValue = rt.tensor(pixels, {1, 3, Side, Side}, error);
+    OrtValue *maskValue = rt.tensor(hole, {1, 1, Side, Side}, error);
+    if (!imageValue || !maskValue) {
+        for (OrtValue *value : {imageValue, maskValue})
+            if (value)
+                rt.api->ReleaseValue(value);
+        return {};
+    }
+    std::vector<OrtValue *> outputs;
+    if (!rt.run(session, {"image", "mask"}, {imageValue, maskValue}, {"output"}, outputs, error))
+        return {};
+    const float *filled = rt.data(outputs[0]);
+    const std::vector<int64_t> dims = rt.shape(outputs[0]);
+    QImage result;
+    if (filled && dims == std::vector<int64_t>{1, 3, Side, Side}) {
+        QImage out(Side, Side, QImage::Format_RGB888);
+        for (int y = 0; y < Side; ++y) {
+            uchar *line = out.scanLine(y);
+            for (int x = 0; x < Side; ++x)
+                for (int c = 0; c < 3; ++c)
+                    line[x * 3 + c] = uchar(std::clamp(filled[size_t(c) * Side * Side + size_t(y) * Side + x], 0.f, 255.f));
+        }
+        result = out.scaled(image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    } else if (error) {
+        *error = "The fill model gave back something unexpected.";
+    }
+    rt.api->ReleaseValue(outputs[0]);
+    if (!result.isNull()) {
+        if (QDir().mkpath(cacheDirectory)) {
+            result.save(cached, "PNG");
+            // A few hundred fills are plenty; the oldest go.
+            QDir dir(cacheDirectory);
+            const QFileInfoList files = dir.entryInfoList({"*.png"}, QDir::Files, QDir::Time);
+            for (int i = 300; i < files.size(); ++i)
+                QFile::remove(files.at(i).absoluteFilePath());
+        }
+        rt.fills.insert(key, result);
+        rt.fillOrder.append(key);
+        while (rt.fillOrder.size() > 16)
+            rt.fills.remove(rt.fillOrder.takeFirst());
+    }
     return result;
 }
 

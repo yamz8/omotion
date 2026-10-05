@@ -722,7 +722,7 @@ void Backend::setTool(const QString &tool) {
     if (!keepShape) {
         m_cut.clear();
         m_reshaping.clear();
-        m_fill = true;
+        m_fill = defaultFill();
     }
     emit toolChanged();
 }
@@ -1030,7 +1030,7 @@ void Backend::startReshape() {
         return setNotice(QString("%1 wasn't cut out here, so it has no shape to change. Press C to cut from it.").arg(layer.name));
     }
     double feather = 0;
-    bool fill = false;
+    int fill = 0;
     const QPolygonF outline = Project::cutOutline(m_scene, m_assets, m_selected, m_time, &feather, &fill);
     if (outline.isEmpty())
         return setError(QString("The layer %1 was cut from is gone, so it can't be reshaped.")
@@ -1045,8 +1045,22 @@ void Backend::startReshape() {
     emit toolChanged();
 }
 
+int Backend::defaultFill() {
+    // OMOTION_FILL=smooth (or none) skips the AI's fill, which takes seconds a cut.
+    const QByteArray chosen = qgetenv("OMOTION_FILL");
+    if (chosen == "none")
+        return 0;
+    if (chosen == "smooth")
+        return 1;
+    return Ai::instance().canInpaint() ? 2 : 1;
+}
+
 void Backend::toggleFill() {
-    m_fill = !m_fill;
+    // AI, smooth, off; without the AI, just smooth and off.
+    if (m_fill < 0)
+        m_fill = defaultFill();
+    const bool ai = Ai::instance().canInpaint();
+    m_fill = m_fill == 2 ? 1 : m_fill == 1 ? 0 : (ai ? 2 : 1);
     emit toolChanged();
 }
 
@@ -1131,15 +1145,15 @@ void Backend::finishCut(bool punch) {
     const QString reshaping = m_reshaping;
     const QPolygonF shape(m_cut);
     const double t = m_time, feather = m_feather;
-    const bool fill = m_fill;
+    const int fill = m_fill < 0 ? defaultFill() : m_fill;
     const int selected = m_selected;
     // The cut itself: a new piece, or a piece given a new shape. Returns the
     // piece's index, or -1 with the reason in error.
     auto cut = [reshaping, shape, t, feather, fill, selected, punch](Scene &scene, AssetCache &assets, QString &error) {
         if (reshaping.isEmpty())
-            return Project::cutOut(scene, assets, selected, shape, t, punch, &error, {}, feather, fill);
+            return Project::cutOut(scene, assets, selected, shape, t, punch, &error, {}, feather, fill > 0, fill == 2);
         const int index = scene.indexOf(reshaping);
-        return Project::reshapeCut(scene, assets, index, shape, t, feather, &error, fill ? 1 : 0) ? index : -1;
+        return Project::reshapeCut(scene, assets, index, shape, t, feather, &error, fill) ? index : -1;
     };
     auto apply = [this, reshaping](const Scene &scene, int index, const QString &error) {
         if (index < 0)
@@ -1168,7 +1182,8 @@ void Backend::finishCut(bool punch) {
                          : m_scene.indexOf(m_scene.layers.value(m_scene.indexOf(reshaping)).raw.value("cut").toObject()
                                                .value("from").toString());
     const QSizeF size = from >= 0 ? m_assets.size(m_scene.layers.at(from).source) : QSizeF();
-    if (size.width() * size.height() <= 4e6) {
+    // The AI's fill takes seconds whatever the size.
+    if (size.width() * size.height() <= 4e6 && fill != 2) {
         Scene scene = m_scene;
         QString error;
         const int index = cut(scene, m_assets, error);
@@ -1178,7 +1193,8 @@ void Backend::finishCut(bool punch) {
     const QByteArray started = Project::serialize(m_scene);
     auto result = std::make_shared<std::tuple<Scene, int, QString>>(m_scene, -1, QString());
     const QString directory = m_directory;
-    setBusy(reshaping.isEmpty() ? "Cutting…" : "Reshaping…");
+    setBusy(fill == 2 ? (reshaping.isEmpty() ? "Cutting, and painting in behind…" : "Reshaping, and painting in behind…")
+                      : (reshaping.isEmpty() ? "Cutting…" : "Reshaping…"));
     m_job.disconnect(this);
     connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, started, apply] {
         setBusy({});

@@ -258,7 +258,61 @@ QImage maskFor(const QPolygonF &polygon, double feather, const QRect &area) {
 // averaged down a pyramid until they've flowed in from every side, then
 // pulled back up into the gaps, each level filling what the finer one
 // couldn't. Big holes are worked out smaller, as the fill is smooth anyway.
-void fillHole(QImage &image, const QImage &before, const QRect &area) {
+// Lays fill colours into the hole: each hole pixel gets back the alpha it
+// had, its colour mixing what's left of the original with the fill.
+template <typename FillAt>
+void layFill(QImage &image, const QImage &before, const QRect &area, const QRect &hole, FillAt fillAt) {
+    for (int y = hole.top(); y <= hole.bottom(); ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        const QRgb *was = reinterpret_cast<const QRgb *>(before.constScanLine(y - area.y()));
+        for (int x = hole.left(); x <= hole.right(); ++x) {
+            const QRgb old = was[x - area.x()];
+            const int a = qAlpha(old), h = qAlpha(line[x]);
+            if (h >= a)
+                continue;
+            const QColor filled = fillAt(x, y);
+            const int fill[3] = {filled.red(), filled.green(), filled.blue()};
+            const int original[3] = {qRed(old), qGreen(old), qBlue(old)};
+            int out[3];
+            for (int k = 0; k < 3; ++k)
+                out[k] = int(std::lround((h * original[k] + (a - h) * fill[k]) / double(a)));
+            line[x] = qRgba(out[0], out[1], out[2], a);
+        }
+    }
+}
+
+// The AI's fill: the area around the hole, about three times its size, is
+// handed to LaMa with the hole (grown a little, so no edge of what was cut
+// out is left to copy) blanked. False when the AI can't, to fall back.
+bool fillHoleWithAi(QImage &image, const QImage &before, const QRect &area, const QRect &hole) {
+    if (!Ai::instance().canInpaint())
+        return false;
+    const int side = std::min({std::max({hole.width(), hole.height()}) * 3, image.width(), image.height()});
+    QRect crop(0, 0, std::max(side, std::min({64, image.width(), image.height()})),
+               std::max(side, std::min({64, image.width(), image.height()})));
+    crop.moveCenter(hole.center());
+    crop.moveLeft(std::clamp(crop.left(), 0, image.width() - crop.width()));
+    crop.moveTop(std::clamp(crop.top(), 0, image.height() - crop.height()));
+    QImage mask(crop.size(), QImage::Format_Alpha8);
+    mask.fill(0);
+    for (int y = hole.top(); y <= hole.bottom(); ++y) {
+        const QRgb *now = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        const QRgb *was = reinterpret_cast<const QRgb *>(before.constScanLine(y - area.y()));
+        for (int x = hole.left(); x <= hole.right(); ++x)
+            if (crop.contains(x, y) && qAlpha(now[x]) < qAlpha(was[x - area.x()]))
+                mask.scanLine(y - crop.y())[x - crop.x()] = 255;
+    }
+    Select::grow(mask, std::max(2, crop.width() / 170));
+    QImage filled = Ai::instance().inpaint(image.copy(crop), mask, nullptr);
+    if (filled.isNull())
+        return false;
+    filled = filled.convertToFormat(QImage::Format_RGB32);
+    layFill(image, before, area, hole & crop, [&](int x, int y) { return filled.pixelColor(x - crop.x(), y - crop.y()); });
+    // Any of the hole outside the crop (a very long hole) gets the smooth fill.
+    return (hole & crop) == hole;
+}
+
+void fillHole(QImage &image, const QImage &before, const QRect &area, bool ai) {
     QRect hole;
     for (int y = 0; y < area.height(); ++y) {
         const QRgb *now = reinterpret_cast<const QRgb *>(image.constScanLine(area.y() + y)) + area.x();
@@ -268,6 +322,8 @@ void fillHole(QImage &image, const QImage &before, const QRect &area) {
                 hole |= QRect(area.x() + x, area.y() + y, 1, 1);
     }
     if (hole.isEmpty())
+        return;
+    if (ai && fillHoleWithAi(image, before, area, hole))
         return;
 
     const int margin = std::max(16, std::max(hole.width(), hole.height()) / 2);
@@ -368,35 +424,21 @@ void fillHole(QImage &image, const QImage &before, const QRect &area) {
         }
     }
 
-    // Lay the fill into the hole, bringing the alpha back to what it was.
+    // Lay the fill into the hole, read smoothly from the finest level.
     const Level &fill = levels[0];
-    for (int y = hole.top(); y <= hole.bottom(); ++y) {
-        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
-        const QRgb *was = reinterpret_cast<const QRgb *>(before.constScanLine(y - area.y()));
+    layFill(image, before, area, hole, [&](int x, int y) {
         const float wy = std::clamp((y - crop.y() + .5f) * float(s) - .5f, 0.f, float(fill.h - 1));
-        const int y0 = int(wy), y1 = std::min(y0 + 1, fill.h - 1);
-        const float fy = wy - y0;
-        for (int x = hole.left(); x <= hole.right(); ++x) {
-            if (!area.contains(x, y))
-                continue;
-            const QRgb old = was[x - area.x()];
-            const int a = qAlpha(old), h = qAlpha(line[x]);
-            if (h >= a)
-                continue;
-            const float wx = std::clamp((x - crop.x() + .5f) * float(s) - .5f, 0.f, float(fill.w - 1));
-            const int x0 = int(wx), x1 = std::min(x0 + 1, fill.w - 1);
-            const float fx = wx - x0;
-            int out[3];
-            const int original[3] = {qRed(old), qGreen(old), qBlue(old)};
-            for (int k = 0; k < 3; ++k) {
-                const float top = fill.c[3 * (y0 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y0 * fill.w + x1) + k] * fx;
-                const float bottom = fill.c[3 * (y1 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y1 * fill.w + x1) + k] * fx;
-                const float filled = std::clamp((top * (1 - fy) + bottom * fy) * 255.f, 0.f, 255.f);
-                out[k] = int(std::lround((h * original[k] + (a - h) * filled) / a));
-            }
-            line[x] = qRgba(out[0], out[1], out[2], a);
+        const float wx = std::clamp((x - crop.x() + .5f) * float(s) - .5f, 0.f, float(fill.w - 1));
+        const int y0 = int(wy), y1 = std::min(y0 + 1, fill.h - 1), x0 = int(wx), x1 = std::min(x0 + 1, fill.w - 1);
+        const float fy = wy - y0, fx = wx - x0;
+        int rgb[3];
+        for (int k = 0; k < 3; ++k) {
+            const float top = fill.c[3 * (y0 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y0 * fill.w + x1) + k] * fx;
+            const float bottom = fill.c[3 * (y1 * fill.w + x0) + k] * (1 - fx) + fill.c[3 * (y1 * fill.w + x1) + k] * fx;
+            rgb[k] = int(std::clamp((top * (1 - fy) + bottom * fy) * 255.f, 0.f, 255.f) + .5f);
         }
-    }
+        return QColor(rgb[0], rgb[1], rgb[2]);
+    });
 }
 
 // Pieces cut from a layer, oldest first.
@@ -512,7 +554,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         if (!opaque)
             return fail(QString("The shape of %1 only covers transparent pixels.").arg(piece.name));
         if (fill)
-            fillHole(remaining, before, area);
+            fillHole(remaining, before, area, cut.value("fillWith").toString() == "ai");
 
         // A reshaped piece keeps its pivot on the same spot of the picture,
         // so its position and every keyframe still mean what they did.
@@ -562,7 +604,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
 }
 
 int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon, double t,
-           bool punch, QString *error, const QString &wantedName, double feather, bool fill) {
+           bool punch, QString *error, const QString &wantedName, double feather, bool fill, bool aiFill) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -598,6 +640,7 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
                                    {"feather", std::round(feather / pixelScale(transform) * 100) / 100},
                                    {"punch", punch},
                                    {"fill", punch && fill},
+                                   {"fillWith", punch && fill && aiFill ? "ai" : "smooth"},
                                    {"order", order}};
 
     Scene edited = scene;
@@ -634,8 +677,10 @@ bool reshapeCut(Scene &scene, AssetCache &assets, int index, const QPolygonF &po
 
     cut["polygon"] = polygonJson(inverse.map(polygon));
     cut["feather"] = std::round(feather / pixelScale(transform) * 100) / 100;
-    if (fill >= 0)
+    if (fill >= 0) {
         cut["fill"] = fill > 0 && cut.value("punch").toBool(true);
+        cut["fillWith"] = fill == 2 ? "ai" : "smooth";
+    }
     Scene edited = scene;
     edited.layers[index].raw["cut"] = cut;
     if (!rebuildCuts(edited, assets, from, error))
@@ -649,7 +694,7 @@ bool isCut(const Scene &scene, int index) {
            scene.layers.at(index).raw.value("cut").toObject().contains("polygon");
 }
 
-QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t, double *feather, bool *fill) {
+QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t, double *feather, int *fill) {
     if (!isCut(scene, index))
         return {};
     const QJsonObject cut = scene.layers.at(index).raw.value("cut").toObject();
@@ -660,7 +705,7 @@ QPolygonF cutOutline(const Scene &scene, AssetCache &assets, int index, double t
     if (feather)
         *feather = cut.value("feather").toDouble() * pixelScale(transform);
     if (fill)
-        *fill = cut.value("fill").toBool(false);
+        *fill = !cut.value("fill").toBool(false) ? 0 : cut.value("fillWith").toString() == "ai" ? 2 : 1;
     return transform.map(polygonFrom(cut.value("polygon")));
 }
 

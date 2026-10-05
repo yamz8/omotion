@@ -64,6 +64,12 @@ class OmotionTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase() {
+        // Cuts here fill smoothly, quickly and the same everywhere; the AI's
+        // fill has its own test.
+        qputenv("OMOTION_FILL", "smooth");
+    }
+
     void easesStartAndEndInPlace() {
         for (const QString &ease : Scene::eases()) {
             QCOMPARE(Scene::ease(ease, 0), 0.0);
@@ -1029,7 +1035,7 @@ private slots:
         for (const QPointF p : {QPointF(100, 100), QPointF(500, 100), QPointF(500, 400), QPointF(100, 400)})
             backend.addCutPoint(p.x(), p.y());
         backend.finishCut(true);
-        QCOMPARE(backend.busy(), QString("Cutting…"));
+        QVERIFY(backend.busy().startsWith("Cutting"));
         QCOMPARE(backend.scene().layers.size(), 1);  // Not yet.
         backend.waitForJobs();
         QCOMPARE(backend.error(), QString());
@@ -1182,6 +1188,41 @@ private slots:
         QCOMPARE(fading.value(fading.layers[0], "opacity", 4), 1.0);
         QVERIFY(!Project::applyPreset(scene, assets, 0, "wobble", 0, 1, &error));
         QVERIFY(error.contains("sway"));
+    }
+
+    void aiFillsHolesWithTexture() {
+        if (!Ai::instance().canInpaint())
+            QSKIP("The AI's fill isn't set up here.");
+        QTemporaryDir dir;
+        // Stripes, with a block over them: the fill should carry the stripes on.
+        QImage picture(240, 160, QImage::Format_RGB32);
+        for (int y = 0; y < 160; ++y)
+            for (int x = 0; x < 240; ++x)
+                picture.setPixelColor(x, y, (x / 10) % 2 ? QColor(230, 220, 120) : QColor(40, 90, 200));
+        QPainter block(&picture);
+        block.fillRect(95, 55, 50, 50, QColor(200, 30, 30));
+        block.end();
+        picture.save(dir.filePath("stripes.png"));
+        const QString project = Project::open(dir.filePath("stripes.png"), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        QCOMPARE(Project::cutOut(scene, assets, 0, {{92, 52}, {148, 52}, {148, 108}, {92, 108}}, 0, true, &error, "block", 1,
+                                 true, true), 1);
+        QCOMPARE(scene.layers[1].raw["cut"].toObject()["fillWith"].toString(), QString("ai"));
+        scene.layers[1].visible = false;
+        const QImage filled = renderFrame(scene, assets, 0);
+        // No red left, and stripes rather than a smudge: the middle row
+        // still swings between the two colours.
+        int reds = 0, swings = 0;
+        for (int x = 100; x < 140; ++x) {
+            const QColor c = filled.pixelColor(x, 80);
+            reds += c.red() > 150 && c.green() < 80;
+            if (x > 100 && std::abs(c.blue() - filled.pixelColor(x - 1, 80).blue()) > 40)
+                ++swings;
+        }
+        QCOMPARE(reds, 0);
+        QVERIFY2(swings >= 2, qPrintable(QString::number(swings)));
     }
 
     void cuttingNothingFails() {

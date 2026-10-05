@@ -41,7 +41,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString tool READ tool NOTIFY toolChanged)
     Q_PROPERTY(QVariantList cutPoints READ cutPoints NOTIFY toolChanged)
     Q_PROPERTY(double feather READ feather NOTIFY toolChanged)
-    Q_PROPERTY(bool fill READ fill NOTIFY toolChanged)
+    Q_PROPERTY(QString fillMode READ fillMode NOTIFY toolChanged)
     Q_PROPERTY(int tolerance READ tolerance NOTIFY toolChanged)
     Q_PROPERTY(int usedTolerance READ usedTolerance NOTIFY toolChanged)
     Q_PROPERTY(QString reshaping READ reshaping NOTIFY toolChanged)
@@ -79,7 +79,8 @@ public:
     QString tool() const { return m_tool; }
     QVariantList cutPoints() const;
     double feather() const { return m_feather; }
-    bool fill() const { return m_fill; }
+    // How the next cut's hole is filled: "AI", "smooth" or "off".
+    QString fillMode() const { return m_fill == 2 ? "AI" : m_fill == 0 ? "off" : "smooth"; }
     // The smart select tolerance; below 0 while it's picked automatically.
     int tolerance() const { return m_tolerance; }
     int usedTolerance() const { return m_usedTolerance; }
@@ -168,7 +169,8 @@ public:
     Q_INVOKABLE void removeCutPointAt(int index);
     // Steps the soft edge for the next cut: 0, 1, 3, 8, 20 canvas pixels.
     Q_INVOKABLE void cycleFeather();
-    // Whether the hole a cut leaves is painted in from its surroundings.
+    // How the hole a cut leaves is filled: by the AI (when it's set up),
+    // smoothly from the colours around it, or not at all; cycles.
     Q_INVOKABLE void toggleFill();
     // Opens the selected piece's shape in the cut tool to change it.
     Q_INVOKABLE void startReshape();
@@ -271,7 +273,8 @@ private:
     QList<QPointF> m_cut;
     QString m_reshaping;
     double m_feather = 1;
-    bool m_fill = true;
+    int m_fill = -1;  // 0 off, 1 smooth, 2 AI; -1 until a tool picks the default.
+    int defaultFill();
     int m_tolerance = -1;
     int m_usedTolerance = 0;
     QList<QPointF> m_seeds;
