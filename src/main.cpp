@@ -212,6 +212,11 @@ int command(const QStringList &args) {
             const QRectF bounds = toCanvas.mapRect(QRectF(QPointF(0, 0), size));
             const QPointF pivot = toCanvas.map(QPointF(layer.anchor.x() * size.width(), layer.anchor.y() * size.height()));
             auto round = [](double v) { return std::round(v * 10) / 10; };
+            if (!layer.particles.isEmpty()) {
+                layers.append(QJsonObject{{"name", layer.name}, {"visible", layer.visible}, {"particles", layer.particles},
+                                          {"blend", layer.blend}, {"follow", followOf(scene, i)}});
+                continue;
+            }
             QJsonObject entry{{"name", layer.name},
                               {"source", layer.source},
                               {"visible", layer.visible},

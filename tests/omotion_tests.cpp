@@ -1494,6 +1494,40 @@ private slots:
         QVERIFY(backend.scene().layers[1].raw["cut"].toObject().contains("polygon"));
     }
 
+    void particleSettingsAreChecked() {
+        Scene scene;
+        QString error;
+        QVERIFY(Project::addParticles(scene, "snow", {{"kind", "blah"}}, &error) < 0);
+        QVERIFY(Project::addParticles(scene, "snow", {{"count", "lots"}}, &error) < 0);
+        QVERIFY(error.contains("number"));
+        QVERIFY(Project::addParticles(scene, "snow", {{"color", 123}}, &error) < 0);
+        QVERIFY(Project::addParticles(scene, "snow", {{"spedd", 3}}, &error) < 0);
+        QVERIFY(error.contains("spedd"));
+        QCOMPARE(Project::addParticles(scene, "snow", {{"count", 12}, {"color", "#ff0000"}, {"twinkle", 5}}, &error), 0);
+        QCOMPARE(scene.layers[0].particles["twinkle"].toDouble(), 1.0);
+    }
+
+    void slowParticlesStillMoveAndLoop() {
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {800, 400}), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        // Snow at its slow default, no sway: it falls, and still loops.
+        Project::addParticles(scene, "snow", {{"sway", 0}, {"count", 80}}, &error);
+        QVERIFY(differences(renderFrame(scene, assets, 0), renderFrame(scene, assets, .5)) > 20);
+        QCOMPARE(differences(renderFrame(scene, assets, 0), renderFrame(scene, assets, scene.duration)), 0);
+        // Panned far over, there's still snow where the camera looks.
+        scene.layers[0].visible = false;
+        scene.camera.keys["x"] = {Key{0, 400, "linear"}, Key{scene.duration, 1000, "linear"}};
+        const QImage panned = renderFrame(scene, assets, scene.duration * .9);
+        int bright = 0;
+        for (int y = 0; y < panned.height(); y += 2)
+            for (int x = 600; x < 800; x += 2)
+                bright += qGray(panned.pixel(x, y)) > 128;
+        QVERIFY2(bright > 10, qPrintable(QString::number(bright)));
+    }
+
     void backendAddsAndTunesParticles() {
         QTemporaryDir dir;
         Backend backend;
@@ -1505,6 +1539,12 @@ private slots:
         backend.setParticle("color", "#ff0000");
         backend.setParticle("color", "not a colour");
         QVERIFY(backend.error().contains("colour"));
+        // No picture to cut or split.
+        backend.setTool("cut");
+        QCOMPARE(backend.tool(), QString("move"));
+        QVERIFY(backend.notice().contains("particle"));
+        backend.splitByDepth(3);
+        QVERIFY(backend.notice().contains("particle"));
         QCOMPARE(backend.scene().layers[1].particles["count"].toInt(), 50);
         QCOMPARE(backend.scene().layers[1].particles["color"].toString(), QString("#ff0000"));
         QVERIFY(!backend.error().contains("Can't find"));  // No picture isn't a missing picture.
@@ -1601,6 +1641,10 @@ private slots:
         QCOMPARE(backend.scene().camera.keys["rotation"].last().t, 1.5);
         backend.undo();
         QCOMPARE(backend.scene().camera.keys["rotation"].last().t, 1.0);
+        // < and > walk the camera's keys when it's selected.
+        backend.seek(0);
+        backend.jumpKey(1);
+        QCOMPARE(backend.time(), 1.0);
         // Selecting a layer leaves the camera.
         backend.select(0);
         QVERIFY(!backend.cameraSelected());

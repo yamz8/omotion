@@ -344,11 +344,13 @@ void Backend::jumpKey(int direction) {
     if (m_playing)
         togglePlay();
     QList<double> times;
-    if (m_selected >= 0)
-        times = m_scene.keyTimes(m_selected);
-    else
+    if (targetLayer()) {
+        times = m_scene.keyTimes(target());
+    } else {
         for (int i = 0; i < m_scene.layers.size(); ++i)
             times += m_scene.keyTimes(i);
+        times += m_scene.keyTimes(Scene::CameraIndex);
+    }
     std::sort(times.begin(), times.end());
     const double epsilon = .5 / m_scene.fps;
     if (direction > 0) {
@@ -521,18 +523,9 @@ void Backend::setParticle(const QString &setting, const QVariant &value) {
     if (m_selected < 0 || m_scene.layers.at(m_selected).particles.isEmpty())
         return;
     QJsonValue json;
-    if (setting == "color") {
-        if (!QColor(value.toString()).isValid())
-            return setError(QString("\"%1\" isn't a colour.").arg(value.toString()));
-        json = value.toString();
-    } else if (setting == "count" || setting == "seed") {
-        json = std::clamp(value.toInt(), 0, setting == "count" ? 5000 : 1 << 30);
-    } else {
-        const double number = value.toDouble();
-        if (!std::isfinite(number))
-            return;
-        json = setting == "twinkle" ? std::clamp(number, 0.0, 1.0) : number;
-    }
+    QString error;
+    if (!Project::particleSetting(setting, value, &json, &error))
+        return setError(error);
     checkpoint();
     m_scene.layers[m_selected].particles.insert(setting, json);
     changed();
@@ -865,6 +858,10 @@ void Backend::setTool(const QString &tool) {
     }
     if (tool != "move" && m_selected < 0) {
         setNotice(tool == "cut" ? "Select the layer to cut a piece out of first." : "Select a layer first.");
+        return;
+    }
+    if ((tool == "cut" || tool == "wand" || tool == "brush") && !m_scene.layers.at(m_selected).particles.isEmpty()) {
+        setNotice("A particle layer has no picture to cut; select a picture layer.");
         return;
     }
     if (m_playing)
@@ -1293,6 +1290,8 @@ void Backend::splitByDepth(int count) {
     int layer = m_selected >= 0 ? m_selected : (m_scene.layers.isEmpty() ? -1 : 0);
     if (layer < 0)
         return setNotice("Add an image to split first.");
+    if (!m_scene.layers.at(layer).particles.isEmpty())
+        return setNotice("A particle layer has no picture to split; select a picture layer.");
     // A piece just cut out is selected; splitting means the picture it came
     // from, which the piece then goes with.
     for (int guard = 0; guard < 16 && layer >= 0; ++guard) {
@@ -1572,8 +1571,15 @@ void Backend::finishCut(bool punch) {
                          : m_scene.indexOf(m_scene.layers.value(m_scene.indexOf(reshaping)).raw.value("cut").toObject()
                                                .value("from").toString());
     const QSizeF size = from >= 0 ? m_assets.size(m_scene.layers.at(from).source) : QSizeF();
-    // The AI's fill takes seconds whatever the size.
-    if (size.width() * size.height() <= 4e6 && fill != 2) {
+    // The AI's fill takes seconds whatever the size, and redrawing the source
+    // redraws every piece of it, so any AI fill there goes in the background.
+    bool aiThere = fill == 2;
+    if (from >= 0)
+        for (const Layer &layer : m_scene.layers) {
+            const QJsonObject cut = layer.raw.value("cut").toObject();
+            aiThere |= cut.value("from").toString() == m_scene.layers.at(from).name && cut.value("fillWith").toString() == "ai";
+        }
+    if (size.width() * size.height() <= 4e6 && !aiThere) {
         Scene scene = m_scene;
         QString error;
         const int index = cut(scene, m_assets, error);

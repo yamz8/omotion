@@ -843,7 +843,9 @@ QTransform cameraTransform(const Scene &scene, double follow, double t) {
     const QPointF centre(scene.width / 2.0, scene.height / 2.0);
     // A layer that follows the camera partly sees a camera moved, zoomed and
     // turned partly: far things drift less than near ones.
-    const QPointF pan = (QPointF(scene.value(camera, "x", t), scene.value(camera, "y", t)) - centre) * follow;
+    const double cx = camera.keys.contains("x") ? scene.value(camera, "x", t) : camera.base.value("x", centre.x());
+    const double cy = camera.keys.contains("y") ? scene.value(camera, "y", t) : camera.base.value("y", centre.y());
+    const QPointF pan = (QPointF(cx, cy) - centre) * follow;
     const double zoom = 1 + (scene.value(camera, "zoom", t) - 1) * follow;
     QTransform transform;
     transform.translate(centre.x(), centre.y());
@@ -916,7 +918,7 @@ QPainter::CompositionMode compositionFor(const QString &blend) {
 }
 }
 
-void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t) {
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow) {
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
         settings.insert(it.key(), it.value());
@@ -930,42 +932,60 @@ void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, do
     const double twinkle = std::clamp(settings.value("twinkle").toDouble(), 0.0, 1.0);
     const QColor color(settings.value("color").toString("#ffffff"));
     const double d = std::max(.01, scene.duration);
-    // They wrap around a box a little bigger than the canvas, so they come
-    // and go off screen.
+    // They live in a box around everything the camera shows over the whole
+    // scene, so panning never runs out of them, and a little more, so they
+    // come and go off screen.
     const double margin = std::max({60.0, size * 6, std::abs(sway) + 20});
-    const QRectF box(-margin, -margin, scene.width + 2 * margin, scene.height + 2 * margin);
-    auto wrap = [](double v, double from, double length) {
-        const double r = std::fmod(v - from, length);
-        return from + (r < 0 ? r + length : r);
+    QRectF seen;
+    for (int i = 0; i <= 32; ++i) {
+        bool invertible = false;
+        const QTransform toWorld = cameraTransform(scene, follow, d * i / 32).inverted(&invertible);
+        if (invertible)
+            seen |= toWorld.mapRect(QRectF(0, 0, scene.width, scene.height));
+    }
+    if (seen.isEmpty())
+        seen = QRectF(0, 0, scene.width, scene.height);
+    const QRectF box = seen.adjusted(-margin, -margin, margin, margin);
+    auto wrap = [](double v, double length) {
+        const double r = std::fmod(v, length);
+        return r < 0 ? r + length : r;
     };
     // The same particles every frame: a fixed sequence of random numbers.
     QRandomGenerator random(quint32(settings.value("seed").toInt(1)));
     painter.save();
     painter.setPen(Qt::NoPen);
     for (int i = 0; i < count; ++i) {
-        const double startX = random.generateDouble(), startY = random.generateDouble();
+        const double across = random.generateDouble(), along0 = random.generateDouble();
         const double pace = .6 + .8 * random.generateDouble();
         const double angle = direction + spread * (random.generateDouble() * 2 - 1);
         const double phase = random.generateDouble() * 2 * M_PI, flicker = random.generateDouble() * 2 * M_PI;
         const double grow = .5 + random.generateDouble(), turn = random.generateDouble();
-        // Movement fitted to the loop: whole trips around the box in the
-        // scene's length, so the last frame leads into the first.
-        auto fitted = [d](double v, double length) {
-            const double trips = std::round(v * d / length);
-            return trips * length / d;
-        };
-        const double vx = fitted(std::cos(angle) * speed * pace, box.width());
-        const double vy = fitted(std::sin(angle) * speed * pace, box.height());
+        // Each one runs along its own track across the box at its own speed.
+        // The track's length is fitted so the scene holds a whole number of
+        // runs, which is what makes it loop: a slow one that can't cross in
+        // time gets a short track and fades in and out at its ends.
+        const QPointF ahead(std::cos(angle), std::sin(angle)), side(-ahead.y(), ahead.x());
+        const double reach = std::abs(ahead.x()) * box.width() + std::abs(ahead.y()) * box.height();
+        const double breadth = std::abs(side.x()) * box.width() + std::abs(side.y()) * box.height();
+        const double v = std::abs(speed) * pace;
+        const double runs = std::floor(v * d / reach);
+        const double track = runs >= 1 ? v * d / runs : std::max(v * d, 1e-6);
+        const double travelled = wrap(along0 * track + v * t * (speed < 0 ? -1 : 1), track);
+        QPointF at = box.center() + ahead * (travelled - track / 2) + side * ((across - .5) * breadth);
+        double fade = 1;
+        if (runs < 1 && v > 0) {
+            const double edge = std::min(travelled, track - travelled) / (track * .15);
+            fade = std::clamp(edge, 0.0, 1.0);
+        }
         const int swings = std::max(1, int(std::round(d / (2.5 + 3 * turn))));
-        double x = wrap(box.x() + startX * box.width() + vx * t, box.x(), box.width());
-        double y = wrap(box.y() + startY * box.height() + vy * t, box.y(), box.height());
+        double x = at.x(), y = at.y();
         x += sway * grow * std::sin(2 * M_PI * swings * t / d + phase);
         if (kind == "fireflies")
             y += sway * .6 * grow * std::cos(2 * M_PI * swings * t / d + flicker);
         const double glow = 1 - twinkle * (.5 + .5 * std::sin(2 * M_PI * std::max(1, swings * 2) * t / d + flicker));
         const double r = size * grow;
         QColor c = color;
-        c.setAlphaF(std::clamp(c.alphaF() * glow, 0.0, 1.0));
+        c.setAlphaF(std::clamp(c.alphaF() * glow * fade, 0.0, 1.0));
 
         if (kind == "rain") {
             // Streaks along their fall, longer the faster.
@@ -1020,14 +1040,14 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         if (!layer.particles.isEmpty()) {
             // Particles live in the world, seen through the camera; their
             // look (blur, glow) is worked on the frame they make.
-            const QTransform toOutput = cameraTransform(scene, followOf(scene, i), t) * base;
+            const QTransform toOutput = layerTransform(scene, assets, i, t) * base;
             const double blur = std::max(0.0, scene.value(layer, "blur", t)) * outputScale;
             const double glowSize = std::max(0.0, scene.value(layer, "glow", t)) * outputScale;
             painter.setOpacity(opacity);
             if (blur <= 0 && glowSize <= 0) {
                 painter.setTransform(toOutput);
                 painter.setCompositionMode(compositionFor(layer.blend));
-                drawParticles(painter, scene, layer, t);
+                drawParticles(painter, scene, layer, t, followOf(scene, i));
                 continue;
             }
             const QRect device(0, 0, painter.device()->width(), painter.device()->height());
@@ -1037,7 +1057,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
                 QPainter into(&frame);
                 into.setRenderHint(QPainter::Antialiasing);
                 into.setTransform(toOutput);
-                drawParticles(into, scene, layer, t);
+                drawParticles(into, scene, layer, t, followOf(scene, i));
             }
             soften(frame, blur);
             painter.setTransform(QTransform());

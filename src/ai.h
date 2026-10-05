@@ -11,6 +11,7 @@
 #include <QMutex>
 #include <QPointF>
 #include <QString>
+#include <atomic>
 #include <memory>
 
 class Ai {
@@ -64,6 +65,9 @@ private:
     struct Runtime;
     std::unique_ptr<Runtime> m_runtime;
     QMutex m_mutex;
+    // Set once the runtime is loaded, so asking what's ready doesn't wait
+    // for a job that holds the mutex.
+    std::atomic<bool> m_loaded{false};
     QString m_loadError;
     bool m_tried = false;
 

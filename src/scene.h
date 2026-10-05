@@ -193,7 +193,7 @@ QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, dou
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t);
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t);
 // A particle layer's particles at time t, in world pixels.
-void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t);
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1);
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
 // Softens an Alpha8 or 32-bit image in place, spreading edges about width
 // pixels: three box blurs, which come close to a Gaussian.

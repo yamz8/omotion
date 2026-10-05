@@ -1273,6 +1273,34 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
     return true;
 }
 
+bool particleSetting(const QString &name, const QVariant &value, QJsonValue *json, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    static const QStringList numbers{"count", "size", "speed", "direction", "spread", "sway", "twinkle", "seed"};
+    if (name == "color") {
+        if (!QColor(value.toString()).isValid() || value.typeId() != QMetaType::QString)
+            return fail(QString("\"%1\" isn't a colour, like #ffffff.").arg(value.toString()));
+        *json = value.toString();
+        return true;
+    }
+    if (!numbers.contains(name))
+        return fail(QString("Particles have no setting \"%1\"; they have %2, color.").arg(name, numbers.join(", ")));
+    bool ok = false;
+    const double number = value.toDouble(&ok);
+    if (!ok || !std::isfinite(number))
+        return fail(QString("%1 needs a number, not \"%2\".").arg(name, value.toString()));
+    if (name == "count" || name == "seed")
+        *json = std::clamp(int(std::lround(number)), 0, name == "count" ? 5000 : 1 << 30);
+    else if (name == "twinkle")
+        *json = std::clamp(number, 0.0, 1.0);
+    else
+        *json = number;
+    return true;
+}
+
 int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings, QString *error) {
     if (!Scene::particleKinds().contains(kind)) {
         if (error)
@@ -1284,8 +1312,12 @@ int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings,
     for (const QString &property : Scene::properties())
         layer.base.insert(property, Scene::defaultValue(property));
     layer.particles = Scene::particleDefaults(kind);
-    for (auto it = settings.begin(); it != settings.end(); ++it)
-        layer.particles.insert(it.key(), it.value());
+    for (auto it = settings.begin(); it != settings.end(); ++it) {
+        QJsonValue value;
+        if (!particleSetting(it.key(), it.value().toVariant(), &value, error))
+            return -1;
+        layer.particles.insert(it.key(), value);
+    }
     // Light things glow on what's under them.
     if (kind == "fireflies" || kind == "embers")
         layer.blend = "add";

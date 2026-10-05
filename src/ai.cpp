@@ -374,6 +374,7 @@ bool Ai::load(QString *error) {
         return false;
     }
     m_runtime = std::move(runtime);
+    m_loaded = true;
     return true;
 }
 
@@ -452,9 +453,11 @@ QImage Ai::depth(const QImage &picture, QString *error) {
 }
 
 bool Ai::canInpaint() {
-    QMutexLocker lock(&m_mutex);
-    if (!load(nullptr))
-        return false;
+    if (!m_loaded) {
+        QMutexLocker lock(&m_mutex);
+        if (!load(nullptr))
+            return false;
+    }
     const QFileInfo model(QDir(modelDirectory()).filePath("lama.onnx"));
     return model.exists() && model.size() == models().last().size;
 }
@@ -488,6 +491,8 @@ QImage Ai::inpaint(const QImage &picture, const QImage &holes, QString *error) {
         if (kept.size() == image.size()) {
             rt.fills.insert(key, kept.convertToFormat(QImage::Format_RGB888));
             rt.fillOrder.append(key);
+            while (rt.fillOrder.size() > 16)
+                rt.fills.remove(rt.fillOrder.takeFirst());
             return rt.fills.value(key);
         }
     }
