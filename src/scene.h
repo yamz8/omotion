@@ -80,6 +80,13 @@ struct Scene {
     static const QStringList &blends();
     static double defaultValue(const QString &property);
     static double ease(const QString &name, double progress);
+    // Custom easing: "cubic(x1,y1,x2,y2)", a curve from (0,0) to (1,1) with
+    // those two handles, as in CSS. y can go past 0..1, to overshoot.
+    static bool cubic(const QString &ease, double *x1, double *y1, double *x2, double *y2);
+    static QString cubicEase(double x1, double y1, double x2, double y2);
+    static bool validEase(const QString &ease);
+    // An easing's curve handles, named ones included, for showing and editing.
+    static QList<double> curveOf(const QString &ease);
 
     static Scene fromJson(const QJsonObject &json, QString *error = nullptr);
     QJsonObject toJson() const;

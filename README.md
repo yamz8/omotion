@@ -49,7 +49,8 @@ layer it stands in, so it rides the camera move with its surroundings, and
 4. Press **K** to set a keyframe, step ahead with **.**, change the layer
    (drag it, **[ ]** to rotate, **- =** to scale), and keep going.
 5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
-   to change how they ease into the next one. **Ctrl+C** and **Ctrl+V**
+   to change how they ease into the next one, or drag the handles of the
+   curve in the inspector to shape it yourself. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
 6. Press **V** for the camera, and animate it like a layer: pan, zoom and
    turn the whole scene. Each layer's **Follow camera** sets how much the
@@ -197,7 +198,8 @@ photo.omotion/
   moves, turns and scales with its parent. Opacity isn't inherited.
 - **Keys** have a time `t` in seconds, a value `v`, and an `ease` for the
   way *out* of that key: `linear`, `in`, `out`, `inOut`, `outBack`
-  (overshoots and settles), or `hold` (jumps at the next key).
+  (overshoots and settles), `hold` (jumps at the next key), or a curve of
+  your own, `cubic(x1,y1,x2,y2)`, as in CSS (y past 0–1 overshoots).
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
 - **`cut`** on a piece remembers how it was made: the layer it came `from`,

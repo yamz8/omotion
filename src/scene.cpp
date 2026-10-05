@@ -5,6 +5,7 @@
 #include <QImageReader>
 #include <QJsonArray>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QSet>
 #include <QVarLengthArray>
 #include <algorithm>
@@ -74,7 +75,80 @@ double Scene::ease(const QString &name, double p) {
     }
     if (name == "hold")
         return p < 1 ? 0 : 1;
+    double x1, y1, x2, y2;
+    if (cubic(name, &x1, &y1, &x2, &y2)) {
+        // A curve from (0,0) to (1,1) with handles at (x1,y1) and (x2,y2): find
+        // where along it time p is reached, then how far the value has got.
+        auto at = [](double a, double b, double u) {
+            return 3 * a * u * (1 - u) * (1 - u) + 3 * b * u * u * (1 - u) + u * u * u;
+        };
+        auto slope = [](double a, double b, double u) {
+            return 3 * a * (1 - u) * (1 - u) + 6 * (b - a) * u * (1 - u) + 3 * (1 - b) * u * u;
+        };
+        double u = p;
+        for (int i = 0; i < 8; ++i) {
+            const double d = slope(x1, x2, u);
+            if (std::abs(d) < 1e-6)
+                break;
+            u = std::clamp(u - (at(x1, x2, u) - p) / d, 0.0, 1.0);
+        }
+        // Where Newton's method stalls, halving the interval always gets there.
+        if (std::abs(at(x1, x2, u) - p) > 1e-5) {
+            double lo = 0, hi = 1;
+            for (int i = 0; i < 40; ++i) {
+                u = (lo + hi) / 2;
+                (at(x1, x2, u) < p ? lo : hi) = u;
+            }
+        }
+        return at(y1, y2, u);
+    }
     return p;
+}
+
+bool Scene::cubic(const QString &ease, double *x1, double *y1, double *x2, double *y2) {
+    static const QRegularExpression pattern(
+        R"(^cubic\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)$)");
+    const auto match = pattern.match(ease);
+    if (!match.hasMatch())
+        return false;
+    bool ok[4];
+    const double v[4] = {match.captured(1).toDouble(&ok[0]), match.captured(2).toDouble(&ok[1]),
+                         match.captured(3).toDouble(&ok[2]), match.captured(4).toDouble(&ok[3])};
+    // Time can't run backwards: the handles' x stay within 0..1.
+    if (!ok[0] || !ok[1] || !ok[2] || !ok[3] || v[0] < 0 || v[0] > 1 || v[2] < 0 || v[2] > 1)
+        return false;
+    *x1 = v[0];
+    *y1 = v[1];
+    *x2 = v[2];
+    *y2 = v[3];
+    return true;
+}
+
+bool Scene::validEase(const QString &ease) {
+    double a, b, c, d;
+    return eases().contains(ease) || cubic(ease, &a, &b, &c, &d);
+}
+
+QString Scene::cubicEase(double x1, double y1, double x2, double y2) {
+    auto number = [](double v) { return QString::number(std::round(v * 1000) / 1000); };
+    return QString("cubic(%1,%2,%3,%4)").arg(number(std::clamp(x1, 0.0, 1.0)), number(y1),
+                                              number(std::clamp(x2, 0.0, 1.0)), number(y2));
+}
+
+QList<double> Scene::curveOf(const QString &ease) {
+    double x1, y1, x2, y2;
+    if (cubic(ease, &x1, &y1, &x2, &y2))
+        return {x1, y1, x2, y2};
+    // The named ones, as the curves closest to them, for showing and editing.
+    if (ease == "in")
+        return {.32, 0, .67, 0};
+    if (ease == "out")
+        return {.33, 1, .68, 1};
+    if (ease == "inOut")
+        return {.65, 0, .35, 1};
+    if (ease == "outBack")
+        return {.34, 1.56, .64, 1};
+    return {0, 0, 1, 1};
 }
 
 Scene Scene::fromJson(const QJsonObject &json, QString *error) {
@@ -138,9 +212,9 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             for (const auto &entry : it.value().toArray()) {
                 const QJsonObject k = entry.toObject();
                 Key key{k.value("t").toDouble(), k.value("v").toDouble(), k.value("ease").toString("linear")};
-                if (!eases().contains(key.ease))
+                if (!validEase(key.ease))
                     return fail(QString("Layer \"%1\" uses easing \"%2\"; use one of %3.")
-                                    .arg(layer.name, key.ease, eases().join(", ")));
+                                    .arg(layer.name, key.ease, eases().join(", ") + ", or cubic(x1,y1,x2,y2)"));
                 list.append(key);
             }
             std::stable_sort(list.begin(), list.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
@@ -170,8 +244,8 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             for (const auto &entry : it.value().toArray()) {
                 const QJsonObject k = entry.toObject();
                 Key key{k.value("t").toDouble(), k.value("v").toDouble(), k.value("ease").toString("linear")};
-                if (!eases().contains(key.ease))
-                    return fail(QString("The camera uses easing \"%1\"; use one of %2.").arg(key.ease, eases().join(", ")));
+                if (!validEase(key.ease))
+                    return fail(QString("The camera uses easing \"%1\"; use one of %2.").arg(key.ease, eases().join(", ") + ", or cubic(x1,y1,x2,y2)"));
                 list.append(key);
             }
             std::stable_sort(list.begin(), list.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
@@ -421,7 +495,7 @@ bool KeyRef::operator==(const KeyRef &other) const {
 double Scene::snap(double t) const { return std::clamp(std::round(t * fps) / fps, 0.0, duration); }
 
 bool Scene::setEaseAt(int index, double t, const QString &ease) {
-    if (!at(index) || !eases().contains(ease))
+    if (!at(index) || !validEase(ease))
         return false;
     const double tolerance = .5 / fps;
     bool found = false;

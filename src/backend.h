@@ -146,6 +146,10 @@ public:
     Q_INVOKABLE void keyAll();
     Q_INVOKABLE void removeKeys();
     Q_INVOKABLE void cycleEase();
+    // Gives the keyframes at the playhead (or the picked ones) a custom
+    // easing curve, with handles at (x1,y1) and (x2,y2). Drags call it many
+    // times between beginGesture and endGesture, for one undo step.
+    Q_INVOKABLE void setCurve(double x1, double y1, double x2, double y2);
     Q_INVOKABLE void setSceneValue(const QString &name, const QVariant &value);
 
     // Selecting keyframe columns on the timeline, retiming them by dragging,

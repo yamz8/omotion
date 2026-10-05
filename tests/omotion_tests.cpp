@@ -79,6 +79,30 @@ private slots:
         QVERIFY(Scene::ease("outBack", .7) > 1);  // It overshoots.
     }
 
+    void customCurvesEase() {
+        // A straight curve is linear; the inOut look-alike is close to inOut.
+        for (double p : {.1, .3, .5, .8})
+            QVERIFY(qAbs(Scene::ease("cubic(0,0,1,1)", p) - p) < 1e-4);
+        for (double p : {.2, .5, .8})
+            QVERIFY(qAbs(Scene::ease("cubic(0.65,0,0.35,1)", p) - Scene::ease("inOut", p)) < .06);
+        // Handles above the top overshoot; ends stay put.
+        double most = 0;
+        for (double p = 0; p <= 1; p += .01)
+            most = std::max(most, Scene::ease("cubic(0.3,1.8,0.6,1)", p));
+        QVERIFY(most > 1.1);
+        QCOMPARE(Scene::ease("cubic(0.3,1.8,0.6,1)", 1), 1.0);
+        QCOMPARE(Scene::ease("cubic(0.3,1.8,0.6,1)", 0), 0.0);
+        // Time can't go backwards, and it has to parse.
+        QVERIFY(!Scene::validEase("cubic(1.2,0,0.5,1)"));
+        QVERIFY(!Scene::validEase("cubic(0.2,0,0.5)"));
+        QVERIFY(Scene::validEase(Scene::cubicEase(.25, .1, .25, 1)));
+        QCOMPARE(Scene::cubicEase(.25, .1, .25, 1), QString("cubic(0.25,0.1,0.25,1)"));
+        QCOMPARE(Scene::curveOf("outBack").size(), 4);
+        QString error;
+        Scene::fromJson(QJsonDocument::fromJson(R"({"layers": [{"name": "a", "source": "a", "keys": {"x": [{"t": 0, "v": 0, "ease": "cubic(0.1,0.2,0.3,0.4)"}]}}]})").object(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+    }
+
     void interpolatesBetweenKeyframes() {
         Scene scene;
         Layer layer;
@@ -1365,6 +1389,23 @@ private slots:
         backend.seek(1);
         backend.removeKeys();
         QCOMPARE(backend.scene().keyTimes(0), (QList<double>{3}));
+    }
+
+    void backendShapesCurvesInOneStep() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.keyAll();
+        QCOMPARE(backend.values()["keyCurve"].toList().size(), 4);
+        backend.beginGesture();
+        backend.setCurve(.2, .9, .4, 1);
+        backend.setCurve(.3, 1.4, .5, 1);
+        backend.endGesture();
+        QCOMPARE(backend.scene().layers[0].keys["x"][0].ease, QString("cubic(0.3,1.4,0.5,1)"));
+        QCOMPARE(backend.scene().layers[0].keys["rotation"][0].ease, QString("cubic(0.3,1.4,0.5,1)"));
+        backend.undo();  // One drag, one step.
+        QCOMPARE(backend.scene().layers[0].keys["x"][0].ease, QString("inOut"));
     }
 
     void backendEditsTheCamera() {

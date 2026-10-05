@@ -156,6 +156,7 @@ QVariantMap Backend::values() const {
         }
         map.insert("animated", animated);
         map.insert("keyEase", easeHere(camera));
+        map.insert("keyCurve", QVariant::fromValue(Scene::curveOf(easeHere(camera))));
         return map;
     }
     if (m_selected < 0 || m_selected >= m_scene.layers.size())
@@ -178,6 +179,7 @@ QVariantMap Backend::values() const {
     map.insert("ownFollow", !std::isnan(layer.follow));
     // The easing of a keyframe under the playhead, for the inspector.
     map.insert("keyEase", easeHere(layer));
+    map.insert("keyCurve", QVariant::fromValue(Scene::curveOf(easeHere(layer))));
     return map;
 }
 
@@ -564,6 +566,17 @@ void Backend::cycleEase() {
     m_scene = scene;
     changed();
     setNotice("Easing out of these keyframes: " + ease);
+}
+
+void Backend::setCurve(double x1, double y1, double x2, double y2) {
+    const QList<KeyRef> refs = targetKeys();
+    if (refs.isEmpty() || !std::isfinite(x1 + y1 + x2 + y2))
+        return;
+    const QString ease = Scene::cubicEase(x1, std::clamp(y1, -2.0, 3.0), x2, std::clamp(y2, -2.0, 3.0));
+    checkpoint();
+    for (const KeyRef &ref : refs)
+        m_scene.setEaseAt(ref.layer, ref.t, ease);
+    changed();
 }
 
 void Backend::setSceneValue(const QString &name, const QVariant &value) {

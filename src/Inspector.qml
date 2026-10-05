@@ -240,8 +240,90 @@ Rectangle {
                 wrapMode: Text.Wrap
                 color: inspector.v.keyEase ? theme.accent : win.muted
                 text: inspector.v.keyEase
-                      ? "On a keyframe · eases " + inspector.v.keyEase + " (E changes)"
+                      ? "On a keyframe · eases " + (inspector.v.keyEase.indexOf("cubic") === 0 ? "on its own curve" : inspector.v.keyEase)
+                        + " (E changes; drag the curve's handles below)"
                       : "K keyframes every property here"
+            }
+
+            // The easing out of the keyframe here, as a curve: drag its two
+            // handles to shape it. Up past the top overshoots.
+            Item {
+                id: curve
+                visible: inspector.hasLayer && !!inspector.v.keyEase && inspector.v.keyEase !== "hold"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.round(width * .66)
+                Layout.topMargin: 4
+                property var live: null
+                readonly property var handles: live || inspector.v.keyCurve || [0, 0, 1, 1]
+                readonly property real pad: 12
+                // x 0..1 across; y shown from -0.25 to 1.25, for overshoot.
+                function px(x) { return pad + x * (width - 2 * pad) }
+                function py(y) { return height - pad - (y + .25) / 1.5 * (height - 2 * pad) }
+                function curveX(X) { return Math.max(0, Math.min(1, (X - pad) / (width - 2 * pad))) }
+                function curveY(Y) { return Math.max(-2, Math.min(3, (height - pad - Y) / (height - 2 * pad) * 1.5 - .25)) }
+                onHandlesChanged: plot.requestPaint()
+                onWidthChanged: plot.requestPaint()
+
+                Rectangle { anchors.fill: parent; radius: 6; color: "#16161a"; border.color: win.line }
+                Canvas {
+                    id: plot
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        ctx.reset();
+                        const h = curve.handles;
+                        // The 0..1 box: start bottom left, end top right.
+                        ctx.strokeStyle = "#2c2c33";
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(curve.px(0), curve.py(1), curve.px(1) - curve.px(0), curve.py(0) - curve.py(1));
+                        ctx.strokeStyle = "#55555e";
+                        ctx.beginPath();
+                        ctx.moveTo(curve.px(0), curve.py(0)); ctx.lineTo(curve.px(h[0]), curve.py(h[1]));
+                        ctx.moveTo(curve.px(1), curve.py(1)); ctx.lineTo(curve.px(h[2]), curve.py(h[3]));
+                        ctx.stroke();
+                        ctx.strokeStyle = String(theme.accent);
+                        ctx.lineWidth = 2.5;
+                        ctx.beginPath();
+                        ctx.moveTo(curve.px(0), curve.py(0));
+                        ctx.bezierCurveTo(curve.px(h[0]), curve.py(h[1]), curve.px(h[2]), curve.py(h[3]), curve.px(1), curve.py(1));
+                        ctx.stroke();
+                    }
+                }
+                Repeater {
+                    model: 2
+                    delegate: Rectangle {
+                        required property int index
+                        width: 14; height: 14; radius: 7
+                        x: curve.px(curve.handles[index * 2]) - 7
+                        y: curve.py(curve.handles[index * 2 + 1]) - 7
+                        color: handleMouse.pressed ? "white" : theme.accent
+                        border.color: "#0e0e10"
+                        border.width: 2
+                        MouseArea {
+                            id: handleMouse
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            cursorShape: Qt.SizeAllCursor
+                            onPressed: {
+                                backend.beginGesture();
+                                curve.live = curve.handles.slice();
+                            }
+                            onPositionChanged: function (mouse) {
+                                const at = mapToItem(curve, mouse.x, mouse.y);
+                                const next = curve.live.slice();
+                                next[parent.index * 2] = curve.curveX(at.x);
+                                next[parent.index * 2 + 1] = curve.curveY(at.y);
+                                curve.live = next;
+                                backend.setCurve(next[0], next[1], next[2], next[3]);
+                            }
+                            onReleased: {
+                                backend.endGesture();
+                                curve.live = null;
+                                inspector.done();
+                            }
+                        }
+                    }
+                }
             }
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 14; Layout.bottomMargin: 6; height: 1; color: win.line }
