@@ -521,8 +521,13 @@ QList<QImage> Ai::segment(const QImage &picture, const QString &key, const QList
                                        rt.tensor(hasMask, {1}, error),
                                        rt.tensor(size, {2}, error)};
         std::vector<OrtValue *> outputs;
-        if (std::count(inputs.begin(), inputs.end(), nullptr) ||
-            !rt.run(decoder, {"image_embeddings", "point_coords", "point_labels", "mask_input", "has_mask_input", "orig_im_size"},
+        if (std::count(inputs.begin(), inputs.end(), nullptr)) {
+            for (OrtValue *value : inputs)
+                if (value)
+                    rt.api->ReleaseValue(value);
+            return {};
+        }
+        if (!rt.run(decoder, {"image_embeddings", "point_coords", "point_labels", "mask_input", "has_mask_input", "orig_im_size"},
                     inputs, {"masks", "iou_predictions"}, outputs, error))
             return {};
         const std::vector<int64_t> dims = rt.shape(outputs[0]);

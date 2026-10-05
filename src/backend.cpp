@@ -326,6 +326,7 @@ void Backend::select(int index) {
         index = -1;
     if (index == m_selected)
         return;
+    ++m_aiGeneration;
     m_selected = index;
     emit selectedChanged();
     emit valuesChanged();
@@ -371,6 +372,13 @@ void Backend::deleteLayer() {
     for (Layer &layer : m_scene.layers) {
         if (layer.parent == name) {
             layer.parent.clear();
+            unlinked = true;
+        }
+        // Its pieces become plain layers: left naming it, a new layer of the
+        // same name would take them over.
+        if (layer.raw.value("cut").toObject().value("from").toString() == name) {
+            layer.raw.remove("cut");
+            layer.raw.remove("uncut");
             unlinked = true;
         }
     }
@@ -638,11 +646,26 @@ void Backend::pasteKeys() {
 }
 
 void Backend::beginGesture() {
-    checkpoint();
+    if (m_inGesture || !hasProject())
+        return;
+    // The undo step is recorded at the end, and only if something changed:
+    // a click that moves nothing shouldn't cost the redo history.
+    m_gestureStart = m_scene.toJson();
     m_inGesture = true;
 }
 
-void Backend::endGesture() { m_inGesture = false; }
+void Backend::endGesture() {
+    if (!m_inGesture)
+        return;
+    m_inGesture = false;
+    if (m_scene.toJson() == m_gestureStart)
+        return;
+    m_undo.append(m_gestureStart);
+    if (m_undo.size() > UndoLimit)
+        m_undo.removeFirst();
+    m_redo.clear();
+    emit historyChanged();
+}
 
 void Backend::beginDrag(double x, double y) {
     if (m_selected < 0)
@@ -688,6 +711,7 @@ void Backend::setTool(const QString &tool) {
     // A smart selection carries over into the cut tool, to fine-tune its points.
     const bool keepShape = tool == "cut" && m_tool == "wand" && !m_cut.isEmpty();
     m_tool = tool;
+    ++m_aiGeneration;
     m_seeds.clear();
     m_seedLevels.clear();
     m_tolerance = -1;
@@ -874,12 +898,15 @@ void Backend::runAiSelect() {
     const QString directory = m_directory;
     auto result = std::make_shared<std::tuple<QPolygonF, int, QString>>();
     setBusy(m_aiChoices == 0 && m_aiTake.size() == 1 ? "Looking at the picture…" : "Selecting…");
+    const QString layerName = selectedName();
+    const int generation = ++m_aiGeneration;
     m_job.disconnect(this);
-    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result] {
+    connect(&m_job, &QFutureWatcher<void>::finished, this, [this, result, layerName, generation] {
         setBusy({});
         if (m_aiAgain)
             return runAiSelect();
-        if (m_tool != "wand")
+        // The tool, the layer or the clicks changed meanwhile: it's stale.
+        if (m_tool != "wand" || m_wandMode != "ai" || selectedName() != layerName || generation != m_aiGeneration)
             return;
         const auto &[outline, choices, error] = *result;
         m_aiChoices = choices;
@@ -1093,6 +1120,7 @@ void Backend::finishCut(bool punch) {
         checkpoint();
         m_scene = scene;
         m_selected = index;
+        setKeySelection({});
         m_tool = "move";
         m_cut.clear();
         m_reshaping.clear();
@@ -1243,6 +1271,17 @@ void Backend::save() {
     // would throw their text away.
     if (!hasProject() || m_diskBroken)
         return;
+    // Someone else wrote scene.json since we last did, and the reload hasn't
+    // caught up yet: take their version rather than write over it. Ours is
+    // kept in undo, so Ctrl+Z brings it back.
+    QFile file(Project::sceneFile(m_directory));
+    if (file.open(QIODevice::ReadOnly) && file.readAll() != m_written) {
+        file.close();
+        m_reloadTimer.stop();
+        reloadFromDisk();
+        return;
+    }
+    file.close();
     QString error;
     if (!Project::save(m_directory, m_scene, &error, &m_written))
         setError(error);
@@ -1274,6 +1313,10 @@ void Backend::reloadFromDisk() {
     if (wasBroken)
         setError({});
     const QString name = selectedName();
+    m_saveTimer.stop();
+    m_dragging = false;
+    m_keyDragging = false;
+    endGesture();
     checkpoint();
     setKeySelection({});
     m_scene = scene;
@@ -1319,7 +1362,7 @@ QString Backend::selectedName() const {
 
 void Backend::restoreSelection(const QString &name) {
     int index = m_scene.indexOf(name);
-    if (index < 0 && !m_scene.layers.isEmpty())
+    if (index < 0 && !name.isEmpty() && !m_scene.layers.isEmpty())
         index = std::clamp(m_selected, 0, int(m_scene.layers.size()) - 1);
     m_selected = index;
     emit selectedChanged();

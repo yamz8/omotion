@@ -954,6 +954,97 @@ private slots:
         QCOMPARE(Project::unusedAssets(project, {noted}).size(), 1);
     }
 
+    void pendingSavesDontOverwriteOutsideEdits() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setProperty("x", 10);  // A save is now waiting.
+        const QString file = Project::sceneFile(backend.projectPath());
+        QJsonObject json = QJsonDocument::fromJson([&] { QFile f(file); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }()).object();
+        json["duration"] = 9;
+        writeText(file, QJsonDocument(json).toJson());  // An agent's edit, before the reload notices.
+        backend.flush();
+        QCOMPARE(backend.sceneInfo()["duration"].toDouble(), 9.0);
+        QFile disk(file);
+        QVERIFY(disk.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(disk.readAll()).object()["duration"].toDouble(), 9.0);
+        // Ours is a step back.
+        backend.undo();
+        QCOMPARE(backend.values()["x"].toDouble(), 10.0);
+    }
+
+    void deletedLayersLetGoOfTheirPieces() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(5, 5), QPointF(80, 5), QPointF(80, 60), QPointF(5, 60)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        backend.select(0);
+        backend.deleteLayer();
+        QCOMPARE(backend.scene().layers.size(), 1);
+        QVERIFY(!backend.scene().layers[0].raw.contains("cut"));
+        QVERIFY(backend.notice().contains("unlinked"));
+    }
+
+    void cuttingForgetsPickedKeyframes() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.keyAll();
+        backend.selectKey(0, 0, false);
+        backend.setTool("cut");
+        for (const QPointF p : {QPointF(5, 5), QPointF(80, 5), QPointF(80, 60), QPointF(5, 60)})
+            backend.addCutPoint(p.x(), p.y());
+        backend.finishCut(true);
+        QVERIFY(backend.keySelection().isEmpty());
+    }
+
+    void clicksThatMoveNothingKeepRedo() {
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        backend.setProperty("x", 10);
+        backend.undo();
+        QVERIFY(backend.canRedo());
+        backend.beginDrag(50, 50);
+        backend.endDrag();
+        backend.keyAll();
+        backend.undo();
+        backend.selectKey(0, 0, false);
+        backend.beginKeyDrag();
+        backend.endKeyDrag();
+        QVERIFY(backend.canRedo());
+        // A drag that moves makes exactly one step.
+        backend.beginDrag(50, 50);
+        backend.dragTo(60, 50);
+        backend.dragTo(70, 50);
+        backend.endDrag();
+        backend.undo();
+        QCOMPARE(backend.values()["x"].toDouble(), 100.0);
+    }
+
+    void staleAiResultsAreDropped() {
+        if (!Ai::instance().problem().isEmpty())
+            QSKIP(qPrintable("The AI isn't set up here: " + Ai::instance().problem()));
+        QTemporaryDir dir;
+        Backend backend;
+        backend.open(ballPicture(dir));
+        backend.select(0);
+        backend.duplicateLayer();
+        backend.select(0);
+        backend.setTool("wand");
+        backend.smartSelect(200, 200, false);
+        backend.select(1);  // Another layer, while it thinks.
+        backend.waitForJobs();
+        QVERIFY(backend.cutPoints().isEmpty());
+    }
+
     void cuttingNothingFails() {
         QTemporaryDir dir;
         const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);

@@ -289,6 +289,8 @@ private:
     int m_aiChoice = 0;
     int m_aiChoices = 0;
     bool m_aiAgain = false;
+    int m_aiGeneration = 0;
+    QJsonObject m_gestureStart;
     AssetCache m_workAssets;
     QFutureWatcher<void> m_job;
     ModelDownload m_download;

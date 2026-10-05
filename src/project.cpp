@@ -979,7 +979,8 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
     const double overscan = 1 + 2 * (strength * 4 / 3) / scene.width + .01;
     source.keys["scale"] = loop(base * overscan, base * overscan * 1.035);
     source.keys["x"] = loop(x, x - strength / 3);
-    const double perPixel = 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)) * overscan);
+    // The source's new scale key already holds the overscan.
+    const double perPixel = 1 / std::max(1e-6, pixelScale(layerTransform(scene, assets, index, 0)));
     for (const int i : pieces) {
         Layer &piece = scene.layers[i];
         const double depth = piece.raw.value("cut").toObject().value("depth").toDouble();
