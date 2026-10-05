@@ -5,7 +5,7 @@ import QtQuick.Layouts
 // Every shortcut, grouped. The README lists the same ones.
 Rectangle {
     id: help
-    color: "#e00e0e10"
+    color: "#f40e0e10"
 
     MouseArea { anchors.fill: parent; onClicked: win.helpVisible = false }
 
@@ -37,16 +37,23 @@ Rectangle {
     ]
 
     Flickable {
-        anchors.fill: parent
-        contentHeight: grid.implicitHeight + 80
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: footer.top
+        contentHeight: grid.implicitHeight + 60
         clip: true
 
         GridLayout {
             id: grid
-            anchors.horizontalCenter: parent.horizontalCenter
+            // As many columns as fit, each wrapping its descriptions to suit.
+            readonly property int count: help.width > 1300 ? 3 : help.width > 820 ? 2 : 1
+            readonly property real columnWidth: (help.width - 64 - (count - 1) * columnSpacing) / count
+            x: 32
             y: 40
-            columns: help.width > 1200 ? 3 : 2
-            columnSpacing: 56
+            width: help.width - 64
+            columns: count
+            columnSpacing: 48
             rowSpacing: 28
 
             Repeater {
@@ -54,6 +61,8 @@ Rectangle {
                 delegate: ColumnLayout {
                     required property var modelData
                     Layout.alignment: Qt.AlignTop
+                    Layout.preferredWidth: grid.columnWidth
+                    Layout.maximumWidth: grid.columnWidth
                     spacing: 7
                     Label {
                         text: modelData[0]
@@ -72,9 +81,15 @@ Rectangle {
                                 color: win.text
                                 font.family: "monospace"
                                 font.bold: true
-                                Layout.preferredWidth: 110
+                                Layout.preferredWidth: 120
+                                Layout.alignment: Qt.AlignTop
                             }
-                            Label { text: modelData[1]; color: "#b8b8c0" }
+                            Label {
+                                text: modelData[1]
+                                color: "#b8b8c0"
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
                         }
                     }
                 }
@@ -83,9 +98,13 @@ Rectangle {
     }
 
     Label {
+        id: footer
         anchors.bottom: parent.bottom
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottomMargin: 20
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: 20
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
         text: "Everything saves itself to scene.json, and edits to that file show up here live.   ·   Esc closes"
         color: win.muted
     }

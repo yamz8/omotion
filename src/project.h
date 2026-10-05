@@ -77,7 +77,7 @@ QList<int> splitByDepth(Scene &scene, AssetCache &assets, int layer, const QImag
 
 // Animates a depth-split layer as a slow camera move: it drifts sideways and
 // pushes in, and nearer layers slide further, strength canvas pixels for the
-// nearest, as a loop over the scene's duration.
+// nearest, as a loop over the scene's duration (made at least 10 seconds).
 bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strength, QString *error);
 
 // Image files in the project's assets folder that none of the given scenes

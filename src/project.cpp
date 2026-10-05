@@ -966,6 +966,8 @@ bool animateParallax(Scene &scene, AssetCache &assets, int index, double strengt
         return fail(QString("%1 hasn't been split by depth (D), so there's no depth to move by.").arg(source.name));
 
     const double far = source.raw.value("depth").toDouble(0);
+    // A camera move this slow wants room; a short scene gets longer.
+    scene.duration = std::max(scene.duration, 10.0);
     const double d = scene.duration;
     auto loop = [d](double a, double b) {
         return QList<Key>{Key{0, a, "inOut"}, Key{d / 2, b, "inOut"}, Key{d, a, "inOut"}};

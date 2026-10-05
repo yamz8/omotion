@@ -950,10 +950,7 @@ void Backend::animateParallax() {
     if (!hasProject() || m_scene.layers.isEmpty())
         return;
     Scene scene = m_scene;
-    // A camera move this slow wants room; a short scene gets longer.
     const bool lengthened = scene.duration < 10;
-    if (lengthened)
-        scene.duration = 10;
     QString error;
     if (!Project::animateParallax(scene, m_assets, m_selected >= 0 ? m_selected : 0, 36, &error))
         return setError(error);
