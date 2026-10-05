@@ -62,6 +62,9 @@ Info info(const Scene &scene) {
     if (!(info.scale > 0))
         info.scale = 1;
     info.wide = world.value("wide").toString();
+    const QJsonObject far = world.value("far").toObject();
+    info.farDepth = far.value("depth").toString();
+    info.farPicture = far.value("picture").toString();
     const QJsonArray margin = world.value("margin").toArray();
     info.margin = QSize(margin.at(0).toInt(), margin.at(1).toInt());
     info.valid = scene.indexOf(info.picture) >= 0 && !info.depth.isEmpty() && !info.behind.isEmpty() && info.focal > 0;
@@ -150,8 +153,10 @@ struct DepthMap {
         const int gx = std::clamp(int((x - origin.x()) / covers.width() * image.width()), 0, image.width() - 1);
         const int gy = std::clamp(int((y - origin.y()) / covers.height() * image.height()), 0, image.height() - 1);
         const quint16 code = reinterpret_cast<const quint16 *>(image.constScanLine(gy))[gx];
-        return code >= Sky ? Far : decodeDepth(code) * scale;
+        // The sky scales too, so it never looks nearer than what's in it.
+        return decodeDepth(code) * scale;
     }
+    bool isSky(double distance) const { return distance >= Far * scale * .999; }
     QVector3D point(double x, double y, double distance) const {
         return QVector3D((x - picture.width() / 2.0) * distance / focal, (y - picture.height() / 2.0) * distance / focal,
                          distance);
@@ -345,7 +350,7 @@ DepthMap pieceDepth(const DepthMap &picture, const QImage &piece, const QPointF 
             const int ix = std::clamp(int(px / size.width() * piece.width()), 0, piece.width() - 1);
             const int iy = std::clamp(int(py / size.height() * piece.height()), 0, piece.height() - 1);
             const double d = picture.at(offset.x() + px, offset.y() + py);
-            const bool covered = qAlpha(piece.pixel(ix, iy)) > 200 && d < Far;
+            const bool covered = qAlpha(piece.pixel(ix, iy)) > 200 && !picture.isSky(d);
             // Kept in meters as they are here; the local map isn't scaled again.
             reinterpret_cast<quint16 *>(local.scanLine(y))[x] = encodeDepth(d);
             hole.scanLine(y)[x] = covered ? 0 : 255;
@@ -413,6 +418,9 @@ ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index);
 // Fitting reads the piece's depth closely, and every frame asks where a
 // piece is: fits are kept until what they depend on changes.
 QByteArray layerKey(const Scene &scene, AssetCache &assets, int index) {
+    if (index == FarLayer)
+        return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")}, {"directory", assets.directory()}, {"index", index}})
+            .toJson(QJsonDocument::Compact);
     const Layer &layer = scene.layers.at(index);
     return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")},
                                      {"directory", assets.directory()},
@@ -490,7 +498,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index);
 
 Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
     static QHash<QByteArray, Mesh> cache;
-    if (index < 0 || index >= scene.layers.size())
+    if ((index < 0 || index >= scene.layers.size()) && !(index == FarLayer && !info(scene).farDepth.isEmpty()))
         return {};
     const QByteArray key = layerKey(scene, assets, index);
     {
@@ -510,6 +518,43 @@ namespace {
 Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     const Info world = info(scene);
     const int root = scene.indexOf(world.picture);
+    if (index == FarLayer) {
+        // Laid out as the widened picture is, on its own distances.
+        if (!world.valid || world.farDepth.isEmpty())
+            return {};
+        const QSizeF picture = assets.size(pictureFile(scene, root));
+        DepthMap depth = depthMap(assets, world.farDepth, picture.toSize(), world.focal, world.scale);
+        if (depth.image.isNull() || picture.isEmpty())
+            return {};
+        const QPointF offset = -QPointF(world.margin.width(), world.margin.height());
+        const QSizeF size = picture + QSizeF(2 * world.margin.width(), 2 * world.margin.height());
+        depth.origin = offset;
+        depth.span = size;
+        const QMatrix4x4 toWorld = pictureToWorld(world);
+        // A vertex for each depth cell, as the picture has, so the two meet.
+        const int cols = std::clamp(depth.image.width() - 1, 2, 1600), rows = std::clamp(depth.image.height() - 1, 2, 1000);
+        Mesh mesh;
+        mesh.columns = cols + 1;
+        mesh.vertices.resize(qsizetype(cols + 1) * (rows + 1) * 5 * sizeof(float));
+        float *v = reinterpret_cast<float *>(mesh.vertices.data());
+        for (int r = 0; r <= rows; ++r)
+            for (int c = 0; c <= cols; ++c) {
+                const double x = offset.x() + size.width() * c / cols, y = offset.y() + size.height() * r / rows;
+                const QVector3D p = toWorld.map(depth.point(x, y, depth.at(x, y)));
+                *v++ = p.x(), *v++ = p.y(), *v++ = p.z();
+                *v++ = float(c) / cols, *v++ = 1 - float(r) / rows;
+            }
+        mesh.indices.resize(qsizetype(cols) * rows * 6 * sizeof(quint32));
+        quint32 *i = reinterpret_cast<quint32 *>(mesh.indices.data());
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c) {
+                const quint32 a = r * (cols + 1) + c, b = a + 1, d = a + cols + 1, e = d + 1;
+                *i++ = a, *i++ = d, *i++ = b, *i++ = b, *i++ = d, *i++ = e;
+            }
+        mesh.minimum = QVector3D(-1e4f, -1e4f, -1e4f);
+        mesh.maximum = QVector3D(1e4f, 1e4f, 1e4f);
+        return mesh;
+    }
     if (!world.valid || index < 0 || index >= scene.layers.size() || rootOf(scene, index) != root)
         return {};
     const Layer &layer = scene.layers.at(index);
@@ -629,8 +674,14 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     }
     const QMatrix4x4 toWorld = pictureToWorld(world);
 
-    // About four picture pixels a cell, at most 320 across, at least 2.
-    const int cols = std::clamp(int(size.width() / 4), 2, 320), rows = std::clamp(int(size.height() / 4), 2, 320);
+    // About four picture pixels a cell, at most 320 across, at least 2. The
+    // picture itself, torn where its distance jumps, takes a vertex for each
+    // of its depth cells, so it tears just where the layer behind is made.
+    int cols = std::clamp(int(size.width() / 4), 2, 320), rows = std::clamp(int(size.height() / 4), 2, 320);
+    if (index == root && !world.farDepth.isEmpty()) {
+        cols = std::clamp(depth.image.width() - 1, 2, 1600);
+        rows = std::clamp(depth.image.height() - 1, 2, 1000);
+    }
     // Its box counts only what shows: a piece's see-through margin reads
     // whatever lies behind it, as far as the sky.
     double factor = 1;
@@ -650,7 +701,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
         if (behind.image.isNull())
             return distance;
         const double back = behind.at(x, y);
-        return back < Far ? std::min(distance, back * .97) : distance;
+        return !behind.isSky(back) ? std::min(distance, back * .97) : distance;
     };
     Mesh mesh;
     mesh.vertices.resize(qsizetype(cols + 1) * (rows + 1) * 5 * sizeof(float));
@@ -680,13 +731,28 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
                                      std::max(mesh.maximum.z(), p.z()));
         }
     mesh.columns = cols + 1;
-    mesh.indices.resize(qsizetype(cols) * rows * 6 * sizeof(quint32));
-    quint32 *i = reinterpret_cast<quint32 *>(mesh.indices.data());
+    // With a layer behind its near edges, the picture doesn't stretch across
+    // a jump in distance: those triangles go, and a moving camera sees the
+    // layer behind through the gap.
+    const bool tear = index == root && !world.farDepth.isEmpty();
+    const QVector3D eye = toWorld.map(QVector3D(0, 0, 0));
+    const float *vertex = reinterpret_cast<const float *>(mesh.vertices.constData());
+    auto distanceOf = [&](quint32 k) { return (QVector3D(vertex[k * 5], vertex[k * 5 + 1], vertex[k * 5 + 2]) - eye).length(); };
+    auto stretched = [&](quint32 a, quint32 b, quint32 c) {
+        const float da = distanceOf(a), db = distanceOf(b), dc = distanceOf(c);
+        return std::max({da, db, dc}) > 1.15f * std::min({da, db, dc});
+    };
+    QList<quint32> kept;
+    kept.reserve(cols * rows * 6);
     for (int r = 0; r < rows; ++r)
         for (int c = 0; c < cols; ++c) {
             const quint32 a = r * (cols + 1) + c, b = a + 1, d = a + cols + 1, e = d + 1;
-            *i++ = a, *i++ = d, *i++ = b, *i++ = b, *i++ = d, *i++ = e;
+            if (!tear || !stretched(a, d, b))
+                kept << a << d << b;
+            if (!tear || !stretched(b, d, e))
+                kept << b << d << e;
         }
+    mesh.indices = QByteArray(reinterpret_cast<const char *>(kept.constData()), kept.size() * qsizetype(sizeof(quint32)));
 
     mesh.pivot = pivot(scene, assets, index);
     return mesh;
@@ -713,12 +779,12 @@ QVector3D pivot(const Scene &scene, AssetCache &assets, int index) {
     // empty, the middle of the piece's own distances stands in.
     const double ax = offset.x() + layer.anchor.x() * size.width(), ay = offset.y() + layer.anchor.y() * size.height();
     double distance = depth.at(ax, ay);
-    if (distance >= Far) {
+    if (depth.isSky(distance)) {
         QList<double> all;
         for (int r = 0; r <= 8; ++r)
             for (int c = 0; c <= 8; ++c) {
                 const double d = depth.at(offset.x() + size.width() * c / 8, offset.y() + size.height() * r / 8);
-                if (d < Far)
+                if (!depth.isSky(d))
                     all.append(d);
             }
         std::sort(all.begin(), all.end());
@@ -1255,6 +1321,8 @@ bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
 }
 
 QString texture(const Scene &scene, AssetCache &assets, int index) {
+    if (index == FarLayer)
+        return info(scene).farPicture;
     const QString source = scene.layers.at(index).source;
     const QDir dir(assets.directory());
     const QString file = "assets/world/" + QFileInfo(source).completeBaseName() + "-3d.png";
@@ -1361,22 +1429,12 @@ QString texture(const Scene &scene, AssetCache &assets, int index) {
     return file;
 }
 
-QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
-    // Worked at about 768 pixels across the picture, in squares of 384.
-    const double s = std::min(1.0, 768.0 / picture.width());
-    const QSize inner(std::max(1, int(picture.width() * s)), std::max(1, int(picture.height() * s)));
-    const QSize pad(int(margin.width() * s), int(margin.height() * s));
-    QImage work(inner.width() + 2 * pad.width(), inner.height() + 2 * pad.height(), QImage::Format_RGB32);
-    work.fill(Qt::black);
-    QImage known(work.size(), QImage::Format_Grayscale8);
-    known.fill(0);
-    {
-        QPainter painter(&work);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform);
-        painter.drawImage(QRect(QPoint(pad.width(), pad.height()), inner), picture);
-        QPainter mark(&known);
-        mark.fillRect(QRect(QPoint(pad.width(), pad.height()), inner), Qt::white);
-    }
+namespace {
+// Paints in what isn't known of an image (known: 0 where to paint), with
+// the AI, a square of 384 at a time: squares with something known in them
+// go first, so each carries on from what's there; rounds repeat until
+// nothing's left, or nothing more can be reached.
+bool paintIn(QImage &work, QImage &known, QString *error) {
     const int tile = std::min({384, work.width(), work.height()}), step = tile * 2 / 3;
     QList<QPoint> corners;
     for (int y = 0;; y += step) {
@@ -1390,8 +1448,6 @@ QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
         if (top == work.height() - tile)
             break;
     }
-    // Squares next to what's known go first, so each one has something to
-    // carry on from; rounds repeat until nothing is left unknown.
     for (int round = 0; round < 6; ++round) {
         bool left = false;
         for (const QPoint &corner : corners) {
@@ -1415,7 +1471,7 @@ QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
             }
             const QImage filled = Ai::instance().inpaint(work.copy(area), mask, error);
             if (filled.isNull())
-                return {};
+                return false;
             const QImage rgb = filled.convertToFormat(QImage::Format_RGB32);
             for (int y = 0; y < tile; ++y) {
                 QRgb *to = reinterpret_cast<QRgb *>(work.scanLine(area.y() + y)) + area.x();
@@ -1431,6 +1487,28 @@ QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
         if (!left)
             break;
     }
+    return true;
+}
+}
+
+QImage outpaint(const QImage &picture, const QSize &margin, QString *error) {
+    // Worked at about 768 pixels across the picture, in squares of 384.
+    const double s = std::min(1.0, 768.0 / picture.width());
+    const QSize inner(std::max(1, int(picture.width() * s)), std::max(1, int(picture.height() * s)));
+    const QSize pad(int(margin.width() * s), int(margin.height() * s));
+    QImage work(inner.width() + 2 * pad.width(), inner.height() + 2 * pad.height(), QImage::Format_RGB32);
+    work.fill(Qt::black);
+    QImage known(work.size(), QImage::Format_Grayscale8);
+    known.fill(0);
+    {
+        QPainter painter(&work);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(QRect(QPoint(pad.width(), pad.height()), inner), picture);
+        QPainter mark(&known);
+        mark.fillRect(QRect(QPoint(pad.width(), pad.height()), inner), Qt::white);
+    }
+    if (!paintIn(work, known, error))
+        return {};
     // Back at full size: the margins as painted, the picture as it was.
     QImage wide(picture.width() + 2 * margin.width(), picture.height() + 2 * margin.height(), QImage::Format_RGB32);
     QPainter painter(&wide);
@@ -1669,10 +1747,133 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         }
     behind = around;
 
+    // Jumps in distance: a cell whose neighbour is more than 15% farther is
+    // on the near side of one. Into the near thing from there, a few cells
+    // deep, the far surface is carried on: that band is what a moving
+    // camera can see behind the edge.
+    constexpr double Jump = 1.15;
+    const int aw = behind.width(), ah = behind.height();
+    auto distanceAt = [&](int x, int y) { return decodeDepth(reinterpret_cast<const quint16 *>(behind.constScanLine(y))[x]); };
+    std::vector<float> farOf(size_t(aw) * ah, 0);
+    std::vector<int> steps(size_t(aw) * ah, -1);
+    std::vector<uchar> farEdge(size_t(aw) * ah, 0);
+    QList<int> queue;
+    static const int around4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    // Diagonals too: the picture's triangles have diagonal sides.
+    static const int around8[8][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}};
+    for (int y = 0; y < ah; ++y)
+        for (int x = 0; x < aw; ++x) {
+            const double here = distanceAt(x, y);
+            for (const auto &d : around8) {
+                const int nx = x + d[0], ny = y + d[1];
+                if (nx < 0 || ny < 0 || nx >= aw || ny >= ah)
+                    continue;
+                const double there = distanceAt(nx, ny);
+                if (there > here * Jump) {
+                    const size_t i = size_t(y) * aw + x;
+                    farOf[i] = std::max(farOf[i], float(there));
+                    farEdge[size_t(ny) * aw + nx] = 1;
+                }
+            }
+            if (farOf[size_t(y) * aw + x] > 0)
+                steps[size_t(y) * aw + x] = 0, queue.append(y * aw + x);
+        }
+    const int deep = std::max(6, aw / 48);
+    for (qsizetype q = 0; q < queue.size(); ++q) {
+        const int i = queue.at(q), x = i % aw, y = i / aw;
+        if (steps[size_t(i)] >= deep)
+            continue;
+        for (const auto &d : around4) {
+            const int nx = x + d[0], ny = y + d[1];
+            if (nx < 0 || ny < 0 || nx >= aw || ny >= ah)
+                continue;
+            const size_t j = size_t(ny) * aw + nx;
+            if (steps[j] >= 0 || distanceAt(nx, ny) * Jump > farOf[size_t(i)])
+                continue;
+            steps[j] = steps[size_t(i)] + 1;
+            farOf[j] = farOf[size_t(i)];
+            queue.append(int(j));
+        }
+    }
+    // On the far side it overlaps the edge by two of the picture mesh's cells
+    // (a dropped triangle reaches one past it), so no gap is left uncovered.
+    {
+        const int reach = 2 * int(std::ceil(aw / 320.0));
+        std::vector<int> along(size_t(aw) * ah, -1);
+        QList<int> ring;
+        for (int i = 0; i < aw * ah; ++i)
+            if (farEdge[size_t(i)])
+                along[size_t(i)] = 0, ring.append(i);
+        for (qsizetype q = 0; q < ring.size(); ++q) {
+            const int i = ring.at(q), x = i % aw, y = i / aw;
+            if (along[size_t(i)] >= reach)
+                continue;
+            for (const auto &d : around4) {
+                const int nx = x + d[0], ny = y + d[1];
+                if (nx < 0 || ny < 0 || nx >= aw || ny >= ah || along[size_t(ny) * aw + nx] >= 0 || steps[size_t(ny) * aw + nx] >= 0)
+                    continue;
+                along[size_t(ny) * aw + nx] = along[size_t(i)] + 1;
+                farEdge[size_t(ny) * aw + nx] = 1;
+                ring.append(ny * aw + nx);
+            }
+        }
+    }
+    QImage farDepthGrid = behind.copy();
+    for (int y = 0; y < ah; ++y)
+        for (int x = 0; x < aw; ++x)
+            if (steps[size_t(y) * aw + x] >= 0)
+                reinterpret_cast<quint16 *>(farDepthGrid.scanLine(y))[x] = encodeDepth(farOf[size_t(y) * aw + x]);
+    // Its picture: the widened picture with the band painted in, see-through
+    // everywhere else (but a cell's overlap on the far side, to join).
+    const QSize farSize(std::min(2048, wide.width()), int(std::round(std::min(2048, wide.width()) * double(wide.height()) / wide.width())));
+    // Starting from the background as it is now: the pieces cut out of it
+    // and filled in behind, not the picture with them in it.
+    QImage farWork = wide.scaled(farSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+    {
+        const QImage now = assets.image(scene.layers.at(root).source);
+        if (!now.isNull()) {
+            const double k = double(farSize.width()) / wide.width();
+            QPainter painter(&farWork);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawImage(QRectF(margin.width() * k, margin.height() * k, picture.width() * k, picture.height() * k), now);
+        }
+    }
+    QImage farKnown(farSize, QImage::Format_Grayscale8), farAlpha(farSize, QImage::Format_Alpha8);
+    farKnown.fill(255);
+    farAlpha.fill(0);
+    {
+        QPainter unknown(&farKnown), shown(&farAlpha);
+        const double cw = double(farSize.width()) / aw, ch = double(farSize.height()) / ah;
+        for (int y = 0; y < ah; ++y)
+            for (int x = 0; x < aw; ++x) {
+                const size_t i = size_t(y) * aw + x;
+                const QRectF cell(x * cw - cw, y * ch - ch, cw * 3, ch * 3);
+                if (steps[i] >= 0) {
+                    unknown.fillRect(cell, Qt::black);
+                    shown.fillRect(cell, Qt::white);
+                } else if (farEdge[i]) {
+                    shown.fillRect(cell, Qt::white);
+                }
+            }
+    }
+    if (!paintIn(farWork, farKnown, error))
+        return false;
+    QImage farPicture = farWork.convertToFormat(QImage::Format_ARGB32);
+    soften(farAlpha, 2);
+    for (int y = 0; y < farPicture.height(); ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(farPicture.scanLine(y));
+        const uchar *a = farAlpha.constScanLine(y);
+        for (int x = 0; x < farPicture.width(); ++x)
+            line[x] = qRgba(qRed(line[x]), qGreen(line[x]), qBlue(line[x]), a[x]);
+    }
+
     const QDir dir(assets.directory());
     dir.mkpath("assets/world");
     const QString stem = "assets/world/" + scene.layers.at(root).name.toLower().replace(QRegularExpression("[^a-z0-9]+"), "-");
     const QString depthFile = stem + "-depth.png", behindFile = stem + "-behind.png";
+    const QString farDepthFile = stem + "-far-depth.png", farPictureFile = stem + "-far.png";
+    if (!writeDepth(farDepthGrid, dir.filePath(farDepthFile), error) || !writeDepth(farPicture, dir.filePath(farPictureFile), error))
+        return false;
     const QString wideFile = stem + "-wide.jpg";
     QSaveFile wideOut(dir.filePath(wideFile));
     QImageWriter wideWriter(&wideOut, "jpg");
@@ -1690,6 +1891,7 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         {"behind", behindFile},
         {"focal", std::round(focal * 10) / 10},
         {"wide", wideFile},
+        {"far", QJsonObject{{"depth", farDepthFile}, {"picture", farPictureFile}}},
         {"dust", dustColour(picture).name()},
         {"margin", QJsonArray{margin.width(), margin.height()}},
         {"ground", QJsonObject{{"up", QJsonArray{std::round(up.x() * 1e4) / 1e4, std::round(up.y() * 1e4) / 1e4,

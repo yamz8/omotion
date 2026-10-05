@@ -29,6 +29,10 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
     QJsonObject key{{"world", scene.raw.value("world")}, {"directory", directory}};
     QVariantList layers;
     QJsonArray parts;
+    if (m_info.valid && !m_info.farDepth.isEmpty())
+        layers.append(QVariantMap{{"layer", World::FarLayer},
+                                  {"picture", QUrl::fromLocalFile(QDir(directory).filePath(m_info.farPicture))},
+                                  {"shaped", false}});
     if (m_info.valid)
         for (const int index : World::layers(scene)) {
             const Layer &layer = scene.layers.at(index);
@@ -154,7 +158,7 @@ void WorldGeometry::setLayer(int layer) {
 
 void WorldGeometry::rebuild() {
     clear();
-    if (m_source && m_layer >= 0) {
+    if (m_source && (m_layer >= 0 || m_layer == World::FarLayer)) {
         const World::Mesh &mesh = m_source->mesh(m_layer);
         if (!mesh.isNull()) {
             setVertexData(mesh.vertices);

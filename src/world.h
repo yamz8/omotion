@@ -44,6 +44,12 @@ struct Info {
     // by the AI), and those margins.
     QString wide;
     QSize margin;
+    // What lies behind the near side of jumps in distance (the sky behind a
+    // hill, the hills behind a sign), painted in by the AI: its distances
+    // and its picture, see-through but for that band. Shown where a moving
+    // camera opens a gap.
+    QString farDepth;
+    QString farPicture;
     // The ground, from the camera: which way is up (y down, z forward, as a
     // picture's pixels go) and how high the camera stood above it.
     QVector3D up{0, -1, 0};
@@ -53,6 +59,10 @@ struct Info {
     double scale = 1;
 };
 Info info(const Scene &scene);
+
+// The layer behind the background's near edges, where a world has one; it
+// goes by this index in meshes and the view.
+constexpr int FarLayer = -10;
 
 // The world's layers, in drawing order: the picture and everything cut from
 // it (and from its pieces), but not particles.
