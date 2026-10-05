@@ -211,6 +211,8 @@ omotion cut photo.omotion photo --ai-pick 316,703 --name deer
 omotion split photo.omotion --layers 4 --animate
                                           # D then A: depth layers, moving
 omotion models --download                 # fetch the AI models
+omotion info photo.omotion                # every layer's place on the canvas, as JSON
+omotion pivot photo.omotion pine 1460,780 # P: where it turns, here the foot of the tree
 omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
 omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```

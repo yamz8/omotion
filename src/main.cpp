@@ -2,6 +2,9 @@
 // export the result. The whole animation is a scene.json anyone can edit.
 
 #include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -44,6 +47,10 @@ const char *Usage = R"(Usage:
                                          looping parallax camera move
   omotion preset <project> <layer> <sway|float|pulse|bounce|spin|fade> [--amount <n>] [--at <seconds>]
                                          Give a layer a ready-made motion, looping with the scene
+  omotion pivot <project> <layer> <x,y> [--at <seconds>]
+                                         Move where a layer turns, without moving it, as P does
+  omotion info <project> [--at <seconds>]
+                                         The scene as JSON, with each layer's place on the canvas
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 145 MB, checked against their hashes)
@@ -153,6 +160,66 @@ int command(const QStringList &args) {
         if (!Project::save(directory, edited, &error))
             return fail(error);
         QTextStream(stdout) << edited.layers.at(piece).name << "\n";
+        return 0;
+    }
+
+    if (args.at(1) == "info") {
+        double t = 0;
+        if (args.size() == 5 && args.at(3) == "--at")
+            t = args.at(4).toDouble();
+        // What an agent needs to work on the picture: where each layer is.
+        QJsonArray layers;
+        for (int i = 0; i < scene.layers.size(); ++i) {
+            const Layer &layer = scene.layers.at(i);
+            const QSizeF size = assets.size(layer.source);
+            const QTransform toCanvas = layerTransform(scene, assets, i, t);
+            const QRectF bounds = toCanvas.mapRect(QRectF(QPointF(0, 0), size));
+            const QPointF pivot = toCanvas.map(QPointF(layer.anchor.x() * size.width(), layer.anchor.y() * size.height()));
+            auto round = [](double v) { return std::round(v * 10) / 10; };
+            QJsonObject entry{{"name", layer.name},
+                              {"source", layer.source},
+                              {"visible", layer.visible},
+                              {"bounds", QJsonArray{round(bounds.x()), round(bounds.y()), round(bounds.width()), round(bounds.height())}},
+                              {"pivot", QJsonArray{round(pivot.x()), round(pivot.y())}},
+                              {"blend", layer.blend}};
+            if (!layer.parent.isEmpty())
+                entry["parent"] = layer.parent;
+            QJsonArray animated;
+            for (auto it = layer.keys.begin(); it != layer.keys.end(); ++it)
+                animated.append(it.key());
+            entry["animated"] = animated;
+            const QJsonObject cut = layer.raw.value("cut").toObject();
+            if (!cut.isEmpty())
+                entry["cutFrom"] = cut.value("from");
+            layers.append(entry);
+        }
+        const QJsonObject info{{"directory", directory},
+                               {"width", scene.width},
+                               {"height", scene.height},
+                               {"fps", scene.fps},
+                               {"duration", scene.duration},
+                               {"at", t},
+                               {"layers", layers}};
+        QTextStream(stdout) << QJsonDocument(info).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+
+    if (args.at(1) == "pivot") {
+        if (args.size() < 5)
+            return fail("pivot takes a project, a layer, and an x,y point on the canvas.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        const QStringList xy = args.at(4).split(',');
+        bool okX = false, okY = false;
+        const QPointF point = xy.size() == 2 ? QPointF(xy.at(0).toDouble(&okX), xy.at(1).toDouble(&okY)) : QPointF();
+        if (!okX || !okY)
+            return fail(QString("\"%1\" isn't a point like 120,340.").arg(args.at(4)));
+        const double t = args.size() == 7 && args.at(5) == "--at" ? args.at(6).toDouble() : 0;
+        Project::setPivot(edited, assets, layer, point, t);
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
         return 0;
     }
 
@@ -270,7 +337,8 @@ int command(const QStringList &args) {
 int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
-                                       !std::strcmp(argv[1], "preset") ||
+                                       !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
+                                       !std::strcmp(argv[1], "info") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -304,7 +372,8 @@ int main(int argc, char *argv[]) {
         return problem.isEmpty() ? 0 : 1;
     }
     if (headless) {
-        if (args.size() < (args.at(1) == "split" || args.at(1) == "clean" ? 3 : 4))
+        const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info";
+        if (args.size() < (short_ ? 3 : 4))
             return fail(QString("missing arguments.\n\n") + Usage);
         return command(args);
     }
