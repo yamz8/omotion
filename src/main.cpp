@@ -55,7 +55,8 @@ const char *Usage = R"(Usage:
                                          Drive a property from another, on top of its own
                                          value: "car.x * 0.8", "speed of car.x * 0.05",
                                          "acceleration of car.x * -0.002, smooth 0.2",
-                                         "time * 90"; extras: lag, smooth, min, max, abs
+                                         "time * 90"; extras: lag, smooth, spring, damping,
+                                         min, max, abs
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...

@@ -52,7 +52,10 @@ layer it stands in, so it rides the camera move with its surroundings, and
    pins.
 5. Drag keyframes (◆) along the timeline to fix the timing, and press **E**
    to change how they ease into the next one, or drag the handles of the
-   curve in the inspector to shape it yourself. **Ctrl+C** and **Ctrl+V**
+   curve in the inspector to shape it yourself. For weight, type a physical
+   easing in the inspector: `spring(3)` overshoots and settles, `bounce(2)`
+   lands like a dropped ball, `arc(300)` jumps 300 px high on the way to
+   the next key. **Ctrl+C** and **Ctrl+V**
    reuse a motion on another layer.
 6. Press **V** for the camera, and animate it like a layer: pan, zoom and
    turn the whole scene. Each layer's **Follow camera** sets how much the
@@ -226,7 +229,13 @@ photo.omotion/
 - **Keys** have a time `t` in seconds, a value `v`, and an `ease` for the
   way *out* of that key: `linear`, `in`, `out`, `inOut`, `outBack`
   (overshoots and settles), `hold` (jumps at the next key), or a curve of
-  your own, `cubic(x1,y1,x2,y2)`, as in CSS (y past 0–1 overshoots).
+  your own, `cubic(x1,y1,x2,y2)`, as in CSS (y past 0–1 overshoots). The
+  physical ones: `spring(n)` overshoots and rings down in `n` wobbles
+  (`spring` is 2); `bounce(n)` falls under gravity and bounces `n` times,
+  each a quarter as high (`bounce` is 3; `bounce(0)` is a plain fall);
+  `arc(h)` is a jump, straight across with `y` rising `h` pixels at the
+  middle along a gravity parabola (other properties go straight, so an arc
+  on every property's key is fine).
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
 - **`links`** drive a property from another, so a scene says how things
@@ -236,7 +245,10 @@ photo.omotion/
   `times` (1 if left out), and optionally `lag` (seconds behind the
   source), `smooth` (seconds `speed` and `acceleration` are measured over,
   a frame if left out), `abs` (`true` counts backwards as forwards), and
-  `min`/`max` to hold it within. What the link gives is added to the
+  `min`/`max` to hold it within. `spring` (times a second) makes it follow
+  on a spring, lagging, overshooting and settling, with `damping` (0.5 if
+  left out; 1 settles without overshoot, near 0 rings): a body on its
+  suspension, a lean that wobbles, a camera that's carried. What the link gives is added to the
   property's own value or keys. One link per property; links that loop
   back on themselves are refused. The camera takes them too.
 
@@ -286,7 +298,8 @@ omotion pivot photo.omotion pine 1460,780 # P: where it turns, here the foot of 
 omotion preset photo.omotion pine sway    # N: a ready-made motion (--amount 2 for twice as much)
 omotion link photo.omotion wheel rotation "car.x * 0.8"
                                           # ⛓: drive a property from another; extras
-                                          # after commas: lag, smooth, min, max, abs;
+                                          # after commas: lag, smooth, spring, damping,
+                                          # min, max, abs;
                                           # --none unlinks
 omotion particles photo.omotion snow --count 400
                                           # Shift+I: a particle layer (any setting as --name value)

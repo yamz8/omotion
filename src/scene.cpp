@@ -640,18 +640,22 @@ double Scene::linkValue(const Layer &layer, const QString &property, double t) c
     auto drive = [&](double moment) {
         const double when = moment - link.lag;
         double measure = 0;
-        if (link.of == "speed") {
+        if (link.of != "value") {
             // Measured inside the scene, so a car already moving at the first
-            // frame isn't taken to be half as fast there.
+            // frame isn't taken to be half as fast there, or to have jolted.
             double lo = when - h, hi = when + h;
             if (lo < 0)
                 hi -= lo, lo = 0;
             if (hi > duration)
                 lo -= hi - duration, hi = duration;
             lo = std::max(0.0, lo);
-            measure = hi > lo ? (read(hi) - read(lo)) / (hi - lo) : 0;
-        } else if (link.of == "acceleration") {
-            measure = (read(when + h) - 2 * read(when) + read(when - h)) / (h * h);
+            const double mid = (lo + hi) / 2, half = (hi - lo) / 2;
+            if (half <= 0)
+                measure = 0;
+            else if (link.of == "speed")
+                measure = (read(hi) - read(lo)) / (hi - lo);
+            else
+                measure = (read(hi) - 2 * read(mid) + read(lo)) / (half * half);
         } else {
             measure = read(when);
         }

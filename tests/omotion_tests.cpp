@@ -226,6 +226,7 @@ private slots:
         QCOMPARE(scene.value(wheel, "x", 0), 100.0);
         QCOMPARE(scene.value(wheel, "x", 3), 100.0);
         QVERIFY(std::abs(scene.value(wheel, "y", 1.5)) < 1e-6);
+        QVERIFY(std::abs(scene.value(wheel, "y", 0)) < 1e-6);  // No jolt at the start.
         // A second behind: at 2 s it reads where the car was at 1 s.
         QCOMPARE(scene.value(wheel, "scale", 2), 1.0 + 1);
         // Backwards at 100 px a second counts as 100, held to the max.
