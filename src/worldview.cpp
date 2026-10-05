@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <algorithm>
 #include <QDir>
+#include <cstdio>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -282,14 +284,21 @@ WorldRenderer::~WorldRenderer() = default;
 QImage WorldRenderer::render(const Scene &scene, const QString &directory, double t, const QSize &size) {
     if (d->failed || size.isEmpty() || !d->resize(size))
         return {};
+    QElapsedTimer clock;
+    clock.start();
     const int revision = d->source.revision();
     d->source.setScene(scene, directory);
+    const qint64 a = clock.nsecsElapsed();
     d->source.setTime(t);
+    const qint64 b = clock.nsecsElapsed();
     // A new world's pictures are uploaded on its first frame; the second one
     // shows them.
     QImage image = d->draw();
     if (d->source.revision() != revision)
         image = d->draw();
+    // OMOTION_PROFILE=1 tells where a frame's time goes.
+    if (qEnvironmentVariableIsSet("OMOTION_PROFILE"))
+        fprintf(stderr, "world render: scene %.1f ms, frame %.1f ms, draw %.1f ms\n", a / 1e6, (b - a) / 1e6, (clock.nsecsElapsed() - b) / 1e6);
     return image;
 }
 

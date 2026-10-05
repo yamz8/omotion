@@ -287,7 +287,9 @@ photo.omotion/
   the `ground` (`up`, which way is up as the picture's camera sees it, x
   right, y down, z ahead; and the camera's `height` above it in meters),
   the picture carried past its edges (`wide`, by `margin` pixels each side),
-  its `scale` and the `dust` colour. A world layer's **world properties**
+  its `scale`, the `dust` colour and the camera's `shutter` in degrees (180
+  unless set; 0 for none): what moves fast smears across that much of each
+  frame, as on film. A world layer's **world properties**
   move it from where it is in the picture: `worldX` (right), `worldY` (up)
   and `worldZ` (away), in meters, and `yaw` (right), `pitch` (nose up) and
   `roll` (lean right), in degrees, turning about its pivot. The camera has

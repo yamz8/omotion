@@ -1892,7 +1892,40 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
     // A world is drawn in 3D first, the other layers over it.
     QImage world;
     if (worldDrawer && World::info(scene).valid) {
-        world = worldDrawer(scene, assets, t, target);
+        // A camera's shutter is open for part of each frame, so what moves
+        // fast smears along its way: several moments across the shutter,
+        // averaged. 180° (half a frame) unless the world says otherwise.
+        const double shutter = scene.raw.value("world").toObject().value("shutter").toDouble(180) / 360 / scene.fps;
+        const int samples = shutter > 0 ? 16 : 1;
+        std::vector<float> sum;
+        for (int i = 0; i < samples; ++i) {
+            const double at = samples == 1 ? t : t + shutter * (double(i) / (samples - 1) - .5);
+            const QImage moment = worldDrawer(scene, assets, std::max(0.0, at), target);
+            if (moment.isNull())
+                break;
+            if (samples == 1) {
+                world = moment;
+                break;
+            }
+            const QImage argb = moment.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+            if (sum.empty())
+                sum.assign(size_t(argb.width()) * argb.height() * 4, 0);
+            for (int y = 0; y < argb.height(); ++y) {
+                const uchar *line = argb.constScanLine(y);
+                float *into = sum.data() + size_t(y) * argb.width() * 4;
+                for (int x = 0; x < argb.width() * 4; ++x)
+                    into[x] += line[x];
+            }
+            if (i == samples - 1) {
+                world = QImage(argb.size(), QImage::Format_ARGB32_Premultiplied);
+                for (int y = 0; y < world.height(); ++y) {
+                    uchar *line = world.scanLine(y);
+                    const float *from = sum.data() + size_t(y) * world.width() * 4;
+                    for (int x = 0; x < world.width() * 4; ++x)
+                        line[x] = uchar(std::lround(from[x] / samples));
+                }
+            }
+        }
         static bool warned = false;
         if (world.isNull() && !warned) {
             warned = true;

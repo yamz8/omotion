@@ -365,7 +365,41 @@ struct ShapeFit {
     }
 };
 
+ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index);
+
+// Fitting reads the piece's depth closely, and every frame asks where a
+// piece is: fits are kept until what they depend on changes.
+QByteArray layerKey(const Scene &scene, AssetCache &assets, int index) {
+    const Layer &layer = scene.layers.at(index);
+    return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")},
+                                     {"directory", assets.directory()},
+                                     {"index", index},
+                                     {"source", layer.source},
+                                     {"shape", layer.raw.value("shape")},
+                                     {"cut", layer.raw.value("cut")},
+                                     {"anchor", QJsonArray{layer.anchor.x(), layer.anchor.y()}}})
+        .toJson(QJsonDocument::Compact);
+}
+
 ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
+    static QHash<QByteArray, ShapeFit> cache;
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const QByteArray key = layerKey(scene, assets, index);
+    {
+        QMutexLocker lock(&cacheLock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const ShapeFit fit = computeFit(scene, assets, index);
+    QMutexLocker lock(&cacheLock);
+    if (cache.size() > 64)
+        cache.clear();
+    cache.insert(key, fit);
+    return fit;
+}
+
+ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index) {
     ShapeFit fit;
     const Info world = info(scene);
     const int root = scene.indexOf(world.picture);
@@ -407,7 +441,30 @@ ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
 
 }
 
+namespace {
+Mesh buildMesh(const Scene &scene, AssetCache &assets, int index);
+}
+
 Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
+    static QHash<QByteArray, Mesh> cache;
+    if (index < 0 || index >= scene.layers.size())
+        return {};
+    const QByteArray key = layerKey(scene, assets, index);
+    {
+        QMutexLocker lock(&cacheLock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const Mesh made = buildMesh(scene, assets, index);
+    QMutexLocker lock(&cacheLock);
+    if (cache.size() > 32)
+        cache.clear();
+    cache.insert(key, made);
+    return made;
+}
+
+namespace {
+Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     const Info world = info(scene);
     const int root = scene.indexOf(world.picture);
     if (!world.valid || index < 0 || index >= scene.layers.size() || rootOf(scene, index) != root)
@@ -505,6 +562,8 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
 
     mesh.pivot = pivot(scene, assets, index);
     return mesh;
+}
+
 }
 
 QVector3D pivot(const Scene &scene, AssetCache &assets, int index) {
