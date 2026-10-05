@@ -4,5 +4,6 @@
         <file alias="Timeline.qml">Timeline.qml</file>
         <file alias="Inspector.qml">Inspector.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="WorldView.qml">WorldView.qml</file>
     </qresource>
 </RCC>

@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "world.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -24,12 +25,13 @@ double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
 
 const QStringList &Scene::properties() {
     static const QStringList list{"x", "y", "z", "scale", "scaleX", "scaleY", "rotation", "opacity",
-                                  "brightness", "contrast", "saturation", "blur", "glow"};
+                                  "brightness", "contrast", "saturation", "blur", "glow",
+                                  "worldX", "worldY", "worldZ", "yaw", "pitch", "roll"};
     return list;
 }
 
 const QStringList &Scene::optionalProperties() {
-    static const QStringList list = QStringList(lookProperties()) << "z";
+    static const QStringList list = QStringList(lookProperties()) << "z" << worldProperties();
     return list;
 }
 
@@ -82,7 +84,12 @@ QJsonObject Scene::particleDefaults(const QString &kind) {
 }
 
 const QStringList &Scene::cameraProperties() {
-    static const QStringList list{"x", "y", "zoom", "rotation"};
+    static const QStringList list{"x", "y", "zoom", "rotation", "worldX", "worldY", "worldZ", "yaw", "pitch"};
+    return list;
+}
+
+const QStringList &Scene::worldProperties() {
+    static const QStringList list{"worldX", "worldY", "worldZ", "yaw", "pitch", "roll"};
     return list;
 }
 
@@ -419,6 +426,9 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         scene.camera.base["y"] = camera.value("y").toDouble(scene.height / 2.0);
         scene.camera.base["zoom"] = camera.value("zoom").toDouble(1);
         scene.camera.base["rotation"] = camera.value("rotation").toDouble(0);
+        for (const QString &property : worldProperties())
+            if (camera.contains(property))
+                scene.camera.base[property] = camera.value(property).toDouble(0);
         if (scene.camera.base["zoom"] <= 0)
             return fail("The camera's zoom must be more than 0.");
         const QJsonObject keys = camera.value("keys").toObject();
@@ -579,14 +589,24 @@ QJsonObject Scene::toJson() const {
     QJsonObject cameraLinks;
     for (auto it = camera.links.begin(); it != camera.links.end(); ++it)
         cameraLinks.insert(it.key(), linkToJson(it.value()));
+    bool moved = false;
+    for (const QString &property : worldProperties())
+        moved |= camera.base.value(property, 0) != 0;
     if (cameraKeys.isEmpty() && cameraLinks.isEmpty() && cx == width / 2.0 && cy == height / 2.0 && zoom == 1 &&
-        turn == 0 && cam.isEmpty()) {
+        turn == 0 && !moved && cam.isEmpty()) {
         json.remove("camera");
     } else {
         cam.insert("x", cx);
         cam.insert("y", cy);
         cam.insert("zoom", zoom);
         cam.insert("rotation", turn);
+        for (const QString &property : worldProperties()) {
+            const double v = camera.base.value(property, 0);
+            if (v == 0)
+                cam.remove(property);
+            else
+                cam.insert(property, v);
+        }
         if (cameraKeys.isEmpty())
             cam.remove("keys");
         else
@@ -1764,16 +1784,26 @@ void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, do
     painter.restore();
 }
 
-void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t) {
+namespace {
+WorldDrawer worldDrawer;
+}
+
+void setWorldRenderer(WorldDrawer drawer) { worldDrawer = std::move(drawer); }
+
+void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld) {
     painter.save();
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.setRenderHint(QPainter::Antialiasing);
     const QTransform base = painter.transform();
     // Output pixels per canvas pixel: the view's zoom, or the export's size.
     const double outputScale = std::sqrt(std::abs(base.determinant()));
-    painter.fillRect(QRectF(0, 0, scene.width, scene.height), scene.background);
+    if (!overWorld)
+        painter.fillRect(QRectF(0, 0, scene.width, scene.height), scene.background);
     painter.setClipRect(QRectF(0, 0, scene.width, scene.height));
+    const QList<int> inWorld = overWorld ? World::layers(scene) : QList<int>();
     for (int i = 0; i < scene.layers.size(); ++i) {
+        if (inWorld.contains(i))
+            continue;
         const Layer &layer = scene.layers.at(i);
         const double opacity = clamp01(scene.value(layer, "opacity", t));
         if (!layer.visible || opacity <= 0)
@@ -1859,8 +1889,22 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
     QImage frame(target, QImage::Format_ARGB32_Premultiplied);
     frame.fill(Qt::transparent);
     QPainter painter(&frame);
+    // A world is drawn in 3D first, the other layers over it.
+    QImage world;
+    if (worldDrawer && World::info(scene).valid) {
+        world = worldDrawer(scene, assets, t, target);
+        static bool warned = false;
+        if (world.isNull() && !warned) {
+            warned = true;
+            qWarning("omotion: can't draw the world in 3D here (it needs a GPU and a desktop session); drawing it flat.");
+        }
+    }
+    if (!world.isNull()) {
+        painter.fillRect(frame.rect(), scene.background);
+        painter.drawImage(0, 0, world);
+    }
     painter.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
-    renderScene(painter, scene, assets, t);
+    renderScene(painter, scene, assets, t, !world.isNull());
     return frame;
 }
 

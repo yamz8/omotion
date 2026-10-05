@@ -16,6 +16,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTransform>
+#include <functional>
 #include <limits>
 
 class QPainter;
@@ -103,6 +104,10 @@ struct Scene {
     QJsonObject raw;
     static constexpr int CameraIndex = -2;
     static const QStringList &cameraProperties();
+    // Moving and turning in a world, in meters and degrees: worldX right,
+    // worldY up, worldZ away from the camera; yaw right, pitch up, roll
+    // clockwise. The camera takes all but roll (its rotation is that).
+    static const QStringList &worldProperties();
     // The kinds of particles, and each one's settings to start from.
     static const QStringList &particleKinds();
     static QJsonObject particleDefaults(const QString &kind);
@@ -266,7 +271,15 @@ QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, dou
 // Where a layer's x and y live: its parent's pixels (or the world) mapped to
 // the canvas, through the camera as this layer sees it.
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t);
-void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t);
+// Draws the scene's layers over its background. Over a world (drawn first,
+// by renderFrame or the window), the world's own layers and the background
+// are left out.
+void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld = false);
+// What draws a scene's world for renderFrame: set by the program, which
+// links the 3D side; without it, or when it can't draw here, worlds are
+// drawn flat.
+using WorldDrawer = std::function<QImage(const Scene &, AssetCache &, double, const QSize &)>;
+void setWorldRenderer(WorldDrawer drawer);
 // Where a point of a pinned layer's image goes, bent by its pins at time t
 // (moving least squares, as rigid as can be); the point itself if unpinned.
 QPointF bend(const Scene &scene, const Layer &layer, const QPointF &point, double t);

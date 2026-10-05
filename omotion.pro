@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 dbus network concurrent multimedia
+QT += core gui gui-private quick3d qml quick quickcontrols2 dbus network concurrent multimedia
 
 CONFIG += c++17 release
 TARGET = omotion
@@ -14,7 +14,9 @@ HEADERS += \
     src/scene.h \
     src/sceneview.h \
     src/select.h \
-    src/theme.h
+    src/theme.h \
+    src/world.h \
+    src/worldview.h
 
 SOURCES += \
     src/main.cpp \
@@ -26,7 +28,9 @@ SOURCES += \
     src/scene.cpp \
     src/sceneview.cpp \
     src/select.cpp \
-    src/theme.cpp
+    src/theme.cpp \
+    src/world.cpp \
+    src/worldview.cpp
 
 RESOURCES += src/resources.qrc
 

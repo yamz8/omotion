@@ -21,6 +21,8 @@
 #include "project.h"
 #include "sceneview.h"
 #include "theme.h"
+#include "world.h"
+#include "worldview.h"
 
 namespace {
 
@@ -57,6 +59,10 @@ const char *Usage = R"(Usage:
                                          "acceleration of car.x * -0.002, smooth 0.2",
                                          "time * 90"; extras: lag, smooth, spring, damping,
                                          min, max, abs
+  omotion world <project> [--layer <name>]
+                                         Turn the picture into a 3D world, with the AI: its
+                                         distances, lens and ground (the bottom layer's
+                                         picture unless named)
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
   omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
@@ -271,6 +277,29 @@ int command(const QStringList &args) {
                                {"at", t},
                                {"layers", layers}};
         QTextStream(stdout) << QJsonDocument(info).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+
+    if (args.at(1) == "world") {
+        Scene edited = scene;
+        int layer = 0;
+        for (int i = 3; i < args.size(); ++i) {
+            if (args.at(i) == "--layer" && i + 1 < args.size()) {
+                layer = edited.indexOf(args.at(++i));
+                if (layer < 0)
+                    return fail(QString("There's no layer named \"%1\".").arg(args.at(i)));
+            } else {
+                return fail(QString("world doesn't know \"%1\".").arg(args.at(i)));
+            }
+        }
+        if (!World::build(edited, assets, layer, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        const World::Info world = World::info(edited);
+        QTextStream(stdout) << QString("World of %1: lens %2 px, camera %3 m above the ground, %4 layers.\n")
+                                   .arg(world.picture)
+                                   .arg(world.focal, 0, 'f', 0)
+                                   .arg(world.height, 0, 'f', 2)
+                                   .arg(World::layers(edited).size());
         return 0;
     }
 
@@ -515,13 +544,16 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
-                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") ||
+                                       !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") ||
                                        !std::strcmp(argv[1], "models"));
-    if (headless)
+    // No window, but a world still needs the GPU, which a desktop session's
+    // platform gives without showing anything; elsewhere, offscreen.
+    if (headless && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("omotion");
+    registerWorld();
     app.setApplicationVersion("0.3.0");
 
     const QStringList args = app.arguments();
@@ -554,7 +586,7 @@ int main(int argc, char *argv[]) {
         return problem.isEmpty() ? 0 : 1;
     }
     if (headless) {
-        const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info";
+        const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info" || args.at(1) == "world";
         if (args.size() < (short_ ? 3 : 4))
             return fail(QString("missing arguments.\n\n") + Usage);
         return command(args);

@@ -19,6 +19,7 @@
 #include "scene.h"
 #include "select.h"
 #include "theme.h"
+#include "world.h"
 
 namespace {
 
@@ -1339,6 +1340,87 @@ private slots:
         // Nothing valid, nothing to solve.
         std::fill(g.valid.begin(), g.valid.end(), 0);
         QVERIFY(!Ai::solveLens(g, scale, picture));
+    }
+
+    void depthCodesKeepCentimetresAndKilometres() {
+        for (const double meters : {.05, .5, 4.37, 61.0, 1500.0}) {
+            const double back = World::decodeDepth(World::encodeDepth(meters));
+            QVERIFY2(std::abs(back - meters) / meters < 2e-4, qPrintable(QString::number(meters)));
+        }
+        QCOMPARE(World::encodeDepth(1e9), World::Sky);
+        QCOMPARE(World::decodeDepth(World::Sky), World::Far);
+        // Holes fill from around them: between 4 m and 8 m, in between.
+        QImage depth(40, 10, QImage::Format_Grayscale16), hole(40, 10, QImage::Format_Grayscale8);
+        hole.fill(0);
+        for (int y = 0; y < 10; ++y)
+            for (int x = 0; x < 40; ++x) {
+                reinterpret_cast<quint16 *>(depth.scanLine(y))[x] = World::encodeDepth(x < 20 ? 4 : 8);
+                if (x >= 15 && x < 25)
+                    hole.scanLine(y)[x] = 255;
+            }
+        World::fillDepth(depth, hole);
+        const double middle = World::decodeDepth(reinterpret_cast<const quint16 *>(depth.constScanLine(5))[20]);
+        QVERIFY2(middle > 4.2 && middle < 7.8, qPrintable(QString::number(middle)));
+        QCOMPARE(World::decodeDepth(reinterpret_cast<const quint16 *>(depth.constScanLine(5))[2]), World::decodeDepth(World::encodeDepth(4)));
+    }
+
+    void worldAtRestLooksLikeThePicture() {
+        // A picture, a piece cut from it, and a made-up world: every mesh
+        // point, seen through the world's camera at rest, lands back on its
+        // own pixel of the picture.
+        QTemporaryDir dir;
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {400, 200}), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        QVERIFY(Project::cutOut(scene, assets, 0, QPolygonF({QPointF(150, 50), QPointF(260, 50), QPointF(260, 140), QPointF(150, 140)}),
+                                0, true, &error, "piece", 0, true, false) >= 0);
+        QImage depth(40, 20, QImage::Format_Grayscale16);
+        for (int y = 0; y < 20; ++y)
+            for (int x = 0; x < 40; ++x)
+                reinterpret_cast<quint16 *>(depth.scanLine(y))[x] = y < 5 ? World::Sky : World::encodeDepth(3 + y * .4 + x * .05);
+        QDir(project).mkpath("assets/world");
+        QVERIFY(depth.save(QDir(project).filePath("assets/world/d.png")));
+        scene.raw["world"] = QJsonObject{{"picture", scene.layers[0].name}, {"depth", "assets/world/d.png"},
+                                         {"behind", "assets/world/d.png"}, {"focal", 350},
+                                         {"ground", QJsonObject{{"up", QJsonArray{.05, -.98, .15}}, {"height", 1.2}}}};
+        QVERIFY(World::info(scene).valid);
+        QCOMPARE(World::layers(scene).size(), 2);
+        const World::Frame frame = World::frame(scene, assets, 0);
+        QMatrix4x4 view;
+        view.rotate(frame.cameraRotation.conjugated());
+        view.translate(-frame.cameraPosition);
+        const double focal = 200 / 2 / std::tan(frame.fov / 2 * M_PI / 180);  // The picture is 200 tall.
+        for (const int layer : World::layers(scene)) {
+            const World::Mesh mesh = World::mesh(scene, assets, layer);
+            QVERIFY(!mesh.isNull());
+            const QPointF offset = World::offsetInPicture(scene, layer);
+            const QSizeF size = assets.size(scene.layers[layer].source);
+            const float *v = reinterpret_cast<const float *>(mesh.vertices.constData());
+            const int count = int(mesh.vertices.size() / (5 * sizeof(float)));
+            for (int i = 0; i < count; i += 37, v += 5 * 37) {
+                const QVector3D seen = view.map(QVector3D(v[0], v[1], v[2]));
+                if (-seen.z() > 1000)
+                    continue;  // The sky: there, but too far to measure.
+                const QPointF pixel(200 + focal * seen.x() / -seen.z(), 100 - focal * seen.y() / -seen.z());
+                const QPointF expected = offset + QPointF(v[3] * size.width(), (1 - v[4]) * size.height());
+                QVERIFY2(QLineF(pixel, expected).length() < .5,
+                         qPrintable(QString("%1,%2 vs %3,%4").arg(pixel.x()).arg(pixel.y()).arg(expected.x()).arg(expected.y())));
+            }
+        }
+        // The camera stands at the ground's height; moving it moves the frame.
+        QVERIFY(std::abs(frame.cameraPosition.y() - 1.2f) < 1e-4);
+        scene.camera.base["worldZ"] = 2;
+        QVERIFY(std::abs(World::frame(scene, assets, 0).cameraPosition.z() + 2) < 1e-4);
+        // Moving a piece in the world moves it, turning turns it about its pivot.
+        const int piece = scene.indexOf("piece");
+        scene.layers[piece].base["worldX"] = 1;
+        scene.layers[piece].base["yaw"] = 90;
+        const World::Frame moved = World::frame(scene, assets, 0);
+        const World::Placement &place = moved.layers.at(World::layers(scene).indexOf(piece));
+        const QVector3D pivot = World::pivot(scene, assets, piece);
+        QVERIFY((place.position + place.rotation.rotatedVector(pivot) - (pivot + QVector3D(1, 0, 0))).length() < 1e-4);
+        QVERIFY(std::abs(place.rotation.rotatedVector(QVector3D(1, 0, 0)).z() - 1) < 1e-4);
     }
 
     void aiSaysWhatsMissing() {
