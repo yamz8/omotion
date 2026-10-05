@@ -770,10 +770,13 @@ void Backend::copyKeys() {
 void Backend::pasteKeys() {
     if (m_clipboard.isEmpty())
         return setNotice("Nothing copied yet.");
+    pasteClip(m_clipboard);
+}
+
+void Backend::pasteClip(QList<KeyClip> clip) {
     if (!targetLayer())
         return setNotice("Select the layer to paste onto.");
     // Pasting a layer's keys on the camera keeps only what a camera has.
-    QList<KeyClip> clip = m_clipboard;
     if (m_cameraSelected) {
         for (KeyClip &item : clip)
             if (item.property == "scale")
@@ -1377,6 +1380,30 @@ void Backend::applyPreset(const QString &preset) {
     else
         setNotice(QString("%1: %2. Space plays it; Ctrl+Z takes it back.").arg(name, preset));
 }
+
+void Backend::saveMotion(const QString &name) {
+    QList<KeyRef> refs = m_keySelection;
+    if (refs.isEmpty() && targetLayer())
+        for (double t : m_scene.keyTimes(target()))
+            refs.append(KeyRef{target(), t});
+    QString error;
+    if (!Project::saveMotion(name, m_scene.copyKeys(refs), &error))
+        return setError(error);
+    setNotice(QString("Saved the motion \"%1\". It's in N, for any layer in any project.").arg(name.trimmed()));
+}
+
+void Backend::applyMotion(const QString &name) {
+    if (!targetLayer())
+        return setNotice("Select the layer to move first.");
+    QString error;
+    const QList<KeyClip> keys = Project::loadMotion(name, &error);
+    if (keys.isEmpty())
+        return setError(error);
+    pasteClip(keys);
+    setNotice(QString("Put on \"%1\" from the playhead.").arg(name));
+}
+
+QStringList Backend::savedMotions() const { return Project::savedMotions(); }
 
 void Backend::waitForJobs() {
     while (m_job.isRunning() || !m_busy.isEmpty())

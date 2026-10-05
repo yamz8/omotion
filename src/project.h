@@ -104,6 +104,15 @@ bool animateParallax(Scene &scene, AssetCache &assets, int layer, double strengt
 // its default settings and any given over them. Returns its index, or -1.
 int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings, QString *error);
 
+// Saved motions: keyframes kept under a name, to use in any project, in
+// ~/.local/share/omotion/motions as JSON (times relative to the first key).
+QString motionDirectory();
+// Keeps motions somewhere else; for tests.
+void setMotionDirectory(const QString &directory);
+QStringList savedMotions();
+bool saveMotion(const QString &name, const QList<KeyClip> &keys, QString *error);
+QList<KeyClip> loadMotion(const QString &name, QString *error);
+
 // The motion presets, by name: sway, float, pulse, bounce, spin, fade.
 const QStringList &presets();
 // Gives a layer a ready-made motion, replacing that property's animation.

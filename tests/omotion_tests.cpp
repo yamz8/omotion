@@ -1550,6 +1550,29 @@ private slots:
         QCOMPARE(backend.audio()["offset"].toDouble(), .5);
     }
 
+    void motionsSaveAndGoOnAnyLayer() {
+        QTemporaryDir motions, dir;
+        Project::setMotionDirectory(motions.path());
+        Backend backend;
+        backend.open(writePicture(dir.filePath("p.png")));
+        backend.select(0);
+        Project::applyPreset(const_cast<Scene &>(backend.scene()), backend.assets(), 0, "bounce", 0, 1, nullptr);
+        backend.saveMotion("hop");
+        QCOMPARE(backend.error(), QString());
+        backend.saveMotion("bad/name");
+        QVERIFY(!backend.error().isEmpty());
+        QCOMPARE(backend.savedMotions(), QStringList{"hop"});
+        // On the camera, from a second in: only what a camera has comes along.
+        backend.selectCamera();
+        backend.seek(1);
+        backend.applyMotion("hop");
+        QVERIFY(backend.scene().camera.keys.contains("y"));
+        QCOMPARE(backend.scene().camera.keys["y"].first().t, 1.0);
+        backend.applyMotion("nothing");
+        QVERIFY(backend.error().contains("nothing"));
+        Project::setMotionDirectory({});
+    }
+
     void backendEditsTheCamera() {
         QTemporaryDir dir;
         Backend backend;

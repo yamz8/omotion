@@ -1293,6 +1293,77 @@ int addParticles(Scene &scene, const QString &kind, const QJsonObject &settings,
     return int(scene.layers.size()) - 1;
 }
 
+namespace {
+QString motionDirectoryOverride;
+}
+
+void setMotionDirectory(const QString &directory) { motionDirectoryOverride = directory; }
+
+QString motionDirectory() {
+    return motionDirectoryOverride.isEmpty()
+               ? QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/omotion/motions"
+               : motionDirectoryOverride;
+}
+
+QStringList savedMotions() {
+    QStringList names;
+    for (const QString &file : QDir(motionDirectory()).entryList({"*.json"}, QDir::Files, QDir::Name))
+        names.append(QFileInfo(file).completeBaseName());
+    return names;
+}
+
+bool saveMotion(const QString &wanted, const QList<KeyClip> &keys, QString *error) {
+    const QString name = wanted.trimmed();
+    if (name.isEmpty() || name.contains('/') || name.startsWith('.')) {
+        if (error)
+            *error = "Give the motion a name (no slashes).";
+        return false;
+    }
+    if (keys.isEmpty()) {
+        if (error)
+            *error = "There are no keyframes to save.";
+        return false;
+    }
+    QJsonObject properties;
+    for (const KeyClip &item : keys) {
+        QJsonArray list = properties.value(item.property).toArray();
+        list.append(QJsonObject{{"t", item.key.t}, {"v", item.key.v}, {"ease", item.key.ease}});
+        properties.insert(item.property, list);
+    }
+    QDir().mkpath(motionDirectory());
+    QSaveFile file(QDir(motionDirectory()).filePath(name + ".json"));
+    const QByteArray data = QJsonDocument(QJsonObject{{"name", name}, {"keys", properties}}).toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
+        if (error)
+            *error = QString("Couldn't save the motion: %1").arg(file.errorString());
+        return false;
+    }
+    return true;
+}
+
+QList<KeyClip> loadMotion(const QString &name, QString *error) {
+    QFile file(QDir(motionDirectory()).filePath(name + ".json"));
+    QList<KeyClip> keys;
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = QString("There's no saved motion \"%1\".").arg(name);
+        return keys;
+    }
+    const QJsonObject properties = QJsonDocument::fromJson(file.readAll()).object().value("keys").toObject();
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        if (!Scene::properties().contains(it.key()) && !Scene::cameraProperties().contains(it.key()))
+            continue;
+        for (const QJsonValue &value : it.value().toArray()) {
+            const QJsonObject k = value.toObject();
+            const QString ease = k.value("ease").toString("linear");
+            keys.append({it.key(), Key{k.value("t").toDouble(), k.value("v").toDouble(), Scene::validEase(ease) ? ease : "linear"}});
+        }
+    }
+    if (keys.isEmpty() && error)
+        *error = QString("The motion \"%1\" has no keyframes omotion can use.").arg(name);
+    return keys;
+}
+
 const QStringList &presets() {
     static const QStringList list{"sway", "float", "pulse", "bounce", "spin", "fade"};
     return list;

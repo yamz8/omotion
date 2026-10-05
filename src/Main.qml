@@ -27,9 +27,10 @@ ApplicationWindow {
     property bool exportHalf: false
     property bool presetMenuVisible: false
     property bool particleMenuVisible: false
+    property bool saveMotionVisible: false
     property bool quitConfirmVisible: false
     // Editing shortcuts go quiet while an overlay is up.
-    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible
+    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible && !saveMotionVisible
                                   && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool hasLayer: ready && backend.selected >= 0
     // Something whose properties edits act on: a layer, or the camera.
@@ -70,6 +71,7 @@ ApplicationWindow {
             else if (win.exportMenuVisible) win.exportMenuVisible = false;
             else if (win.presetMenuVisible) win.presetMenuVisible = false;
             else if (win.particleMenuVisible) win.particleMenuVisible = false;
+            else if (win.saveMotionVisible) win.saveMotionVisible = false;
             else if (backend.exporting) backend.cancelExport();
             else if (backend.tool !== "move") backend.setTool("move");
             else if (backend.keySelection.length > 0) backend.clearKeySelection();
@@ -85,6 +87,7 @@ ApplicationWindow {
     Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.importImageDialog() }
     Shortcut { sequence: "Shift+I"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: win.particleMenuVisible = true }
     Shortcut { sequence: "Ctrl+M"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.importAudioDialog() }
+    Shortcut { sequence: "Ctrl+Shift+S"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: win.saveMotionVisible = true }
     Shortcut { sequence: "Ctrl+E"; context: Qt.ApplicationShortcut; enabled: win.ready && !backend.exporting; onActivated: win.exportMenuVisible = true }
 
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.togglePlay() }
@@ -151,7 +154,7 @@ ApplicationWindow {
     Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "wand"; onActivated: backend.toggleWandMode() }
     Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.splitByDepth(4) }
     Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.animateParallax() }
-    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: win.presetMenuVisible = true }
+    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && backend.tool === "move"; onActivated: win.presetMenuVisible = true }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.aiPrompt !== ""; onActivated: backend.acceptAiPrompt() }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
 
@@ -621,6 +624,21 @@ ApplicationWindow {
         color: "#b0000000"
         MouseArea { anchors.fill: parent; onClicked: win.presetMenuVisible = false }
 
+        // Read again each time it opens, as motions are saved.
+        property var saved: []
+        onVisibleChanged: if (visible) saved = backend.savedMotions()
+        Repeater {
+            model: 3
+            delegate: Item {
+                required property int index
+                Shortcut {
+                    sequence: String(index + 7)
+                    context: Qt.ApplicationShortcut
+                    enabled: win.presetMenuVisible && index < presetMenu.saved.length
+                    onActivated: { win.presetMenuVisible = false; backend.applyMotion(presetMenu.saved[index]) }
+                }
+            }
+        }
         readonly property var choices: [["1", "Sway", "A gentle rock, for trees, grass and signs", "sway"],
                                         ["2", "Float", "Drifting up and down", "float"],
                                         ["3", "Pulse", "Breathing in and out", "pulse"],
@@ -687,8 +705,82 @@ ApplicationWindow {
                         MouseArea { id: presetMouse; anchors.fill: parent; hoverEnabled: true; onClicked: presetChoice.pick(modelData[3]) }
                     }
                 }
+                Label {
+                    visible: presetMenu.saved.length > 0
+                    text: "Saved"
+                    color: win.text
+                    font.bold: true
+                    topPadding: 8
+                }
+                Repeater {
+                    model: presetMenu.saved
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+                        width: presetColumn.width
+                        height: 36
+                        radius: 6
+                        color: savedMouse.containsMouse ? "#1f1f24" : "transparent"
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            spacing: 14
+                            Label { text: index < 3 ? String(index + 7) : ""; color: theme.accent; font.bold: true; width: 14 }
+                            Label { text: modelData; color: win.text; font.bold: true }
+                        }
+                        MouseArea {
+                            id: savedMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: { win.presetMenuVisible = false; backend.applyMotion(modelData) }
+                        }
+                    }
+                }
                 Item { width: 1; height: 4 }
-                Label { text: "Esc closes"; color: win.muted }
+                Label { text: "Ctrl+Shift+S saves a layer's animation here   ·   Esc closes"; color: win.muted }
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: win.saveMotionVisible
+        color: "#b0000000"
+        MouseArea { anchors.fill: parent; onClicked: win.saveMotionVisible = false }
+        onVisibleChanged: if (visible) { motionName.text = ""; motionName.forceActiveFocus() }
+        Rectangle {
+            anchors.centerIn: parent
+            width: 440
+            height: saveColumn.implicitHeight + 40
+            radius: 10
+            color: win.panel
+            border.color: win.line
+            Column {
+                id: saveColumn
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 10
+                Label { text: "Save the motion"; font.pixelSize: 20; font.bold: true; color: win.text }
+                Label {
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    text: "The " + (backend.keySelection.length ? "picked keyframes" : "animation of " + (backend.values.name || "the layer"))
+                          + ", to put on any layer in any project from N."
+                }
+                TextField {
+                    id: motionName
+                    width: parent.width
+                    placeholderText: "A name, like wave hello"
+                    onAccepted: {
+                        if (text.trim() === "") return;
+                        backend.saveMotion(text);
+                        win.saveMotionVisible = false;
+                        win.focusCanvas();
+                    }
+                }
+                Label { text: "Enter saves   ·   Esc closes"; color: win.muted }
             }
         }
     }

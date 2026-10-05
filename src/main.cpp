@@ -58,6 +58,8 @@ const char *Usage = R"(Usage:
                                          direction, spread, sway, twinkle, color, seed
   omotion audio <project> <file|--none> [--offset <seconds>] [--volume <0-4>]
                                          The scene's sound, for playing along and video exports
+  omotion motion list | save <project> <layer|camera> <name> | apply <project> <layer|camera> <name> [--at <seconds>]
+                                         Saved motions: a layer's keyframes, kept to reuse
   omotion clean <project> [--dry-run]    Move images scene.json doesn't use to the trash
   omotion models [--download]            Whether the AI is ready; --download fetches its
                                          models (about 350 MB, checked against their hashes)
@@ -88,7 +90,8 @@ bool numberAfter(const QStringList &args, int &i, double *value) {
 // The command-line renderer, for scripts and agents: no window, same output.
 int command(const QStringList &args) {
     QString error;
-    const QString directory = Project::open(args.at(2), &error);
+    // "motion save|apply <project> ...": the project comes a word later.
+    const QString directory = Project::open(args.at(args.at(1) == "motion" ? 3 : 2), &error);
     if (directory.isEmpty())
         return fail(error);
     const Scene scene = Project::load(directory, &error);
@@ -347,6 +350,33 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "motion") {
+        if (args.size() < 6 || (args.at(2) != "save" && args.at(2) != "apply"))
+            return fail("motion is: list, save <project> <layer> <name>, or apply <project> <layer> <name>.");
+        Scene edited = scene;
+        const int layer = args.at(4) == "camera" ? Scene::CameraIndex : edited.indexOf(args.at(4));
+        if (!edited.at(layer))
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(4)));
+        if (args.at(2) == "save") {
+            QList<KeyRef> refs;
+            for (double t : edited.keyTimes(layer))
+                refs.append(KeyRef{layer, t});
+            return Project::saveMotion(args.at(5), edited.copyKeys(refs), &error) ? 0 : fail(error);
+        }
+        double t = 0;
+        for (int i = 6; i < args.size(); ++i) {
+            if (args.at(i) != "--at")
+                return fail(QString("motion apply doesn't know \"%1\".").arg(args.at(i)));
+            if (!numberAfter(args, i, &t))
+                return 1;
+        }
+        const QList<KeyClip> keys = Project::loadMotion(args.at(5), &error);
+        if (keys.isEmpty())
+            return fail(error);
+        edited.pasteKeys(layer, t, keys);
+        return Project::save(directory, edited, &error) ? 0 : fail(error);
+    }
+
     if (args.at(1) == "clean") {
         const QList<QJsonObject> scenes{scene.toJson()};
         if (args.contains("--dry-run")) {
@@ -441,6 +471,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
+                                       !std::strcmp(argv[1], "motion") ||
                                        !std::strcmp(argv[1], "models"));
     if (headless)
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -456,6 +487,11 @@ int main(int argc, char *argv[]) {
     }
     if (args.size() > 1 && args.at(1) == "--version") {
         QTextStream(stdout) << "omotion " << app.applicationVersion() << "\n";
+        return 0;
+    }
+    if (headless && args.at(1) == "motion" && args.size() > 2 && args.at(2) == "list") {
+        for (const QString &name : Project::savedMotions())
+            QTextStream(stdout) << name << "\n";
         return 0;
     }
     if (headless && args.at(1) == "models") {

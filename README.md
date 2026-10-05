@@ -86,6 +86,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `[` `]` | Rotate 1° (`{` `}`: 15°) |
 | `-` `=` | Scale down / up |
 | `9` `0` | Opacity down / up |
+| `Ctrl+Shift+S` | Save the layer's animation (or the picked keyframes) as a motion, for any layer in any project |
 | `N` | A ready-made motion for the layer: sway, float, pulse, bounce or spin (looping with the scene), or fade in |
 | `K` | Keyframe every property at the playhead |
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
@@ -255,6 +256,9 @@ omotion particles photo.omotion snow --count 400
                                           # Shift+I: a particle layer (any setting as --name value)
 omotion audio photo.omotion song.mp3 --offset 12
                                           # Ctrl+M: the scene's sound, from 12 s in (--none takes it away)
+omotion motion save photo.omotion pine sway-gently
+omotion motion apply other.omotion tree sway-gently --at 2
+                                          # saved motions, as with Ctrl+Shift+S and N
 omotion clean photo.omotion               # unused images to the trash (--dry-run lists them)
 ```
 

@@ -231,6 +231,11 @@ public:
     Q_INVOKABLE void animateParallax();
     // Gives the selected layer a ready-made motion (see Project::presets).
     Q_INVOKABLE void applyPreset(const QString &preset);
+    // Saves the selected layer's animation (or the picked keyframes) as a
+    // motion to use in any project, and puts one on at the playhead.
+    Q_INVOKABLE void saveMotion(const QString &name);
+    Q_INVOKABLE void applyMotion(const QString &name);
+    Q_INVOKABLE QStringList savedMotions() const;
     Q_INVOKABLE void acceptAiPrompt();
     Q_INVOKABLE void dismissAiPrompt();
     Q_INVOKABLE void cancelDownload();
@@ -306,6 +311,7 @@ private:
     }
     void restoreSelection(const QString &name);
     void setKeySelection(const QList<KeyRef> &refs);
+    void pasteClip(QList<KeyClip> clip);
     // The selected columns, or the selected layer's keys at the playhead.
     QList<KeyRef> targetKeys() const;
 
