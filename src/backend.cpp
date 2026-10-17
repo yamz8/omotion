@@ -175,7 +175,10 @@ QVariantList Backend::outliner() const {
     auto add = [&](auto &&self, int index, int depth, const QList<int> &among) -> void {
         const Layer &layer = m_scene.layers.at(index);
         QString kind = "image", detail;
-        if (!layer.particles.isEmpty()) {
+        if (layer.raw.value("empty").toBool()) {
+            kind = "empty";
+            detail = "empty";
+        } else if (!layer.particles.isEmpty()) {
             kind = "particles";
             detail = layer.particles.value("kind").toString();
         } else if (inWorld.contains(index)) {
@@ -466,6 +469,63 @@ void Backend::takeBackAgent() {
     emit agentChanged();
 }
 
+void Backend::rigSelected(const QString &type, const QString &other) {
+    if (m_selected < 0)
+        return;
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::rig(scene, m_assets, m_selected, type, other, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice(type == "ik" ? QString("Rigged: move \"%1 target\" and the arm follows.").arg(other) : QString("Rigged."));
+}
+
+void Backend::unrigSelected() {
+    if (m_selected < 0)
+        return;
+    Scene scene = m_scene;
+    if (!Project::unrig(scene, m_selected))
+        return;
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
+void Backend::addEmpty() {
+    if (!hasProject())
+        return;
+    checkpoint();
+    // In the middle of what's in view.
+    const QPointF middle = cameraTransform(m_scene, 1, m_time).inverted().map(QPointF(m_scene.width / 2.0, m_scene.height / 2.0));
+    const int index = Project::addEmpty(m_scene, "empty", {}, middle);
+    changed();
+    select(index);
+}
+
+void Backend::finishPath(bool turn) {
+    if (m_tool != "path" || m_selected < 0)
+        return;
+    if (m_cut.size() < 2)
+        return setNotice("Click two points or more for the path.");
+    QJsonArray points;
+    for (const QPointF &p : m_cut)
+        points.append(QJsonArray{p.x(), p.y()});
+    Scene scene = m_scene;
+    QString error;
+    // From the playhead to the end of the scene.
+    const QJsonObject options{{"points", points}, {"start", m_time}, {"end", m_scene.duration}, {"turn", turn}};
+    if (!Project::rig(scene, m_assets, m_selected, "path", {}, &error, options))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    m_cut.clear();
+    setTool("move");
+    changed();
+    setNotice("It follows the path from here to the end; its rig in the inspector takes it away.");
+}
+
 void Backend::setWorldValue(const QString &name, const QVariant &value) {
     if (!World::info(m_scene).valid)
         return;
@@ -562,6 +622,22 @@ QVariantMap Backend::values() const {
         map.insert("particles", settings.toVariantMap());
     }
     map.insert("ownFollow", !std::isnan(layer.follow));
+    map.insert("empty", layer.raw.value("empty").toBool());
+    // Its rig, in words: what it reaches for, looks at, rolls with, follows.
+    QStringList rig;
+    for (const QJsonValue &entry : layer.raw.value("constraints").toArray()) {
+        const QJsonObject c = entry.toObject();
+        const QString type = c.value("type").toString();
+        if (type == "ik")
+            rig << QString("Reaches with %1 for %2").arg(c.value("lower").toString(), c.value("target").toString());
+        else if (type == "lookAt")
+            rig << "Looks at " + c.value("target").toString();
+        else if (type == "path")
+            rig << QString("Follows a path from %1 s to %2 s").arg(c.value("start").toDouble()).arg(c.value("end").toDouble());
+    }
+    if (layer.raw.contains("wheel"))
+        rig << "Rolls as " + layer.raw.value("wheel").toString() + " goes";
+    map.insert("rig", rig);
     // The easing of a keyframe under the playhead, for the inspector.
     map.insert("keyEase", easeHere(layer));
     map.insert("keyCurve", QVariant::fromValue(Scene::curveOf(easeHere(layer))));
@@ -783,7 +859,23 @@ void Backend::selectNext(int direction) {
     select(m_selected < 0 ? (direction > 0 ? 0 : count - 1) : (m_selected + direction + count) % count);
 }
 
-void Backend::selectAt(double x, double y) { select(layerAt(m_scene, m_assets, m_time, QPointF(x, y))); }
+int Backend::emptyNear(double x, double y, double reach) const {
+    for (int i = int(m_scene.layers.size()) - 1; i >= 0; --i) {
+        const Layer &layer = m_scene.layers.at(i);
+        if (!layer.raw.value("empty").toBool() || !layer.visible)
+            continue;
+        const QPointF at = layerTransform(m_scene, const_cast<AssetCache &>(m_assets), i, m_time).map(QPointF());
+        if (QLineF(at, QPointF(x, y)).length() <= reach)
+            return i;
+    }
+    return -1;
+}
+
+void Backend::selectAt(double x, double y) {
+    // Empties have nothing to click but their cross.
+    const int empty = emptyNear(x, y, 12);
+    select(empty >= 0 ? empty : layerAt(m_scene, m_assets, m_time, QPointF(x, y)));
+}
 
 void Backend::toggleVisible(int index) {
     if (index < 0 || index >= m_scene.layers.size())
@@ -1323,7 +1415,7 @@ void Backend::endDrag() {
 }
 
 void Backend::setTool(const QString &tool) {
-    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin")
+    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin" && tool != "path")
         return;
     if (tool != "brush") {
         m_brushPiece.clear();
@@ -2416,6 +2508,9 @@ void Backend::pickAt(double x, double y) {
     }
     // What's drawn over the world is in front of it, in the shot.
     if (!m_freeView) {
+        const int empty = emptyNear(x, y, 12);
+        if (empty >= 0)
+            return select(empty);
         const int over = layerAt(m_scene, m_assets, m_time, QPointF(x, y), World::layers(m_scene));
         if (over >= 0) {
             select(over);
@@ -2871,7 +2966,7 @@ void Backend::rearmWatcher() {
 void Backend::reportMissing() {
     QStringList missing;
     for (const Layer &layer : m_scene.layers)
-        if (layer.particles.isEmpty() && !QFileInfo::exists(QDir(m_directory).absoluteFilePath(layer.source)))
+        if (layer.particles.isEmpty() && !layer.source.isEmpty() && !QFileInfo::exists(QDir(m_directory).absoluteFilePath(layer.source)))
             missing.append(QString("%1 (layer \"%2\")").arg(layer.source, layer.name));
     if (!missing.isEmpty())
         setError("Can't find " + missing.join(", ") + " in the project folder.");

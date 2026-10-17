@@ -274,6 +274,77 @@ Rectangle {
                 }
             }
 
+            // The rig: what drives it, as Blender's constraints do.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !inspector.isParticles
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 2
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Rig"; color: win.text; font.bold: true; Layout.fillWidth: true }
+                    ToolButton {
+                        visible: (inspector.v.rig || []).length > 0
+                        text: "Remove"
+                        font.pixelSize: 12
+                        implicitHeight: 28
+                        onClicked: { backend.unrigSelected(); inspector.done() }
+                    }
+                }
+                Repeater {
+                    model: inspector.v.rig || []
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: "⛓ " + modelData
+                        color: theme.accent
+                        font.pixelSize: 12
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+                    ComboBox {
+                        id: rigType
+                        Layout.preferredWidth: 110
+                        font.pixelSize: 12
+                        implicitHeight: 34
+                        model: ["Reach with", "Look at", "Roll on"]
+                    }
+                    ComboBox {
+                        id: rigOther
+                        Layout.fillWidth: true
+                        font.pixelSize: 12
+                        implicitHeight: 34
+                        // A reach is with a child; the rest with any other layer.
+                        model: {
+                            const names = [];
+                            const all = backend.layers;
+                            const me = inspector.v.name;
+                            for (let i = all.length - 1; i >= 0; --i)
+                                if (all[i].name !== me && (rigType.currentIndex !== 0 || all[i].parent === me))
+                                    names.push(all[i].name);
+                            return names;
+                        }
+                    }
+                    ToolButton {
+                        text: "Rig"
+                        enabled: rigOther.count > 0
+                        font.pixelSize: 12
+                        implicitHeight: 34
+                        onClicked: { backend.rigSelected(["ik", "lookAt", "wheel"][rigType.currentIndex], rigOther.currentText); inspector.done() }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "Reach: an arm bending to reach for an empty (move the empty).  Shift+P draws a path to follow, Shift+A adds an empty."
+                }
+            }
+
             // The world's own look, with nothing else selected.
             ColumnLayout {
                 visible: !inspector.hasLayer && backend.world.active

@@ -152,6 +152,11 @@ ApplicationWindow {
 
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "cut" ? "move" : "cut") }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.setTool(backend.tool === "pivot" ? "move" : "pivot") }
+    // A path for the selected layer to follow, drawn as a cut's points are.
+    Shortcut { sequence: "Shift+P"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setTool(backend.tool === "path" ? "move" : "path") }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(false) }
+    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(true) }
+    Shortcut { sequence: "Shift+A"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addEmpty() }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
     Shortcut { sequence: "Shift+R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startBrush() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "brush"; onActivated: backend.finishBrush() }
@@ -201,7 +206,7 @@ ApplicationWindow {
     Shortcut { sequence: "Y"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(2) }
     Shortcut { sequence: "Z"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(3) }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: { backend.endHandle(true); canvasMouse.grabbing = false } }
-    Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
+    Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "path"); onActivated: backend.removeCutPoint() }
 
     // ---- Layout ----------------------------------------------------------
 
@@ -395,7 +400,7 @@ ApplicationWindow {
                             return;
                         }
                         const p = view.toScene(mouse.x, mouse.y);
-                        if (backend.tool === "cut") {
+                        if (backend.tool === "cut" || backend.tool === "path") {
                             const reach = 9 / view.zoom();
                             const near = backend.cutPointNear(p.x, p.y, reach);
                             if (mouse.button === Qt.RightButton) {
@@ -617,6 +622,9 @@ ApplicationWindow {
                               ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
                               : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
+                              : backend.tool === "path"
+                              ? "Path for " + (backend.values.name || "the layer") + ": click points, or drag to draw it (" + backend.cutPoints.length + " so far)"
+                                + "\nEnter: it follows them from the playhead to the end   ·   Shift+Enter: turning with the way   ·   Backspace drops a point   ·   Esc cancel"
                               : backend.tool === "pivot"
                               ? "Pivot: click where the layer should turn and scale around   ·   Esc cancel"
                               : backend.tool === "wand" && backend.wandMode === "ai"

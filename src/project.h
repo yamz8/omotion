@@ -136,6 +136,24 @@ void renameCutSource(Scene &scene, const QString &from, const QString &to);
 // Moves a layer's pivot to a canvas point without moving the layer.
 void setPivot(Scene &scene, AssetCache &assets, int layer, const QPointF &point, double t);
 
+// An empty: a layer with nothing to draw, a point to aim at or move by (a
+// target for a rig), at a point in its parent's pixels. Its index.
+int addEmpty(Scene &scene, const QString &name, const QString &parent, const QPointF &at);
+
+// Rigs a layer, as Blender's constraints do (see Scene::constrained):
+// "ik" makes it the upper bone of a two-bone chain whose lower bone is
+// other (its child), reaching for a new empty put where the lower's tip is
+// now; "lookAt" turns it toward other, as it faces now; "wheel" makes it
+// roll as other (the body it's on) moves, turning about its middle; "path"
+// moves it along points (canvas pixels, in options' "points") from
+// options' "start" to "end" seconds, turning with the way when "turn".
+// Returns false with why when it can't.
+bool rig(Scene &scene, AssetCache &assets, int layer, const QString &type, const QString &other, QString *error,
+         const QJsonObject &options = {});
+// Takes a layer's rig away (constraints and a wheel's link); the empties it
+// aimed at stay.
+bool unrig(Scene &scene, int layer);
+
 // What changed between two versions of a scene, in a few words a line:
 // layers added and taken away, and for each layer (and the camera, the
 // world and the scene) which properties and keys changed.

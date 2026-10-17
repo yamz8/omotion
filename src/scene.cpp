@@ -378,7 +378,8 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
         if (!layer.particles.isEmpty() && !particleKinds().contains(layer.particles.value("kind").toString()))
             return fail(QString("Layer \"%1\" has particles of kind \"%2\"; use one of %3.")
                             .arg(layer.name, layer.particles.value("kind").toString(), particleKinds().join(", ")));
-        if (layer.source.isEmpty() && layer.particles.isEmpty())
+        // An empty is a point to aim at or move by, with nothing to draw.
+        if (layer.source.isEmpty() && layer.particles.isEmpty() && !object.value("empty").toBool())
             return fail(QString("Layer \"%1\" has no source image.").arg(layer.name));
         if (names.contains(layer.name))
             return fail(QString("Two layers are named \"%1\"; names must be unique.").arg(layer.name));
@@ -641,8 +642,119 @@ int Scene::frameCount() const { return std::max(1, int(std::lround(duration * fp
 double Scene::frameTime(int frame) const { return frame / fps; }
 
 double Scene::value(const Layer &layer, const QString &property, double t) const {
-    const double own = ownValue(layer, property, t);
+    double own = 0;
+    if (!constrained(layer, property, t, &own))
+        own = ownValue(layer, property, t);
     return layer.links.isEmpty() ? own : own + linkValue(layer, property, t);
+}
+
+namespace {
+QPointF pointOf(const QJsonValue &value) {
+    const QJsonArray a = value.toArray();
+    return QPointF(a.at(0).toDouble(), a.at(1).toDouble());
+}
+}
+
+bool Scene::constrained(const Layer &layer, const QString &property, double t, double *v) const {
+    if (property != "rotation" && property != "x" && property != "y")
+        return false;
+    // Constraints can lean on each other; a loop of them stops somewhere.
+    thread_local int depth = 0;
+    if (depth > 12)
+        return false;
+    struct Guard {
+        Guard() { ++depth; }
+        ~Guard() { --depth; }
+    } guard;
+    const double degrees = 180 / M_PI;
+    auto position = [&](const Layer &of) { return QPointF(value(of, "x", t), value(of, "y", t)); };
+    auto spread = [&](const Layer &of) { return value(of, "scale", t) * value(of, "scaleX", t); };
+    // Two bones: the upper's constraint turns both.
+    auto solveIk = [&](const Layer &upper, const QJsonObject &c, double *upperTurn, double *lowerTurn) {
+        const int lowerIndex = indexOf(c.value("lower").toString()), targetIndex = indexOf(c.value("target").toString());
+        if (lowerIndex < 0 || targetIndex < 0)
+            return false;
+        const Layer &lower = layers.at(lowerIndex);
+        const QPointF pivot = pointOf(c.value("pivot")), tip = pointOf(c.value("tip"));
+        const QPointF joint = position(lower) - pivot;  // The lower's pivot, from the upper's, in its pixels.
+        const double first = std::hypot(joint.x(), joint.y()) * spread(upper);
+        const double second = std::hypot(tip.x(), tip.y()) * spread(upper) * spread(lower);
+        if (first <= 0 || second <= 0)
+            return false;
+        const QPointF base = position(upper), aim = position(layers.at(targetIndex)) - base;
+        const double reach = std::clamp(std::hypot(aim.x(), aim.y()), std::abs(first - second) + 1e-6, first + second - 1e-6);
+        const double toward = std::atan2(aim.y(), aim.x());
+        const double bend = std::acos(std::clamp((first * first + reach * reach - second * second) / (2 * first * reach), -1.0, 1.0));
+        const double upperAngle = toward + (c.value("bend").toInt(1) >= 0 ? -bend : bend);
+        const QPointF elbow = base + QPointF(std::cos(upperAngle), std::sin(upperAngle)) * first;
+        const QPointF target = base + QPointF(std::cos(toward), std::sin(toward)) * reach;
+        const double lowerAngle = std::atan2(target.y() - elbow.y(), target.x() - elbow.x());
+        const double restUpper = std::atan2(joint.y(), joint.x()), restLower = std::atan2(tip.y(), tip.x());
+        *upperTurn = (upperAngle - restUpper) * degrees;
+        *lowerTurn = (lowerAngle - upperAngle - restLower + restUpper) * degrees;
+        return true;
+    };
+    for (const QJsonValue &entry : layer.raw.value("constraints").toArray()) {
+        const QJsonObject c = entry.toObject();
+        const QString type = c.value("type").toString();
+        if (type == "ik" && property == "rotation") {
+            double upper = 0, lower = 0;
+            if (solveIk(layer, c, &upper, &lower)) {
+                *v = upper;
+                return true;
+            }
+        } else if (type == "lookAt" && property == "rotation") {
+            const int target = indexOf(c.value("target").toString());
+            if (target < 0)
+                continue;
+            const QPointF aim = position(layers.at(target)) - position(layer);
+            *v = std::atan2(aim.y(), aim.x()) * degrees - c.value("axis").toDouble();
+            return true;
+        } else if (type == "path") {
+            const QJsonArray points = c.value("points").toArray();
+            if (points.size() < 2)
+                continue;
+            const double start = c.value("start").toDouble(), end = c.value("end").toDouble(duration);
+            const double p = ease(c.value("ease").toString("inOut"), std::clamp(end > start ? (t - start) / (end - start) : 1, 0.0, 1.0));
+            double total = 0;
+            for (int i = 1; i < points.size(); ++i)
+                total += QLineF(pointOf(points.at(i - 1)), pointOf(points.at(i))).length();
+            double left = p * total;
+            QPointF at = pointOf(points.last()), way = pointOf(points.last()) - pointOf(points.at(points.size() - 2));
+            for (int i = 1; i < points.size(); ++i) {
+                const QLineF piece(pointOf(points.at(i - 1)), pointOf(points.at(i)));
+                if (left <= piece.length() || i == points.size() - 1) {
+                    at = piece.pointAt(piece.length() > 0 ? std::min(1.0, left / piece.length()) : 0);
+                    way = piece.p2() - piece.p1();
+                    break;
+                }
+                left -= piece.length();
+            }
+            if (property == "x" || property == "y") {
+                *v = property == "x" ? at.x() : at.y();
+                return true;
+            }
+            if (c.value("turn").toBool()) {
+                *v = std::atan2(way.y(), way.x()) * degrees - c.value("axis").toDouble();
+                return true;
+            }
+        }
+    }
+    // A lower bone is turned by its upper's constraint.
+    if (property == "rotation" && !layer.parent.isEmpty()) {
+        const int parent = indexOf(layer.parent);
+        if (parent >= 0)
+            for (const QJsonValue &entry : layers.at(parent).raw.value("constraints").toArray()) {
+                const QJsonObject c = entry.toObject();
+                double upper = 0, lower = 0;
+                if (c.value("type").toString() == "ik" && c.value("lower").toString() == layer.name &&
+                    solveIk(layers.at(parent), c, &upper, &lower)) {
+                    *v = lower;
+                    return true;
+                }
+            }
+    }
+    return false;
 }
 
 double Scene::ownValue(const Layer &layer, const QString &property, double t) const {

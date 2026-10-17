@@ -153,7 +153,15 @@ struct Scene {
 
     // A property's value on a layer at a time: its own value (the keyframes
     // when it has any, otherwise its constant value) plus what a link adds.
+    // A constraint (see constrained) takes the own value's place.
     double value(const Layer &layer, const QString &property, double t) const;
+    // Constraints, in a layer's "constraints" (as Blender's): what they make
+    // a property at time t, when one sets it. "ik" on an upper bone turns it
+    // and its lower bone (a child) so the lower's tip reaches a target layer;
+    // "lookAt" turns a layer toward a target; "path" moves it along points
+    // over a time (and turns it with the way, with turn). Targets and paths
+    // are in the layer's parent's pixels: a target shares the parent.
+    bool constrained(const Layer &layer, const QString &property, double t, double *v) const;
     // The keyframes or constant alone, without the link.
     double ownValue(const Layer &layer, const QString &property, double t) const;
     // What a property's link adds at time t; 0 when it has none.

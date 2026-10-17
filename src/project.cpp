@@ -1733,4 +1733,189 @@ QList<int> rankMatches(const QString &query, const QStringList &names) {
     return order;
 }
 
+int addEmpty(Scene &scene, const QString &name, const QString &parent, const QPointF &at) {
+    Layer empty;
+    empty.name = scene.uniqueName(name);
+    empty.parent = parent;
+    empty.base["x"] = at.x();
+    empty.base["y"] = at.y();
+    empty.raw["empty"] = true;
+    scene.layers.append(empty);
+    return int(scene.layers.size()) - 1;
+}
+
+namespace {
+// The middle of what's solid in a layer's image, and how far its solid part
+// reaches from a point; in its pixels.
+QRectF solidBox(const QImage &image) {
+    QRect box;
+    const QImage argb = image.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < argb.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(argb.constScanLine(y));
+        for (int x = 0; x < argb.width(); ++x)
+            if (qAlpha(line[x]) > 128)
+                box |= QRect(x, y, 1, 1);
+    }
+    return QRectF(box);
+}
+
+// The end of a bone: of what's solid, the point farthest along a way from
+// a point (and of those, the nearest the line), in its pixels.
+QPointF farthestSolid(const QImage &image, const QPointF &from, QPointF way) {
+    const QImage argb = image.convertToFormat(QImage::Format_ARGB32);
+    const double length = std::hypot(way.x(), way.y());
+    way = length > 0 ? way / length : QPointF(1, 0);
+    // Big pictures are looked at a pixel in so many.
+    const int step = std::max(1, int(std::sqrt(double(argb.width()) * argb.height() / 250000)));
+    QPointF best = from;
+    double score = -1e30;
+    for (int y = 0; y < argb.height(); y += step) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(argb.constScanLine(y));
+        for (int x = 0; x < argb.width(); x += step)
+            if (qAlpha(line[x]) > 128) {
+                const QPointF d = QPointF(x + .5, y + .5) - from;
+                const double along = QPointF::dotProduct(d, way), across = std::abs(d.x() * way.y() - d.y() * way.x());
+                const double s = std::round(along) - across * 1e-3;
+                if (s > score)
+                    score = s, best = from + d;
+            }
+    }
+    return best;
+}
+
+QPointF pointOf(const QJsonValue &value) { return QPointF(value.toArray().at(0).toDouble(), value.toArray().at(1).toDouble()); }
+
+QJsonArray pointJson(const QPointF &p) { return QJsonArray{std::round(p.x() * 100) / 100, std::round(p.y() * 100) / 100}; }
+
+void addConstraint(Scene &scene, int layer, const QJsonObject &constraint) {
+    QJsonArray list;
+    // One of a kind a layer: a new one takes the old one's place.
+    for (const QJsonValue &c : scene.layers.at(layer).raw.value("constraints").toArray())
+        if (c.toObject().value("type") != constraint.value("type"))
+            list.append(c);
+    list.append(constraint);
+    scene.layers[layer].raw["constraints"] = list;
+}
+
+// From the canvas into a layer's parent's pixels (the world, for none).
+QPointF intoParent(const Scene &scene, AssetCache &assets, int layer, const QPointF &canvas, double t) {
+    const int parent = scene.indexOf(scene.layers.at(layer).parent);
+    const QTransform toCanvas = (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
+                                cameraTransform(scene, followOf(scene, layer), t);
+    return toCanvas.inverted().map(canvas);
+}
+}
+
+bool rig(Scene &scene, AssetCache &assets, int index, const QString &type, const QString &otherName, QString *error,
+         const QJsonObject &options) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size())
+        return fail("There's no such layer.");
+    const Layer &layer = scene.layers.at(index);
+    const int other = scene.indexOf(otherName);
+    const double t = 0;
+    if (type == "path") {
+        const QJsonArray given = options.value("points").toArray();
+        if (given.size() < 2)
+            return fail("A path needs two points or more.");
+        QJsonArray points;
+        for (const QJsonValue &p : given)
+            points.append(pointJson(intoParent(scene, assets, index, QPointF(p.toArray().at(0).toDouble(), p.toArray().at(1).toDouble()), t)));
+        QJsonObject c{{"type", "path"}, {"points", points}, {"start", options.value("start").toDouble(0)},
+                      {"end", options.value("end").toDouble(scene.duration)}, {"turn", options.value("turn").toBool()}};
+        if (options.contains("ease"))
+            c["ease"] = options.value("ease");
+        // Turning with the way keeps the way it faces now, at the start.
+        if (c["turn"].toBool()) {
+            const QPointF a = pointOf(points.at(0)), b = pointOf(points.at(1));
+            c["axis"] = std::round((std::atan2(b.y() - a.y(), b.x() - a.x()) * 180 / M_PI - scene.ownValue(layer, "rotation", t)) * 100) / 100;
+        }
+        addConstraint(scene, index, c);
+        return true;
+    }
+    if (other < 0 || other == index)
+        return fail(QString("Rig %1 to another layer: there's none called \"%2\".").arg(layer.name, otherName));
+    const Layer &with = scene.layers.at(other);
+    if (type == "lookAt") {
+        if (with.parent != layer.parent)
+            return fail(QString("%1 and %2 should move with the same layer to look at each other.").arg(layer.name, with.name));
+        const QPointF aim = QPointF(scene.value(with, "x", t), scene.value(with, "y", t)) -
+                            QPointF(scene.value(layer, "x", t), scene.value(layer, "y", t));
+        const double axis = std::atan2(aim.y(), aim.x()) * 180 / M_PI - scene.ownValue(layer, "rotation", t);
+        addConstraint(scene, index, {{"type", "lookAt"}, {"target", with.name}, {"axis", std::round(axis * 100) / 100}});
+        return true;
+    }
+    if (type == "ik") {
+        if (with.parent != layer.name)
+            return fail(QString("%1 should move with %2 (be its child) to be the lower bone.").arg(with.name, layer.name));
+        const QSizeF upperSize = assets.size(layer.source), lowerSize = assets.size(with.source);
+        const QImage lowerImage = assets.image(with.source);
+        if (upperSize.isEmpty() || lowerImage.isNull())
+            return fail("Bones need pictures.");
+        const QPointF upperPivot(layer.anchor.x() * upperSize.width(), layer.anchor.y() * upperSize.height());
+        const QPointF lowerPivot(with.anchor.x() * lowerSize.width(), with.anchor.y() * lowerSize.height());
+        // Along the bone: from the upper's pivot through the lower's, as the
+        // lower's own pixels see it.
+        const QTransform lowerToCanvas = layerTransform(scene, assets, other, t);
+        const QPointF upperOnCanvas = layerTransform(scene, assets, index, t).map(upperPivot);
+        const QPointF lowerOnCanvas = lowerToCanvas.map(lowerPivot);
+        const QTransform back = lowerToCanvas.inverted();
+        QPointF way = back.map(lowerOnCanvas + (lowerOnCanvas - upperOnCanvas)) - lowerPivot;
+        if (std::hypot(way.x(), way.y()) < 1e-6)
+            way = QPointF(1, 0);
+        const QPointF tip = farthestSolid(lowerImage, lowerPivot, way);
+        // The target starts where the tip is, so nothing moves.
+        const QPointF tipCanvas = lowerToCanvas.map(tip);
+        const QPointF at = intoParent(scene, assets, index, tipCanvas, t);
+        const int target = addEmpty(scene, with.name + " target", scene.layers.at(index).parent, at);
+        addConstraint(scene, index, {{"type", "ik"}, {"lower", scene.layers.at(other).name}, {"target", scene.layers.at(target).name},
+                                     {"pivot", pointJson(upperPivot)}, {"tip", pointJson(tip - lowerPivot)},
+                                     {"bend", options.value("bend").toInt(1)}});
+        return true;
+    }
+    if (type == "wheel") {
+        if (layer.parent != with.name && layer.parent != with.parent)
+            return fail(QString("%1 should move with %2, or with the same layer, to roll as it goes.").arg(layer.name, with.name));
+        const QImage image = assets.image(layer.source);
+        const QRectF box = solidBox(image);
+        if (box.isEmpty())
+            return fail(QString("%1 has nothing solid to roll.").arg(layer.name));
+        // It turns about its middle.
+        setPivot(scene, assets, index, layerTransform(scene, assets, index, t).map(box.center()), t);
+        const Layer &wheel = scene.layers.at(index);
+        double radius = std::max(box.width(), box.height()) / 2 * scene.value(wheel, "scale", t) * scene.value(wheel, "scaleX", t);
+        if (wheel.parent == with.name)
+            radius *= scene.value(with, "scale", t) * scene.value(with, "scaleX", t);
+        if (radius <= 0)
+            return fail("The wheel has no size.");
+        // A turn for every circumference it goes, the way it rolls.
+        Link link;
+        link.from = with.name + ".x";
+        link.times = std::round(180 / (M_PI * radius) * 1e5) / 1e5;
+        QString why;
+        if (!scene.setLink(index, "rotation", link, &why))
+            return fail(why);
+        scene.layers[index].raw["wheel"] = with.name;
+        return true;
+    }
+    return fail(QString("There's no rig called %1: ik, lookAt, wheel or path.").arg(type));
+}
+
+bool unrig(Scene &scene, int index) {
+    if (index < 0 || index >= scene.layers.size())
+        return false;
+    Layer &layer = scene.layers[index];
+    const bool had = layer.raw.contains("constraints") || layer.raw.contains("wheel");
+    layer.raw.remove("constraints");
+    if (layer.raw.contains("wheel")) {
+        layer.raw.remove("wheel");
+        layer.links.remove("rotation");
+    }
+    return had;
+}
+
 }

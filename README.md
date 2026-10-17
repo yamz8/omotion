@@ -129,6 +129,9 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `R` | Reshape the selected piece by its points; its animation and pivot stay (a depth layer opens the brush) |
 | `Shift+R` | Paint a piece's shape with a brush: drag adds, right-drag takes away, the wheel sizes it, `Enter` applies |
 | `P` | Pivot tool: click where the layer turns and scales around |
+| `Shift+P` | Path: click points (or drag) for the selected layer to follow from the playhead to the end, `Enter`; `Shift+Enter` turns it with the way |
+| `Shift+A` | Add an empty: a cross, a point for rigs to aim at |
+| Rig | In the inspector: *Reach with* a child makes a two-bone arm (IK) that bends to reach for a new empty; *Look at* turns the layer toward another; *Roll on* makes a wheel turn as the body it's on goes. `omotion rig` does the same |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
 | `Ctrl+D` | Duplicate the layer |
 | `H` | Hide / show the layer |
@@ -304,6 +307,18 @@ photo.omotion/
   meets the horizon (the canvas centre if left out), and the focal
   `distance` in pixels (the canvas width if left out; a layer that far back
   is half size).
+- **`constraints`** on a layer rig it, as Blender's do: `{"type": "ik", "lower",
+  "target", "pivot", "tip", "bend"}` turns it (the upper bone) and its child
+  `lower` so the lower's `tip` (from its pivot, in its pixels) reaches the
+  layer `target`; `pivot` is the upper's own pivot in its pixels, `bend` 1
+  or -1 which way the elbow goes. `{"type": "lookAt", "target", "axis"}`
+  turns it toward `target`, `axis` degrees off. `{"type": "path", "points",
+  "start", "end", "ease", "turn", "axis"}` moves it along `points` (in its
+  parent's pixels) from `start` to `end` seconds, turned with the way when
+  `turn`. Targets share the layer's parent. A constraint sets the property
+  in place of its keys; a link still adds to it. A wheel rig is a rotation
+  link from its body's x, and `"wheel"` names the body. An `"empty": true`
+  layer has no `source`: a point to aim at, drawn as a cross.
 - **`world`**, made by `omotion world`: the `picture` (layer) it was made
   from, its `depth` and the depth `behind` its pieces (16-bit images,
   logarithmic from 5 cm to 2 km), the lens `focal` in the picture's pixels,

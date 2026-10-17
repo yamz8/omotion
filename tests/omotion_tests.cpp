@@ -1844,6 +1844,77 @@ private slots:
         QVERIFY(!gltf.contains("animations"));
     }
 
+    void rigsReachLookRollAndFollow() {
+        QTemporaryDir dir;
+        // An arm: an upper bone 100 px long pointing right, its pivot at its
+        // left end, and a forearm as its child, 80 px long.
+        auto bar = [&](const QString &name, int length) {
+            QImage image(length, 10, QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            image.save(dir.filePath(name));
+        };
+        bar("upper.png", 100);
+        bar("lower.png", 80);
+        QImage wheel(40, 40, QImage::Format_ARGB32);
+        wheel.fill(Qt::black);
+        wheel.save(dir.filePath("wheel.png"));
+        Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"width": 400, "height": 400, "layers": [
+            {"name": "upper", "source": "upper.png", "x": 100, "y": 200, "anchor": [0, 0.5]},
+            {"name": "lower", "source": "lower.png", "parent": "upper", "x": 100, "y": 5, "anchor": [0, 0.5]},
+            {"name": "body", "source": "wheel.png", "x": 100, "y": 300},
+            {"name": "wheel", "source": "wheel.png", "parent": "body", "x": 20, "y": 40},
+            {"name": "eye", "source": "wheel.png", "x": 300, "y": 100}]})").object());
+        AssetCache assets(dir.path());
+        QString error;
+        auto tipAt = [&](double t) {
+            return layerTransform(scene, assets, scene.indexOf("lower"), t).map(QPointF(79.5, 5.5));
+        };
+        const QPointF tip = tipAt(0);
+        QVERIFY(QLineF(tip, QPointF(279.5, 200.5)).length() < 1.5);
+        // IK: the target starts at the tip, so nothing moves...
+        QVERIFY2(Project::rig(scene, assets, 0, "ik", "lower", &error), qPrintable(error));
+        const int target = scene.indexOf("lower target");
+        QVERIFY(target >= 0);
+        QVERIFY(scene.layers.at(target).raw["empty"].toBool());
+        QVERIFY(QLineF(tipAt(0), tip).length() < 2);
+        // ...and moved, the tip follows it, the elbow bending.
+        scene.layers[target].base["x"] = 220;
+        scene.layers[target].base["y"] = 260;
+        QVERIFY2(QLineF(tipAt(0), QPointF(220, 260)).length() < 2, qPrintable(QString("%1,%2").arg(tipAt(0).x()).arg(tipAt(0).y())));
+        QVERIFY(std::abs(scene.value(scene.layers.at(1), "rotation", 0)) > 5);
+        // Out of reach, it points straight at it.
+        scene.layers[target].base["x"] = 1000;
+        scene.layers[target].base["y"] = 200;
+        QVERIFY(std::abs(tipAt(0).y() - 200) < 2);
+        // It goes through scene.json, as empties do.
+        Scene again = Scene::fromJson(scene.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(again.layers.at(0).raw["constraints"], scene.layers.at(0).raw["constraints"]);
+        QVERIFY(Project::unrig(scene, 0));
+        QCOMPARE(scene.value(scene.layers.at(1), "rotation", 0), 0.0);
+
+        // Looking at: turned toward the eye as it moves, from how it faced.
+        QVERIFY(Project::rig(scene, assets, 2, "lookAt", "eye", &error));
+        QVERIFY(std::abs(scene.value(scene.layers.at(2), "rotation", 0)) < 1e-6);
+        scene.layers[4].base["y"] = 300;
+        QVERIFY(std::abs(scene.value(scene.layers.at(2), "rotation", 0) - std::atan2(-200, 200) * -180 / M_PI) < 1e-3);
+        Project::unrig(scene, 2);
+
+        // A wheel rolls a turn for each circumference its body goes.
+        QVERIFY2(Project::rig(scene, assets, 3, "wheel", "body", &error), qPrintable(error));
+        scene.layers[2].keys["x"] = {Key{0, 100}, Key{1, 100 + M_PI * 40}};
+        QVERIFY(std::abs(scene.value(scene.layers.at(3), "rotation", 1) - scene.value(scene.layers.at(3), "rotation", 0) - 360) < 1);
+        QVERIFY(!Project::rig(scene, assets, 4, "wheel", "lower", &error));
+
+        // A path: along the points over the time, turning with the way.
+        QVERIFY(Project::rig(scene, assets, 4, "path", {}, &error,
+                             {{"points", QJsonArray{QJsonArray{0, 0}, QJsonArray{100, 0}, QJsonArray{100, 100}}}, {"start", 0}, {"end", 2}, {"ease", "linear"}, {"turn", true}}));
+        QCOMPARE(scene.value(scene.layers.at(4), "x", 0), 0.0);
+        QCOMPARE(scene.value(scene.layers.at(4), "x", 1), 100.0);
+        QCOMPARE(scene.value(scene.layers.at(4), "y", 2), 100.0);
+        QVERIFY(std::abs(scene.value(scene.layers.at(4), "rotation", 1.5) - 90) < 1e-6);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

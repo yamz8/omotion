@@ -71,6 +71,18 @@ const char *Usage = R"(Usage:
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
   omotion size <project> <layer> <meters>  Size the world so that piece is that tall (a car 1.4)
+  omotion rig <project> <layer> ik <lower> [--bend -1]
+  omotion rig <project> <layer> look <target>
+  omotion rig <project> <layer> wheel <body>
+  omotion rig <project> <layer> path <x,y> <x,y>... [--from <s>] [--to <s>] [--ease <ease>] [--turn]
+  omotion rig <project> <layer> none
+                                         Rig a layer as Blender's constraints do: ik makes it an
+                                         upper bone reaching its child's tip for a new empty (move
+                                         the empty, the arm follows); look turns it toward a layer;
+                                         wheel rolls it as the body it's on moves; path moves it
+                                         along canvas points over a time; none takes the rig away
+  omotion empty <project> <name> <x,y> [--parent <layer>]
+                                         Add an empty: a point to aim at or move by, drawn as a cross
   omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
                                          pictures, its pieces and camera moving as they do; a flat
                                          scene as cards moving as its layers do
@@ -136,7 +148,7 @@ int command(const QStringList &args) {
 
     AssetCache assets(directory);
     for (const Layer &layer : scene.layers)
-        if (layer.particles.isEmpty() && assets.image(layer.source).isNull())
+        if (layer.particles.isEmpty() && !layer.source.isEmpty() && assets.image(layer.source).isNull())
             return fail(QString("Can't read %1 (layer \"%2\").").arg(layer.source, layer.name));
 
     if (args.at(1) == "cut") {
@@ -371,6 +383,76 @@ int command(const QStringList &args) {
         QTextStream(stdout) << QString("%1 has a shape (fits its outline %2%).\n")
                                    .arg(args.at(3))
                                    .arg(int(shape.value("fit").toDouble() * 100));
+        return 0;
+    }
+
+    if (args.at(1) == "rig") {
+        if (args.size() < 5)
+            return fail("rig takes a project, a layer, and a rig: ik, look, wheel, path or none.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        const QString kind = args.at(4);
+        if (kind == "none") {
+            if (!Project::unrig(edited, layer))
+                return fail(QString("%1 isn't rigged.").arg(args.at(3)));
+        } else if (kind == "path") {
+            QJsonArray points;
+            QJsonObject options;
+            for (int i = 5; i < args.size(); ++i) {
+                const QString arg = args.at(i);
+                if ((arg == "--from" || arg == "--to" || arg == "--ease") && i + 1 < args.size()) {
+                    const QString value = args.at(++i);
+                    if (arg == "--ease")
+                        options["ease"] = value;
+                    else
+                        options[arg == "--from" ? "start" : "end"] = value.toDouble();
+                } else if (arg == "--turn") {
+                    options["turn"] = true;
+                } else {
+                    const QStringList xy = arg.split(',');
+                    bool okX = false, okY = false;
+                    if (xy.size() != 2)
+                        return fail(QString("%1 isn't a point; write x,y.").arg(arg));
+                    points.append(QJsonArray{xy.at(0).toDouble(&okX), xy.at(1).toDouble(&okY)});
+                    if (!okX || !okY)
+                        return fail(QString("%1 isn't a point; write x,y.").arg(arg));
+                }
+            }
+            options["points"] = points;
+            if (!Project::rig(edited, assets, layer, "path", {}, &error, options))
+                return fail(error);
+        } else {
+            if (args.size() < 6)
+                return fail(QString("rig %1 takes the other layer too.").arg(kind));
+            QJsonObject options;
+            if (args.size() >= 8 && args.at(6) == "--bend")
+                options["bend"] = args.at(7).toInt() < 0 ? -1 : 1;
+            const QString type = kind == "look" ? QString("lookAt") : kind;
+            if (!Project::rig(edited, assets, layer, type, args.at(5), &error, options))
+                return fail(error);
+        }
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << QString("%1: %2.\n").arg(args.at(3), kind == "none" ? QString("no rig") : "rigged, " + kind);
+        return 0;
+    }
+
+    if (args.at(1) == "empty") {
+        if (args.size() != 5 && args.size() != 7)
+            return fail("empty takes a project, a name and x,y (and --parent and a layer).");
+        const QStringList xy = args.at(4).split(',');
+        if (xy.size() != 2)
+            return fail(QString("%1 isn't a point; write x,y.").arg(args.at(4)));
+        const QString parent = args.size() == 7 && args.at(5) == "--parent" ? args.at(6) : QString();
+        if (!parent.isEmpty() && scene.indexOf(parent) < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(parent));
+        Scene edited = scene;
+        const int index = Project::addEmpty(edited, args.at(3), parent, QPointF(xy.at(0).toDouble(), xy.at(1).toDouble()));
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << edited.layers.at(index).name << "\n";
         return 0;
     }
 
@@ -754,7 +836,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

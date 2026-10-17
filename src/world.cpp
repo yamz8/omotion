@@ -97,7 +97,7 @@ QList<int> layers(const Scene &scene) {
     if (root < 0)
         return list;
     for (int i = 0; i < scene.layers.size(); ++i)
-        if (scene.layers.at(i).particles.isEmpty() && rootOf(scene, i) == root)
+        if (scene.layers.at(i).particles.isEmpty() && !scene.layers.at(i).source.isEmpty() && rootOf(scene, i) == root)
             list.append(i);
     return list;
 }

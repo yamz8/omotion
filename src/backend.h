@@ -271,6 +271,16 @@ public:
     // Does one of the selected layer's steps again, or differently (an
     // action from its list); the AI's run in the background.
     Q_INVOKABLE void runStep(const QString &step, const QString &action);
+    // Rigs the selected layer (see Project::rig: "ik", "lookAt", "wheel"),
+    // or takes its rig away; adds an empty in the middle of the view; and
+    // with the path tool's points, makes it follow them from the playhead to
+    // the end (turning with the way, with turn).
+    Q_INVOKABLE void rigSelected(const QString &type, const QString &other);
+    Q_INVOKABLE void unrigSelected();
+    Q_INVOKABLE void addEmpty();
+    Q_INVOKABLE void finishPath(bool turn);
+    // The empty whose cross is within reach of a canvas point, or -1.
+    int emptyNear(double x, double y, double reach) const;
     // Moves a key of the selected thing's property to a new time and value
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.

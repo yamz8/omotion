@@ -65,6 +65,9 @@ Rectangle {
         ["Fill the hole behind it by the AI", "", () => (win.idle && backend.selected >= 0) && box.canFill(), () => backend.runStep("fill", "ai")],
         ["Fill the hole behind it smoothly", "", () => (win.idle && backend.selected >= 0) && box.canFill(), () => backend.runStep("fill", "smooth")],
         ["Leave the hole behind it open", "", () => (win.idle && backend.selected >= 0) && box.canFill(), () => backend.runStep("fill", "none")],
+        ["Add an empty: a point to aim at", "Shift+A", () => win.idle, () => backend.addEmpty()],
+        ["Draw a path for the layer to follow", "Shift+P", () => (win.idle && backend.selected >= 0), () => backend.setTool("path")],
+        ["Remove the layer's rig", "", () => (win.idle && backend.selected >= 0) && (backend.values.rig || []).length > 0, () => backend.unrigSelected()],
         ["Redo what's out of date (AI)", "", () => win.idle && backend.staleSteps > 0, () => backend.redoStale()]
     ]
 

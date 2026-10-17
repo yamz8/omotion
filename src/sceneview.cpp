@@ -2,6 +2,8 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLineF>
 
 #include "world.h"
@@ -317,6 +319,36 @@ void SceneView::paint(QPainter *painter) {
         painter->drawLine(pivot - QPointF(0, 9), pivot + QPointF(0, 9));
     }
 
+    // Empties: crosses, as Blender draws them; the selected one brighter.
+    for (int i = 0; i < scene.layers.size(); ++i) {
+        const Layer &layer = scene.layers.at(i);
+        if (!layer.raw.value("empty").toBool() || !layer.visible)
+            continue;
+        const QPointF at = (layerTransform(scene, m_backend->assets(), i, now) * view).map(QPointF());
+        painter->setPen(QPen(i == selected ? m_accent : QColor(255, 255, 255, 190), i == selected ? 2.2 : 1.5));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(at - QPointF(9, 0), at + QPointF(9, 0));
+        painter->drawLine(at - QPointF(0, 9), at + QPointF(0, 9));
+        painter->drawEllipse(at, 4, 4);
+    }
+    // The selected layer's path, where it has one.
+    if (selected >= 0 && selected < scene.layers.size())
+        for (const QJsonValue &entry : scene.layers.at(selected).raw.value("constraints").toArray()) {
+            const QJsonObject c = entry.toObject();
+            if (c.value("type").toString() != "path")
+                continue;
+            const int parent = scene.indexOf(scene.layers.at(selected).parent);
+            const QTransform toView = (parent >= 0 ? chainTransform(scene, m_backend->assets(), parent, now) : QTransform()) *
+                                      cameraTransform(scene, followOf(scene, selected), now) * view;
+            QPolygonF line;
+            for (const QJsonValue &p : c.value("points").toArray())
+                line << toView.map(QPointF(p.toArray().at(0).toDouble(), p.toArray().at(1).toDouble()));
+            QColor colour = m_accent;
+            colour.setAlpha(170);
+            painter->setPen(QPen(colour, 1.5, Qt::DashLine));
+            painter->drawPolyline(line);
+        }
+
     // The shape being painted with the brush, tinted.
     if (m_backend->tool() == "brush" && !m_backend->brushPreview().isNull()) {
         const QImage shape = m_backend->brushPreview();
@@ -352,15 +384,18 @@ void SceneView::paint(QPainter *painter) {
             shape.append(view.map(point));
         QPainterPath path;
         path.addPolygon(shape);
-        if (shape.size() > 2)
+        // A path stays open; a cut's shape closes.
+        const bool open = m_backend->tool() == "path";
+        if (shape.size() > 2 && !open)
             path.closeSubpath();
         QColor fill = m_accent;
         fill.setAlpha(50);
-        painter->fillPath(path, fill);
+        if (!open)
+            painter->fillPath(path, fill);
         painter->setPen(QPen(m_accent, 2));
         painter->setBrush(Qt::NoBrush);
         painter->drawPolyline(shape);
-        if (shape.size() > 2) {
+        if (shape.size() > 2 && !open) {
             painter->setPen(QPen(m_accent, 1.5, Qt::DashLine));
             painter->drawLine(shape.last(), shape.first());
         }
