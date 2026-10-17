@@ -345,6 +345,40 @@ Rectangle {
                 }
             }
 
+            // A 3D shape's mesh modifiers.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !!inspector.v.shaped
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                function amount(type, key) {
+                    const list = inspector.v.shapeModifiers || [];
+                    for (let i = 0; i < list.length; ++i)
+                        if (list[i].type === type) return list[i][key];
+                    return 0;
+                }
+                Label { text: "Shape"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Smooth ×"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; decimals: 0; value: parent.parent.amount("smooth", "times"); onCommitted: function (n) { backend.setShapeModifier("smooth", Math.round(n)) } }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Simplify to"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; decimals: 0; value: parent.parent.amount("simplify", "cells"); onCommitted: function (n) { backend.setShapeModifier("simplify", Math.round(n)) } }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "Smooth relaxes the AI's lumps; simplify keeps about that many points across it. 0 for none. The shape itself stays as made."
+                }
+            }
+
             // A drawing's pen.
             RowLayout {
                 visible: backend.selected >= 0 && !!inspector.v.drawing

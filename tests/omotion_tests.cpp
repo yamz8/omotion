@@ -2251,6 +2251,64 @@ private slots:
         QVERIFY(!Project::addStroke(scene, assets, 5, 0, {{1, 1}}, Qt::red, 2, &error));
     }
 
+    void shapesSmoothAndSimplify() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const int piece = scene.indexOf("piece");
+        // A lumpy ball as its shape: rings of points, every other one out.
+        QList<float> positions;
+        QList<quint32> triangles;
+        const int rings = 24, around = 32;
+        for (int r = 0; r <= rings; ++r)
+            for (int a = 0; a < around; ++a) {
+                const double lat = M_PI * r / rings, lon = 2 * M_PI * a / around;
+                const double radius = .5 * (1 + .15 * ((r + a) % 2));
+                positions << float(radius * std::sin(lat) * std::cos(lon)) << float(radius * std::cos(lat)) << float(radius * std::sin(lat) * std::sin(lon));
+            }
+        for (int r = 0; r < rings; ++r)
+            for (int a = 0; a < around; ++a) {
+                const quint32 p = quint32(r * around + a), q = quint32(r * around + (a + 1) % around);
+                triangles << p << p + around << q << q << p + around << q + around;
+            }
+        QByteArray bytes("OMSHAPE1");
+        const quint32 v = quint32(positions.size() / 3), n = quint32(triangles.size());
+        bytes.append(reinterpret_cast<const char *>(&v), 4).append(reinterpret_cast<const char *>(&n), 4);
+        bytes.append(reinterpret_cast<const char *>(positions.constData()), positions.size() * 4);
+        bytes.append(reinterpret_cast<const char *>(triangles.constData()), triangles.size() * 4);
+        writeText(QDir(project).filePath("assets/world/ball.shape"), bytes);
+        scene.layers[piece].raw["shape"] = QJsonObject{{"file", "assets/world/ball.shape"}, {"quarter", 0}};
+        const World::Mesh lumpy = World::mesh(scene, assets, piece);
+        QVERIFY(!lumpy.isNull());
+        // Lumps: how much the distance from its middle varies, for its size.
+        auto roughness = [](const World::Mesh &mesh) {
+            const float *f = reinterpret_cast<const float *>(mesh.vertices.constData());
+            const qsizetype count = mesh.vertices.size() / qsizetype(mesh.stride * sizeof(float));
+            QVector3D middle;
+            for (qsizetype k = 0; k < count; ++k)
+                middle += QVector3D(f[k * mesh.stride], f[k * mesh.stride + 1], f[k * mesh.stride + 2]) / float(count);
+            double sum = 0, squares = 0;
+            for (qsizetype k = 0; k < count; ++k) {
+                const double d = (QVector3D(f[k * mesh.stride], f[k * mesh.stride + 1], f[k * mesh.stride + 2]) - middle).length();
+                sum += d, squares += d * d;
+            }
+            const double mean = sum / count;
+            return std::sqrt(std::max(0.0, squares / count - mean * mean)) / mean;
+        };
+        QString error;
+        QVERIFY2(World::setShapeModifier(scene, piece, "smooth", 3, &error), qPrintable(error));
+        const World::Mesh smooth = World::mesh(scene, assets, piece);
+        QVERIFY(roughness(smooth) < roughness(lumpy) * .8);
+        QVERIFY(World::setShapeModifier(scene, piece, "simplify", 8, &error));
+        const World::Mesh light = World::mesh(scene, assets, piece);
+        QVERIFY(light.indices.size() < lumpy.indices.size() / 2);
+        QCOMPARE(scene.layers[piece].raw["shape"].toObject()["modifiers"].toArray().size(), 2);
+        QVERIFY(World::setShapeModifier(scene, piece, "none", 0, &error));
+        QCOMPARE(World::mesh(scene, assets, piece).indices.size(), lumpy.indices.size());
+        QVERIFY(!World::setShapeModifier(scene, 0, "smooth", 2, &error));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

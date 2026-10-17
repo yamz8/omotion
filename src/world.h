@@ -218,6 +218,11 @@ QJsonArray madeFrom(const Scene &scene, int root);
 // wasn't cut.
 QString cutCode(const Layer &layer);
 
+// A shaped piece's mesh modifiers, as Blender's, kept in its "shape" and
+// applied when its mesh is made: "smooth" (times) relaxes the AI's lumps,
+// "simplify" (cells across) makes it lighter; "none" takes them away.
+bool setShapeModifier(Scene &scene, int index, const QString &type, int amount, QString *error);
+
 // Sizes the world so a piece of it is as tall as it really is (meters).
 bool setSize(Scene &scene, AssetCache &assets, int index, double meters, QString *error);
 

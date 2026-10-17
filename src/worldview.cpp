@@ -43,7 +43,7 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
                                       {"picture", QUrl::fromLocalFile(picture)},
                                       {"shaped", !layer.raw.value("shape").toObject().isEmpty()}});
             parts.append(QJsonArray{index, layer.source, layer.anchor.x(), layer.anchor.y(),
-                                    QFileInfo(path).lastModified().toMSecsSinceEpoch()});
+                                    QFileInfo(path).lastModified().toMSecsSinceEpoch(), layer.raw.value("shape")});
         }
     key["layers"] = parts;
     const QByteArray meshKey = QJsonDocument(key).toJson(QJsonDocument::Compact);

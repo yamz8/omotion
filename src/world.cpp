@@ -457,6 +457,93 @@ ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
     return fit;
 }
 
+// A shape's mesh modifiers, as Blender's, in order: "smooth" relaxes it
+// (Taubin's way, so it doesn't shrink) "times" over; "simplify" merges
+// points closer than a "cells"th of its size into one.
+void modifyShape(StoredShape &shape, const QJsonArray &modifiers) {
+    for (const QJsonValue &value : modifiers) {
+        const QJsonObject m = value.toObject();
+        const size_t count = shape.positions.size() / 3;
+        if (count == 0)
+            return;
+        if (m.value("type").toString() == "smooth") {
+            std::vector<std::vector<quint32>> around(count);
+            for (size_t t = 0; t + 2 < shape.triangles.size(); t += 3)
+                for (int k = 0; k < 3; ++k) {
+                    const quint32 a = shape.triangles[t + k], b = shape.triangles[t + (k + 1) % 3];
+                    around[a].push_back(b);
+                    around[b].push_back(a);
+                }
+            const int times = std::clamp(m.value("times").toInt(2), 1, 50);
+            std::vector<float> next = shape.positions;
+            for (int pass = 0; pass < times * 2; ++pass) {
+                // In towards its neighbours, then out a little more.
+                const float step = pass % 2 ? -.53f : .5f;
+                for (size_t i = 0; i < count; ++i) {
+                    if (around[i].empty())
+                        continue;
+                    float mean[3] = {0, 0, 0};
+                    for (const quint32 j : around[i])
+                        for (int k = 0; k < 3; ++k)
+                            mean[k] += shape.positions[j * 3 + k];
+                    for (int k = 0; k < 3; ++k)
+                        next[i * 3 + k] = shape.positions[i * 3 + k] + step * (mean[k] / float(around[i].size()) - shape.positions[i * 3 + k]);
+                }
+                shape.positions = next;
+            }
+        } else if (m.value("type").toString() == "simplify") {
+            float low[3] = {1e30f, 1e30f, 1e30f}, high[3] = {-1e30f, -1e30f, -1e30f};
+            for (size_t i = 0; i < count; ++i)
+                for (int k = 0; k < 3; ++k)
+                    low[k] = std::min(low[k], shape.positions[i * 3 + k]), high[k] = std::max(high[k], shape.positions[i * 3 + k]);
+            const float span = std::max({high[0] - low[0], high[1] - low[1], high[2] - low[2], 1e-6f});
+            const int cells = std::clamp(m.value("cells").toInt(48), 4, 1024);
+            const float cell = span / float(cells);
+            QHash<quint64, quint32> merged;
+            std::vector<quint32> into(count);
+            std::vector<float> positions, colors;
+            std::vector<int> counts;
+            const bool coloured = shape.colors.size() == shape.positions.size();
+            for (size_t i = 0; i < count; ++i) {
+                quint64 key = 0;
+                for (int k = 0; k < 3; ++k)
+                    key = key * 2048 + quint64(std::clamp(int((shape.positions[i * 3 + k] - low[k]) / cell), 0, 2047));
+                auto found = merged.constFind(key);
+                if (found == merged.constEnd()) {
+                    found = merged.insert(key, quint32(counts.size()));
+                    counts.push_back(0);
+                    positions.insert(positions.end(), {0, 0, 0});
+                    if (coloured)
+                        colors.insert(colors.end(), {0, 0, 0});
+                }
+                const quint32 j = *found;
+                into[i] = j;
+                ++counts[j];
+                for (int k = 0; k < 3; ++k) {
+                    positions[j * 3 + k] += shape.positions[i * 3 + k];
+                    if (coloured)
+                        colors[j * 3 + k] += shape.colors[i * 3 + k];
+                }
+            }
+            for (size_t j = 0; j < counts.size(); ++j)
+                for (int k = 0; k < 3; ++k) {
+                    positions[j * 3 + k] /= float(counts[j]);
+                    if (coloured)
+                        colors[j * 3 + k] /= float(counts[j]);
+                }
+            std::vector<quint32> triangles;
+            for (size_t t = 0; t + 2 < shape.triangles.size(); t += 3) {
+                const quint32 a = into[shape.triangles[t]], b = into[shape.triangles[t + 1]], c = into[shape.triangles[t + 2]];
+                if (a != b && b != c && a != c)
+                    triangles.insert(triangles.end(), {a, b, c});
+            }
+            shape.positions = positions;
+            shape.colors = colors;
+            shape.triangles = triangles;
+        }
+    }
+}
+
 ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index) {
     ShapeFit fit;
     const Info world = info(scene);
@@ -467,6 +554,7 @@ ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index) {
         return fit;
     fit.model = readShape(QDir(assets.directory()).filePath(file));
     fit.model.quarter = layer.raw.value("shape").toObject().value("quarter").toInt();
+    modifyShape(fit.model, layer.raw.value("shape").toObject().value("modifiers").toArray());
     fit.size = assets.size(layer.source);
     const QSizeF picture = assets.size(pictureFile(scene, root));
     const DepthMap depth = depthMap(assets, world.depth, picture.toSize(), world.focal, world.scale);
@@ -1523,9 +1611,13 @@ bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
         return fail(QString("Couldn't write %1.").arg(file));
     // With what it was made from: the piece's image, and the world it was
     // fitted in.
-    scene.layers[index].raw["shape"] = QJsonObject{{"file", file}, {"quarter", quarter}, {"fit", std::round(best * 100) / 100},
-                                                   {"from", cutCode(scene.layers.at(index))},
-                                                   {"world", scene.raw.value("world").toObject().value("made")}};
+    QJsonObject made{{"file", file}, {"quarter", quarter}, {"fit", std::round(best * 100) / 100},
+                     {"from", cutCode(scene.layers.at(index))}, {"world", scene.raw.value("world").toObject().value("made")}};
+    // Made again, it keeps its modifiers.
+    const QJsonValue modifiers = scene.layers.at(index).raw.value("shape").toObject().value("modifiers");
+    if (!modifiers.isUndefined())
+        made["modifiers"] = modifiers;
+    scene.layers[index].raw["shape"] = made;
     return true;
 }
 
@@ -2163,6 +2255,33 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
             if (before.contains(kept) && !(kept == QString("horizon") && horizon > 0 && horizon < 1))
                 made[kept] = before.value(kept);
     scene.raw["world"] = made;
+    return true;
+}
+
+bool setShapeModifier(Scene &scene, int index, const QString &type, int amount, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size() || scene.layers.at(index).raw.value("shape").toObject().isEmpty())
+        return fail("Give the piece a 3D shape first (S).");
+    if (type != "smooth" && type != "simplify" && type != "none")
+        return fail("A shape's modifier is smooth, simplify or none.");
+    QJsonObject shape = scene.layers.at(index).raw.value("shape").toObject();
+    QJsonArray list;
+    for (const QJsonValue &m : shape.value("modifiers").toArray())
+        if (type != "none" && m.toObject().value("type").toString() != type)
+            list.append(m);
+    if (type == "smooth")
+        list.append(QJsonObject{{"type", "smooth"}, {"times", std::clamp(amount, 1, 50)}});
+    else if (type == "simplify")
+        list.append(QJsonObject{{"type", "simplify"}, {"cells", std::clamp(amount, 4, 1024)}});
+    if (list.isEmpty())
+        shape.remove("modifiers");
+    else
+        shape["modifiers"] = list;
+    scene.layers[index].raw["shape"] = shape;
     return true;
 }
 

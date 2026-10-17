@@ -294,6 +294,8 @@ public:
     Q_INVOKABLE void strokeTo(double x, double y);
     Q_INVOKABLE void endStroke();
     Q_INVOKABLE void undoStroke();
+    // The selected piece's shape's modifiers (World::setShapeModifier).
+    Q_INVOKABLE void setShapeModifier(const QString &type, int amount);
     // Rigs the selected layer (see Project::rig: "ik", "lookAt", "wheel"),
     // or takes its rig away; adds an empty in the middle of the view; and
     // with the path tool's points, makes it follow them from the playhead to

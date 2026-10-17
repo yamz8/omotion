@@ -604,6 +604,31 @@ void Backend::undoStroke() {
     changed();
 }
 
+void Backend::setShapeModifier(const QString &type, int amount) {
+    Scene scene = m_scene;
+    QString error;
+    // Nothing's an amount of zero: that modifier goes.
+    if (amount <= 0) {
+        QJsonObject shape = scene.layers.value(m_selected).raw.value("shape").toObject();
+        QJsonArray kept;
+        for (const QJsonValue &m : shape.value("modifiers").toArray())
+            if (m.toObject().value("type").toString() != type)
+                kept.append(m);
+        if (m_selected < 0 || shape.isEmpty())
+            return;
+        if (kept.isEmpty())
+            shape.remove("modifiers");
+        else
+            shape["modifiers"] = kept;
+        scene.layers[m_selected].raw["shape"] = shape;
+    } else if (!World::setShapeModifier(scene, m_selected, type, amount, &error)) {
+        return setError(error);
+    }
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::rigSelected(const QString &type, const QString &other) {
     if (m_selected < 0)
         return;
@@ -780,6 +805,8 @@ QVariantMap Backend::values() const {
     map.insert("ownFollow", !std::isnan(layer.follow));
     map.insert("empty", layer.raw.value("empty").toBool());
     map.insert("drawing", layer.raw.contains("drawing"));
+    map.insert("shapeModifiers", layer.raw.value("shape").toObject().value("modifiers").toArray().toVariantList());
+    map.insert("shaped", !layer.raw.value("shape").toObject().isEmpty());
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());
     map.insert("body", layer.raw.value("body").toObject().toVariantMap());
     map.insert("clips", layer.raw.value("clips").toArray().toVariantList());

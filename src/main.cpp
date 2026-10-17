@@ -72,6 +72,10 @@ const char *Usage = R"(Usage:
                                          horizon is, down the picture, for which way is level
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
+  omotion mesh <project> <layer> smooth [<times>] | simplify [<cells>] | none
+                                         Modify a piece's 3D shape as Blender's modifiers do, kept
+                                         apart from it: smooth relaxes the AI's lumps, simplify makes
+                                         it lighter (cells across it), none takes them away
   omotion size <project> <layer> <meters>  Size the world so that piece is that tall (a car 1.4)
   omotion rig <project> <layer> ik <lower> [--bend -1]
   omotion rig <project> <layer> look <target>
@@ -631,6 +635,20 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "mesh") {
+        if (args.size() < 5)
+            return fail("mesh takes a project, a layer and smooth, simplify or none.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        const int amount = args.size() > 5 ? args.at(5).toInt() : args.at(4) == "smooth" ? 2 : 48;
+        if (!World::setShapeModifier(edited, layer, args.at(4), amount, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << "Done.\n";
+        return 0;
+    }
+
     if (args.at(1) == "size") {
         if (args.size() != 5)
             return fail("size takes a project, a layer, and how tall it really is in meters.");
@@ -957,7 +975,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.
