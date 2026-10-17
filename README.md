@@ -390,8 +390,8 @@ photo.omotion/
   centimeters (`speed` 300 is 3 m/s, `gravity` 980 is Earth's).
 - **`body`** on a layer makes it a rigid body: `mass`, `bounce` (0 to 1),
   `friction` (0 to 1), `fixed`, `tumble` (true unless set false: bodies
-  spin when knocked off their middle or caught by the ground, and tip onto
-  a side as they rest). A flat scene's bodies land on its bottom,
+  are boxes that turn, meeting the ground with their corners, so they rock
+  on an edge, roll over when thrown hard, and come to rest on a face). A flat scene's bodies land on its bottom,
   or at the scene's `floor` (canvas y) when set.
 - **`constraints`** on a layer rig it, as Blender's do: `{"type": "ik", "lower",
   "target", "pivot", "tip", "bend"}` turns it (the upper bone) and its child

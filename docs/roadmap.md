@@ -85,15 +85,16 @@ layer; the look (grade, vignette, bloom, depth of field); films with
 transitions and sound; drawing frame by frame; shape modifiers; lights and
 materials; video layers and tracking; imported models; billowing layers.
 
-Done since: bodies tumble (spin from knocks and the ground, rest on a
-side); models in glTF exports and in physics; films previewed in the
+Done since: bodies tumble (turned boxes meeting the ground with their
+corners: they rock, roll over and rest on a face); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property; several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
 video's frame under the playhead; soft shadows from added lights; emitters on a world's pieces throw
 particles in 3D.
 
-Still to do there: collisions with shapes rather than boxes; particles
+Still to do there: bodies meeting each other as turned boxes or shapes (they
+meet as boxes square to the axes); particles
 hidden behind what's nearer (they're drawn over the world); cloth and real fluids; light probes, and true shadow maps (a light's
 shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).
 

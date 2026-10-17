@@ -10,7 +10,7 @@ namespace Physics {
 namespace {
 constexpr double degrees = 180 / M_PI;
 
-// How hard a body is to turn about each axis: a box's, from its size.
+// How hard a body is to turn about each of its own axes: a box's.
 QVector3D inertia(const Body &b) {
     const double x = b.half.x() * b.half.x(), y = b.half.y() * b.half.y(), z = b.half.z() * b.half.z();
     return QVector3D(float(b.mass * (y + z) / 3), float(b.mass * (x + z) / 3), float(b.mass * (x + y) / 3));
@@ -18,56 +18,85 @@ QVector3D inertia(const Body &b) {
 
 double inverseMass(const Body &b) { return b.fixed ? 0 : 1 / b.mass; }
 
+// A twist (torque or impulse about its middle) as the turning it causes:
+// taken into the body's own axes, where its box is square, and back.
+QVector3D turnedBy(const Body &b, const QVector3D &twist) {
+    if (b.fixed || !b.tumble)
+        return {};
+    const QVector3D own = b.turn.inverted().rotatedVector(twist), hard = inertia(b);
+    QVector3D change;
+    for (int k = 0; k < 3; ++k)
+        change[k] = float(own[k] / std::max(1e-9, double(hard[k])));
+    return b.turn.rotatedVector(change);
+}
+
 // Turning in radians a second, as the simulation works.
 QVector3D turning(const Body &b) { return b.spin / float(degrees); }
 
 // How a point on it, r from its middle, moves.
 QVector3D pointVelocity(const Body &b, const QVector3D &r) { return b.velocity + QVector3D::crossProduct(turning(b), r); }
 
-// How little a push at r along a direction moves that point: the share of
-// the push it takes, for working out how big a push stops it.
+// How much a point r from its middle gives to a push along a direction:
+// what a push of one moves it by, for working out the push that stops it.
 double give(const Body &b, const QVector3D &r, const QVector3D &direction) {
     if (b.fixed)
         return 0;
-    const QVector3D arm = QVector3D::crossProduct(r, direction), turn = inertia(b);
-    double g = 1 / b.mass;
-    if (b.tumble)
-        for (int k = 0; k < 3; ++k)
-            g += double(arm[k]) * arm[k] / std::max(1e-9, double(turn[k]));
-    return g;
+    const QVector3D swing = QVector3D::crossProduct(turnedBy(b, QVector3D::crossProduct(r, direction)), r);
+    return 1 / b.mass + QVector3D::dotProduct(swing, direction);
 }
 
 void push(Body &b, const QVector3D &r, const QVector3D &impulse) {
     if (b.fixed)
         return;
     b.velocity += impulse / float(b.mass);
-    if (!b.tumble)
-        return;
-    const QVector3D torque = QVector3D::crossProduct(r, impulse), turn = inertia(b);
-    for (int k = 0; k < 3; ++k)
-        b.spin[k] += float(torque[k] / std::max(1e-9, double(turn[k])) * degrees);
+    b.spin += turnedBy(b, QVector3D::crossProduct(r, impulse)) * float(degrees);
 }
 
-// Rubbing at a contact: a push against how the point slides, a share of
-// what stops it each step, so friction 1 grips and 0 slips.
-void rub(Body &a, const QVector3D &ra, Body *b, const QVector3D &rb, const QVector3D &normal, double grip) {
+// Rubbing at a contact: a push against how the point slides, no more than
+// friction times how hard they press (pressed, the share that stops it).
+void rub(Body &a, const QVector3D &ra, Body *b, const QVector3D &rb, const QVector3D &normal, double friction, double pressed) {
     QVector3D slide = pointVelocity(a, ra) - (b ? pointVelocity(*b, rb) : QVector3D());
     slide -= normal * QVector3D::dotProduct(slide, normal);
     const float speed = slide.length();
-    if (speed < 1e-6f || grip <= 0)
+    if (speed < 1e-6f || friction <= 0 || pressed <= 0)
         return;
     const QVector3D along = slide / speed;
     const double share = give(a, ra, along) + (b ? give(*b, rb, along) : 0);
     if (share <= 0)
         return;
-    const QVector3D impulse = along * float(-speed / share * std::min(1.0, grip));
-    push(a, ra, impulse);
+    const double stop = std::min(speed / share, friction * pressed);
+    push(a, ra, along * float(-stop));
     if (b)
-        push(*b, rb, -impulse);
+        push(*b, rb, along * float(stop));
 }
 
-// The nearest resting angle, a side down.
-float square(float angle) { return float(std::round(angle / 90.0) * 90.0); }
+// The corners of its box where it is now; a flat body's only across and
+// up, as it only turns in the picture's plane.
+QList<QVector3D> corners(const Body &b) {
+    const bool flat = b.half.z() > 1e5f;
+    QList<QVector3D> list;
+    for (int c = 0; c < (flat ? 4 : 8); ++c) {
+        const QVector3D own((c & 1 ? 1 : -1) * b.half.x(), (c & 2 ? 1 : -1) * b.half.y(), flat ? 0 : (c & 4 ? 1 : -1) * b.half.z());
+        list << b.centre + b.turn.rotatedVector(own);
+    }
+    return list;
+}
+
+// How far it reaches along each axis as it's turned: the box square to the
+// axes around it, for meeting other bodies.
+QVector3D reach(const Body &b) {
+    if (b.half.z() > 1e5f) {
+        QVector3D r;
+        for (const QVector3D &c : corners(b))
+            r = QVector3D(std::max(r.x(), std::abs(c.x() - b.centre.x())), std::max(r.y(), std::abs(c.y() - b.centre.y())), b.half.z());
+        return r;
+    }
+    QVector3D r;
+    for (const QVector3D &c : corners(b))
+        for (int k = 0; k < 3; ++k)
+            r[k] = std::max(r[k], std::abs(c[k] - b.centre[k]));
+    return r;
+}
 }
 
 QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::function<double(double, double)> &ground,
@@ -75,44 +104,53 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
     QList<QList<Pose>> path(bodies.size());
     constexpr int substeps = 8;
     const double h = dt / substeps;
-    for (Body &b : bodies)
+    for (Body &b : bodies) {
+        b.turn = QQuaternion();
         if (!b.tumble || b.fixed)
             b.spin = QVector3D();
+    }
     for (int f = 0; f < frames; ++f) {
         for (int i = 0; i < bodies.size(); ++i)
-            path[i] << Pose{bodies.at(i).centre, bodies.at(i).angle};
+            path[i] << Pose{bodies.at(i).centre, bodies.at(i).turn};
         for (int step = 0; step < substeps; ++step) {
             for (Body &b : bodies) {
                 if (b.fixed)
                     continue;
                 b.velocity.setY(b.velocity.y() - float(gravity * h));
                 b.centre += b.velocity * float(h);
-                b.angle += b.spin * float(h);
-                // The ground under its middle.
-                const double floor = ground(b.centre.x(), b.centre.z());
-                if (!std::isnan(floor) && b.centre.y() - b.half.y() < floor) {
-                    b.centre.setY(float(floor + b.half.y()));
-                    if (b.velocity.y() < 0) {
-                        const float up = float(-b.velocity.y() * b.bounce);
-                        // Too slow to bounce: it settles.
-                        b.velocity.setY(up < gravity * h * 4 ? 0.f : up);
-                    }
-                    // Sliding along the ground rolls it over, as the ground
-                    // catches its bottom; then a box doesn't roll far.
-                    const QVector3D bottom(0, -b.half.y(), 0);
-                    rub(b, bottom, nullptr, {}, QVector3D(0, 1, 0), b.friction * h * 30);
-                    const float slow = float(std::max(0.0, 1 - b.friction * h * 6));
-                    b.velocity.setX(b.velocity.x() * slow);
-                    b.velocity.setZ(b.velocity.z() * slow);
-                    b.spin *= float(std::max(0.0, 1 - h * 6));
-                    // Slow enough, it tips onto its nearest side and rests.
-                    if (b.tumble && b.spin.length() < 120) {
-                        const float pull = float(std::min(1.0, h * 10));
-                        for (const int k : {0, 2})
-                            b.angle[k] += (square(b.angle[k]) - b.angle[k]) * pull;
-                        b.spin *= 1 - pull;
+                const QVector3D w = turning(b);
+                if (!w.isNull())
+                    b.turn = (QQuaternion::fromAxisAndAngle(w.normalized(), float(w.length() * h * degrees)) * b.turn).normalized();
+                // Its corners under the ground: lifted out by the deepest,
+                // then each pushed back up (bouncing when it hit hard),
+                // and rubbed along it.
+                QList<QVector3D> touching;
+                double deepest = 0;
+                for (const QVector3D &corner : corners(b)) {
+                    const double floor = ground(corner.x(), corner.z());
+                    if (!std::isnan(floor) && corner.y() < floor) {
+                        touching << corner;
+                        deepest = std::max(deepest, floor - corner.y());
                     }
                 }
+                if (touching.isEmpty())
+                    continue;
+                b.centre.setY(b.centre.y() + float(deepest));
+                const QVector3D up(0, 1, 0);
+                for (int pass = 0; pass < 2; ++pass)
+                    for (const QVector3D &corner : touching) {
+                        const QVector3D r = corner - b.centre;
+                        const double closing = pointVelocity(b, r).y();
+                        if (closing >= 0)
+                            continue;
+                        // Too slow to bounce: it settles.
+                        const double bounce = pass == 0 && -closing > gravity * h * 4 ? b.bounce : 0;
+                        const double pressed = -(1 + bounce) * closing / give(b, r, up);
+                        push(b, r, up * float(pressed));
+                        rub(b, r, nullptr, {}, up, b.friction, pressed);
+                    }
+                // A box rolls badly: turning on the ground dies away.
+                b.spin *= float(std::max(0.0, 1 - h * 2));
             }
             // Each pair that overlaps is pushed apart along where they
             // overlap least, and their speeds that way exchanged, as boxes
@@ -122,11 +160,12 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
                     Body &a = bodies[i], &b = bodies[j];
                     if (a.fixed && b.fixed)
                         continue;
+                    const QVector3D ha = reach(a), hb = reach(b);
                     const QVector3D d = b.centre - a.centre;
                     int axis = -1;
                     float least = 1e30f;
                     for (int k = 0; k < 3; ++k) {
-                        const float overlap = a.half[k] + b.half[k] - std::abs(d[k]);
+                        const float overlap = ha[k] + hb[k] - std::abs(d[k]);
                         if (overlap <= 0) {
                             axis = -1;
                             break;
@@ -146,17 +185,18 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
                     // the face between them.
                     QVector3D contact;
                     for (int k = 0; k < 3; ++k)
-                        contact[k] = k == axis ? a.centre[k] + normal[k] * a.half[k]
-                                               : (std::max(a.centre[k] - a.half[k], b.centre[k] - b.half[k]) +
-                                                  std::min(a.centre[k] + a.half[k], b.centre[k] + b.half[k])) / 2;
+                        contact[k] = k == axis ? a.centre[k] + normal[k] * ha[k]
+                                               : (std::max(a.centre[k] - ha[k], b.centre[k] - hb[k]) +
+                                                  std::min(a.centre[k] + ha[k], b.centre[k] + hb[k])) / 2;
                     const QVector3D ra = contact - a.centre, rb = contact - b.centre;
                     const double closing = QVector3D::dotProduct(b.velocity - a.velocity, normal);
+                    double pressed = 0;
                     if (closing < 0) {
-                        const double impulse = -(1 + std::min(a.bounce, b.bounce)) * closing / share;
-                        a.velocity -= normal * float(impulse * ia);
-                        b.velocity += normal * float(impulse * ib);
+                        pressed = -(1 + std::min(a.bounce, b.bounce)) * closing / share;
+                        a.velocity -= normal * float(pressed * ia);
+                        b.velocity += normal * float(pressed * ib);
                     }
-                    rub(b, rb, &a, ra, normal, std::sqrt(a.friction * b.friction) * h * 30);
+                    rub(b, rb, &a, ra, normal, std::sqrt(a.friction * b.friction), pressed);
                 }
         }
     }
@@ -271,47 +311,76 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
             continue;
         const int index = layers.at(b);
         Layer &layer = scene.layers[index];
-        QStringList properties = world ? QStringList{"worldX", "worldY", "worldZ"} : QStringList{"x", "y"};
+        const Layer &was = before.layers.at(index);
+        const QList<Pose> &poses = path.at(b);
         // Its turn only when it turned, so an upright body keeps its keys.
         bool turned = false;
-        for (const Pose &pose : path.at(b))
-            turned = turned || (pose.angle - path.at(b).first().angle).length() > 1e-3f;
+        for (const Pose &pose : poses)
+            turned = turned || std::abs(pose.turn.scalar()) < 1 - 1e-7f;
+        QStringList properties = world ? QStringList{"worldX", "worldY", "worldZ"} : QStringList{"x", "y"};
         if (turned)
             properties << (world ? QStringList{"pitch", "yaw", "roll"} : QStringList{"rotation"});
-        QHash<QString, double> start;
-        for (const QString &p : properties)
-            start[p] = before.ownValue(before.layers.at(index), p, from);
-        // A flat layer's move is in its parent's pixels.
-        bool invertible = true;
-        const QTransform back = world ? QTransform() : parentTransform(before, assets, index, from).inverted(&invertible);
-        if (!invertible)
-            continue;
+        QHash<QString, QList<double>> values;
+        // It turns about its pivot, not the middle of its box: where the
+        // pivot goes is where the box's middle went, less the turned way
+        // from the pivot to the middle.
+        if (world) {
+            const QVector3D pivot = World::pivot(before, assets, index);
+            const QVector3D move0(float(before.value(was, "worldX", from)), float(before.value(was, "worldY", from)), float(-before.value(was, "worldZ", from)));
+            const QQuaternion start = World::turn(before.value(was, "yaw", from), before.value(was, "pitch", from), before.value(was, "roll", from));
+            const QVector3D toMiddle = poses.first().centre - pivot - move0;
+            QVector3D last;
+            for (int f = 0; f < frames; ++f) {
+                const Pose &pose = poses.at(f);
+                const QVector3D move = pose.centre - pivot - pose.turn.rotatedVector(toMiddle);
+                values["worldX"] << move.x();
+                values["worldY"] << move.y();
+                values["worldZ"] << -move.z();
+                // As yaw, pitch and roll again, kept going the same way
+                // round rather than jumping at 180°.
+                const QVector3D e = (pose.turn * start).toEulerAngles();
+                QVector3D angles(-e.y(), e.x(), -e.z());
+                if (f > 0)
+                    for (int k = 0; k < 3; ++k)
+                        angles[k] = last[k] + float(std::remainder(angles[k] - last[k], 360.0));
+                else
+                    angles = QVector3D(float(before.value(was, "yaw", from)), float(before.value(was, "pitch", from)), float(before.value(was, "roll", from)));
+                last = angles;
+                values["yaw"] << angles.x();
+                values["pitch"] << angles.y();
+                values["roll"] << angles.z();
+            }
+        } else {
+            bool invertible = true;
+            const QTransform back = parentTransform(before, assets, index, from).inverted(&invertible);
+            if (!invertible)
+                continue;
+            const QSizeF size = assets.size(was.source);
+            const QPointF pivot = layerTransform(before, assets, index, from).map(QPointF(was.anchor.x() * size.width(), was.anchor.y() * size.height()));
+            const QPointF middle(poses.first().centre.x(), -poses.first().centre.y());
+            const QPointF here = back.map(pivot);
+            double angle = 0;
+            for (int f = 0; f < frames; ++f) {
+                const Pose &pose = poses.at(f);
+                // Turned in the canvas's plane: counter-clockwise as seen is
+                // less rotation, the canvas's y running down.
+                const double z = 2 * qRadiansToDegrees(std::atan2(double(pose.turn.z()), double(pose.turn.scalar())));
+                angle = f == 0 ? 0 : angle + std::remainder(-z - angle, 360.0);
+                const QPointF now(pose.centre.x(), -pose.centre.y());
+                const QPointF goes = now - QTransform().rotate(angle).map(middle - pivot);
+                const QPointF inParent = back.map(goes);
+                values["x"] << before.ownValue(was, "x", from) + inParent.x() - here.x();
+                values["y"] << before.ownValue(was, "y", from) + inParent.y() - here.y();
+                values["rotation"] << before.ownValue(was, "rotation", from) + angle;
+            }
+        }
         for (const QString &p : properties) {
             QList<Key> keys;
             for (const Key &key : layer.keys.value(p))
                 if (key.t < from - 1e-9 || key.t > to + 1e-9)
                     keys << key;
-            for (int f = 0; f < frames; ++f) {
-                const QVector3D shift = path.at(b).at(f).centre - path.at(b).first().centre;
-                const QVector3D turn = path.at(b).at(f).angle - path.at(b).first().angle;
-                double v;
-                if (p == "pitch")
-                    v = start[p] + turn.x();
-                else if (p == "yaw")
-                    v = start[p] - turn.y();
-                else if (p == "roll")
-                    v = start[p] - turn.z();
-                else if (p == "rotation")
-                    v = start[p] - turn.z();
-                else if (world)
-                    v = start[p] + (p == "worldX" ? shift.x() : p == "worldY" ? shift.y() : -shift.z());
-                else {
-                    const QPointF onCanvas(shift.x(), -shift.y());
-                    const QPointF inParent = back.map(onCanvas) - back.map(QPointF());
-                    v = start[p] + (p == "x" ? inParent.x() : inParent.y());
-                }
-                keys << Key{from + f * dt, std::round(v * 1e4) / 1e4, "linear"};
-            }
+            for (int f = 0; f < frames; ++f)
+                keys << Key{from + f * dt, std::round(values.value(p).at(f) * 1e4) / 1e4, "linear"};
             std::sort(keys.begin(), keys.end(), [](const Key &a, const Key &k) { return a.t < k.t; });
             layer.keys[p] = keys;
         }

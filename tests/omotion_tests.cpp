@@ -2131,24 +2131,40 @@ private slots:
         QVERIFY(std::abs(fixed.value(fixed.layers[1], "y", 2) - 10) < 1.5);
         QVERIFY(!Physics::setBody(fixed, 5, {{"mass", 1}}, &error));
 
-        // Thrown sideways, a body rolls over as the floor catches it, and
-        // comes to rest on a side; told not to tumble, it only slides.
-        Scene thrown = twoSquares(dir, assets);
-        thrown.duration = 3;
-        thrown.layers.removeLast();
-        thrown.layers[0].keys["x"] = {Key{0, 10, "linear"}, Key{.1, 40, "linear"}};
-        QVERIFY(Physics::setBody(thrown, 0, {{"bounce", 0}, {"friction", .8}}, &error));
-        Scene sliding = thrown;
-        QCOMPARE(Physics::bake(thrown, assets, 0, 3, &error), 1);
-        QVERIFY(thrown.layers[0].keys.contains("rotation"));
-        double most = 0;
-        for (double t = 0; t < 3; t += .05)
-            most = std::max(most, std::abs(thrown.value(thrown.layers[0], "rotation", t)));
-        QVERIFY2(most > 20, qPrintable(QString::number(most)));
-        const double rest = thrown.value(thrown.layers[0], "rotation", 3);
-        QVERIFY2(std::abs(rest - std::round(rest / 90) * 90) < 1, qPrintable(QString::number(rest)));
-        sliding.layers[0].raw["body"] = QJsonObject{{"bounce", 0}, {"friction", .8}, {"tumble", false}};
-        QCOMPARE(Physics::bake(sliding, assets, 0, 3, &error), 1);
+        // Thrown sideways, a body is tipped onto its corner as the floor
+        // catches it: gently, it rocks and falls back; hard, it rolls over
+        // and comes to rest on another face. Told not to tumble, it slides.
+        auto thrown = [&](double speed, bool tumble) {
+            Scene one = twoSquares(dir, assets);
+            one.duration = 3;
+            one.layers.removeLast();
+            one.layers[0].keys["x"] = {Key{0, 10, "linear"}, Key{.1, 10 + speed / 10, "linear"}};
+            QJsonObject settings{{"bounce", 0}, {"friction", .8}};
+            if (!tumble)
+                settings["tumble"] = false;
+            Physics::setBody(one, 0, settings, nullptr);
+            Physics::bake(one, assets, 0, 3, nullptr);
+            return one;
+        };
+        auto most = [](const Scene &one) {
+            double m = 0;
+            for (double t = 0; t < 3; t += .02)
+                m = std::max(m, std::abs(one.value(one.layers[0], "rotation", t)));
+            return m;
+        };
+        auto resting = [](const Scene &one) {
+            const double rest = one.value(one.layers[0], "rotation", 3);
+            return std::abs(rest - std::round(rest / 90) * 90) < 2;
+        };
+        const Scene gently = thrown(300, true), hard = thrown(1000, true), sliding = thrown(1000, false);
+        QVERIFY2(most(gently) > 8 && most(gently) < 45, qPrintable(QString::number(most(gently))));
+        QVERIFY(resting(gently));
+        QVERIFY2(std::abs(gently.value(gently.layers[0], "rotation", 3)) < 2, qPrintable(QString::number(gently.value(gently.layers[0], "rotation", 3))));
+        QVERIFY2(most(hard) >= 88, qPrintable(QString::number(most(hard))));
+        QVERIFY2(resting(hard), qPrintable(QString::number(hard.value(hard.layers[0], "rotation", 3))));
+        // Resting on its face on the floor (the canvas's bottom, at 100).
+        const QRectF lying = layerTransform(hard, assets, 0, 3).mapRect(QRectF(0, 0, 40, 40));
+        QVERIFY2(std::abs(lying.bottom() - 100) < 1.5, qPrintable(QString::number(lying.bottom())));
         QVERIFY(!sliding.layers[0].keys.contains("rotation"));
 
         // In a world: dropped from up high, it lands on the ground there.
