@@ -103,6 +103,31 @@ Item {
             }
         }
 
+        // Smoke, fire and water from its pieces: each worked out on a sheet
+        // standing where it comes from, drawn among the pieces.
+        Repeater3D {
+            model: view.frame.sheets || []
+            delegate: Model {
+                required property var modelData
+                source: "#Rectangle"
+                position: modelData.position
+                rotation: modelData.rotation
+                // The rectangle is 100 units square.
+                scale: Qt.vector3d(modelData.width / 100, modelData.height / 100, 1)
+                materials: CustomMaterial {
+                    shadingMode: CustomMaterial.Unshaded
+                    cullMode: Material.NoCulling
+                    depthDrawMode: Material.NeverDepthDraw
+                    sourceBlend: CustomMaterial.One
+                    destinationBlend: CustomMaterial.OneMinusSrcAlpha
+                    vertexShader: "qrc:/sheet.vert"
+                    fragmentShader: "qrc:/sheet.frag"
+                    property real strength: modelData.opacity
+                    property TextureInput picture: TextureInput { texture: Texture { textureData: view.source.sheet(modelData.layer) } }
+                }
+            }
+        }
+
         // Dust thrown up where things leave the ground and land: soft puffs
         // facing the camera, worked out for the frame's time (so the same
         // frame always shows the same dust).

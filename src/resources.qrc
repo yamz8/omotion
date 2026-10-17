@@ -11,6 +11,8 @@
         <file alias="puff.png">puff.png</file>
         <file alias="dust.vert">dust.vert</file>
         <file alias="dust.frag">dust.frag</file>
+        <file alias="sheet.vert">sheet.vert</file>
+        <file alias="sheet.frag">sheet.frag</file>
         <file alias="shape.vert">shape.vert</file>
         <file alias="shape.frag">shape.frag</file>
         <file alias="card.vert">card.vert</file>

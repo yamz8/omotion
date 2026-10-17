@@ -1,4 +1,6 @@
 #include "world.h"
+#include "fluid.h"
+#include "liquid.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -1208,6 +1210,108 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         }
     }
     return frame;
+}
+
+bool fluidInWorld(const Scene &scene, const Layer &layer) {
+    if (layer.particles.isEmpty() || !info(scene).valid)
+        return false;
+    const QString kind = layer.particles.value("kind").toString();
+    if (kind != "smoke" && kind != "fire" && kind != "water")
+        return false;
+    const int source = scene.indexOf(layer.particles.value("from").toString());
+    return source >= 0 && layers(scene).contains(source) && source != scene.indexOf(info(scene).picture);
+}
+
+QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
+    QList<Sheet> list;
+    const Info world = info(scene);
+    for (int index = 0; index < scene.layers.size(); ++index) {
+        const Layer &layer = scene.layers.at(index);
+        if (!layer.visible || !fluidInWorld(scene, layer))
+            continue;
+        const int source = scene.indexOf(layer.particles.value("from").toString());
+        const Layer &from = scene.layers.at(source);
+        // The piece's point in the world at a time: its pivot, or "at" on
+        // its picture, as far off the pivot as that is at its distance.
+        const QVector3D centre = pivot(scene, assets, source);
+        const QSizeF picture = assets.size(from.source);
+        const QJsonArray at = layer.particles.value("at").toArray();
+        const QPointF anchor(from.anchor.x() * picture.width(), from.anchor.y() * picture.height());
+        const QPointF off = at.size() == 2 ? QPointF(at.at(0).toDouble(), at.at(1).toDouble()) - anchor : QPointF();
+        const double metersAPixel = (centre - pictureToWorld(world).map(QVector3D())).length() / std::max(1.0, world.focal);
+        auto pointAt = [&](double when) {
+            const QVector3D move(float(scene.value(from, "worldX", when)), float(scene.value(from, "worldY", when)), float(-scene.value(from, "worldZ", when)));
+            return centre + move +
+                   turn(scene.value(from, "yaw", when), scene.value(from, "pitch", when), scene.value(from, "roll", when))
+                       .rotatedVector(QVector3D(float(off.x() * metersAPixel), float(-off.y() * metersAPixel), 0));
+        };
+        // The sheet: upright, square to the camera, round the point; in
+        // centimeters, the source low in its middle. The source moves over
+        // it as the point moves, as far as a third of the sheet each way;
+        // past that the sheet goes along with it.
+        const View now = cameraAt(scene, assets, t);
+        QVector3D facing = now.position - pointAt(t);
+        facing.setY(0);
+        facing = facing.length() > 1e-4f ? facing.normalized() : QVector3D(0, 0, 1);
+        const QVector3D right = QVector3D::crossProduct(QVector3D(0, 1, 0), facing).normalized();
+        const QString kind = layer.particles.value("kind").toString();
+        const double size = std::max(2.0, layer.particles.value("size").toDouble(kind == "water" ? 4 : 30));
+        const double wide = std::max(kind == "water" ? 600.0 : 300.0, size * 16), tall = wide * (kind == "water" ? .6 : 1.6);
+        const QPointF start(wide / 2, tall * (kind == "water" ? .25 : .85));
+        auto overSheet = [&](double when) {
+            const QVector3D moved = pointAt(std::min(when, scene.duration)) - pointAt(0);
+            return QPointF(std::clamp(double(QVector3D::dotProduct(moved, right)) * 100, -wide / 3, wide / 3),
+                           std::clamp(-double(moved.y()) * 100, -start.y() * .8, (tall - start.y()) * .8));
+        };
+        // The fluid's own little scene: the sheet as its canvas, a mark
+        // keyed to where the source is on it, each frame.
+        Scene own;
+        own.width = int(std::ceil(wide));
+        own.height = int(std::ceil(tall));
+        own.fps = scene.fps;
+        own.duration = scene.duration;
+        Layer mark;
+        mark.name = "source";
+        mark.raw["empty"] = true;
+        const double step = 1 / std::max(1.0, scene.fps);
+        QList<Key> xs, ys;
+        for (double when = 0; when <= 2 * scene.duration + step; when += step) {
+            const QPointF over = overSheet(when);
+            xs << Key{when, start.x() + over.x(), "linear"};
+            ys << Key{when, start.y() + over.y(), "linear"};
+        }
+        mark.keys["x"] = xs;
+        mark.keys["y"] = ys;
+        own.layers << mark;
+        Layer fluid = layer;
+        fluid.name = layer.name;
+        fluid.particles["from"] = "source";
+        fluid.particles.remove("at");
+        if (kind == "water") {
+            // Its floor is the ground under the point.
+            const double ground = groundAt(scene, assets, pointAt(t).x(), pointAt(t).z());
+            if (!std::isnan(ground))
+                fluid.particles["floor"] = std::round(start.y() + overSheet(t).y() + (pointAt(t).y() - ground) * 100);
+        }
+        own.layers << fluid;
+        Sheet sheet;
+        sheet.layer = index;
+        QRectF covers;
+        sheet.image = kind == "water" ? Liquid::at(own, assets, own.layers.last(), t, .5, &covers)
+                                      : Fluid::at(own, assets, own.layers.last(), t, &covers);
+        if (sheet.image.isNull())
+            continue;
+        sheet.size = QSizeF(covers.width() / 100, covers.height() / 100);
+        sheet.rotation = QQuaternion::fromAxes(right, QVector3D(0, 1, 0), facing);
+        // Its middle: from the point now, back by where the source is on
+        // it, to the sheet's middle.
+        const QPointF spot = start + overSheet(t);
+        sheet.centre = pointAt(t) + right * float((covers.center().x() - spot.x()) / 100) +
+                       QVector3D(0, float((spot.y() - covers.center().y()) / 100), 0);
+        sheet.opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
+        list << sheet;
+    }
+    return list;
 }
 
 QList<int> lightLayers(const Scene &scene) {

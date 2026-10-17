@@ -2555,7 +2555,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
             continue;
         // Thrown from a world's piece, they're drawn in the world, among
         // its pieces.
-        if (overWorld && throwsIntoWorld(scene, layer))
+        if (overWorld && (throwsIntoWorld(scene, layer) || World::fluidInWorld(scene, layer)))
             continue;
         if (!layer.particles.isEmpty()) {
             // Particles live in the world, seen through the camera; their

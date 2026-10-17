@@ -11,6 +11,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQuick3D/QQuick3DGeometry>
+#include <QtQuick3D/QQuick3DTextureData>
 #include <memory>
 
 #include "scene.h"
@@ -47,6 +48,8 @@ public:
     // The frame's dust as camera-facing quads: position, uv, colour.
     const QByteArray &dustVertices() const { return m_dustVertices; }
     const QByteArray &dustIndices() const { return m_dustIndices; }
+    // A world fluid's sheet (its layer's), as a texture for the 3D view.
+    Q_INVOKABLE QQuick3DTextureData *sheet(int layer);
 
 signals:
     void changed();
@@ -62,6 +65,7 @@ private:
     QVariantList m_models;
     QVariantMap m_frame;
     QHash<int, World::Mesh> m_meshes;
+    QHash<int, std::shared_ptr<QQuick3DTextureData>> m_sheets;
     QByteArray m_dustVertices;
     QByteArray m_dustIndices;
     QByteArray m_meshKey;

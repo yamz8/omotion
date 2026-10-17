@@ -150,6 +150,24 @@ void WorldSource::update() {
         frame["time"] = f.time;
         frame["haze"] = f.haze;
         frame["dustCount"] = f.puffs.size();
+        // Smoke, fire and water from its pieces, on sheets among them.
+        QVariantList sheets;
+        for (const World::Sheet &sheet : World::sheets(m_scene, *m_assets, m_time)) {
+            QQuick3DTextureData *texture = this->sheet(sheet.layer);
+            // Rows bottom first, as the rectangle's texture coordinates go.
+            const QImage rgba = sheet.image.convertToFormat(QImage::Format_RGBA8888_Premultiplied).mirrored();
+            texture->setSize(rgba.size());
+            texture->setFormat(QQuick3DTextureData::RGBA8);
+            texture->setHasTransparency(true);
+            texture->setTextureData(QByteArray(reinterpret_cast<const char *>(rgba.constBits()), rgba.sizeInBytes()));
+            sheets.append(QVariantMap{{"layer", sheet.layer},
+                                      {"position", QVariant::fromValue(sheet.centre)},
+                                      {"rotation", QVariant::fromValue(sheet.rotation)},
+                                      {"width", sheet.size.width()},
+                                      {"height", sheet.size.height()},
+                                      {"opacity", sheet.opacity}});
+        }
+        frame["sheets"] = sheets;
 
         // Puffs face the camera and are drawn far to near, so they blend.
         QList<World::Puff> puffs = f.puffs;
@@ -185,6 +203,15 @@ void WorldSource::update() {
     }
     m_frame = frame;
     emit frameChanged();
+}
+
+QQuick3DTextureData *WorldSource::sheet(int layer) {
+    std::shared_ptr<QQuick3DTextureData> &texture = m_sheets[layer];
+    if (!texture) {
+        texture = std::make_shared<QQuick3DTextureData>();
+        QQmlEngine::setObjectOwnership(texture.get(), QQmlEngine::CppOwnership);
+    }
+    return texture.get();
 }
 
 void WorldGeometry::setSource(WorldSource *source) {

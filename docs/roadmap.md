@@ -96,7 +96,8 @@ particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire 
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
-Still to do there: fluids in 3D; light probes, and true shadow maps (a light's
+Still to do there: fluids worked out in 3D (they're 2D sheets standing in
+the world); light probes, and true shadow maps (a light's
 shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).
 
 ## Realism (folded into the world)

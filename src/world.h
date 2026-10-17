@@ -174,6 +174,21 @@ QList<int> lightLayers(const Scene &scene);
 QList<int> modelLayers(const Scene &scene);
 bool modelBounds(const QString &path, QVector3D *low, QVector3D *high);
 QVector3D lightPosition(const Scene &scene, int index, double t);
+// Smoke, fire or water from a piece of the world: its fluid worked out on
+// a sheet standing in the world where the piece's point was at the start,
+// upright and square to the camera then, in centimeters; the source moving
+// over it as the piece moves. Drawn among the pieces, so nearer ones hide
+// it.
+struct Sheet {
+    int layer = -1;
+    QVector3D centre;
+    QQuaternion rotation;  // A sheet facing +z, turned to stand there.
+    QSizeF size;           // Meters.
+    QImage image;          // Premultiplied; see-through where there's none.
+    float opacity = 1;
+};
+bool fluidInWorld(const Scene &scene, const Layer &layer);
+QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t);
 struct Frame {
     double time = 0;
     QList<Light> lights;

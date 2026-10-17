@@ -2698,6 +2698,31 @@ private slots:
         QVERIFY(resting > 0);
     }
 
+    void fluidsInAWorldStandOnSheets() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        scene.duration = 2;
+        const int smoke = Project::addParticles(scene, "smoke", QJsonObject{{"from", "piece"}}, &error);
+        QVERIFY2(smoke >= 0, qPrintable(error));
+        QVERIFY(World::fluidInWorld(scene, scene.layers[smoke]));
+        const QList<World::Sheet> sheets = World::sheets(scene, assets, 1);
+        QCOMPARE(sheets.size(), 1);
+        const World::Sheet &sheet = sheets.first();
+        // Standing by the piece it comes from, a few meters across.
+        QVERIFY((sheet.centre - World::pivot(scene, assets, scene.indexOf("piece"))).length() < sheet.size.height());
+        QVERIFY(sheet.size.width() > 1 && sheet.size.width() < 20);
+        int smoky = 0;
+        for (int y = 0; y < sheet.image.height(); ++y)
+            for (int x = 0; x < sheet.image.width(); ++x)
+                smoky += qAlpha(sheet.image.pixel(x, y)) > 20;
+        QVERIFY(smoky > 20);
+        // Not drawn again over the world.
+        QVERIFY(!throwsIntoWorld(scene, scene.layers[smoke]));
+    }
+
     void lightsAndMaterialsInAWorld() {
         QTemporaryDir dir;
         Backend backend;
