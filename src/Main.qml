@@ -157,6 +157,8 @@ ApplicationWindow {
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(false) }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(true) }
     Shortcut { sequence: "Shift+A"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addEmpty() }
+    // Drawing, as Grease Pencil: strokes on a drawing layer, frame by frame.
+    Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.startDrawing() }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
     Shortcut { sequence: "Shift+R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startBrush() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "brush"; onActivated: backend.finishBrush() }
@@ -421,6 +423,11 @@ ApplicationWindow {
                             backend.beginBrush(p.x, p.y, mouse.button === Qt.RightButton);
                             return;
                         }
+                        if (backend.tool === "draw") {
+                            if (mouse.button === Qt.RightButton) backend.undoStroke();
+                            else backend.beginStroke(p.x, p.y);
+                            return;
+                        }
                         if (backend.tool === "pin") {
                             const near = backend.pinNear(p.x, p.y, 10 / view.zoom());
                             if (mouse.button === Qt.RightButton) {
@@ -501,6 +508,13 @@ ApplicationWindow {
                             backend.pinDragTo(q.x, q.y);
                             return;
                         }
+                        if (backend.tool === "draw") {
+                            if (pressed) {
+                                const d = view.toScene(mouse.x, mouse.y);
+                                backend.strokeTo(d.x, d.y);
+                            }
+                            return;
+                        }
                         if (backend.tool === "brush") {
                             if (pressed) {
                                 const b = view.toScene(mouse.x, mouse.y);
@@ -533,6 +547,8 @@ ApplicationWindow {
                         orbiting = false;
                         if (backend.tool === "brush")
                             backend.endBrush();
+                        if (backend.tool === "draw")
+                            backend.endStroke();
                         if (pinDrag >= 0) {
                             backend.endPinDrag();
                             pinDrag = -1;
@@ -553,7 +569,7 @@ ApplicationWindow {
                             view.zoomBy(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15, wheel.x, wheel.y);
                             return;
                         }
-                        if (backend.tool === "brush") {
+                        if (backend.tool === "brush" || backend.tool === "draw") {
                             backend.adjustBrush(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15);
                             return;
                         }
@@ -629,6 +645,9 @@ ApplicationWindow {
                               ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
                               : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
+                              : backend.tool === "draw"
+                              ? "Draw on " + (backend.values.name || "the drawing") + ": drag to draw, right-click takes back a stroke, the wheel sizes the pen ("
+                                + Math.round(backend.brushRadius / 4 * 10) / 10 + " px)   ·   , . to another frame: drawing there starts a new drawing   ·   Esc done"
                               : backend.tool === "path"
                               ? "Path for " + (backend.values.name || "the layer") + ": click points, or drag to draw it (" + backend.cutPoints.length + " so far)"
                                 + "\nEnter: it follows them from the playhead to the end   ·   Shift+Enter: turning with the way   ·   Backspace drops a point   ·   Esc cancel"

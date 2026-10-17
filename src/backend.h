@@ -284,6 +284,16 @@ public:
     // Does one of the selected layer's steps again, or differently (an
     // action from its list); the AI's run in the background.
     Q_INVOKABLE void runStep(const QString &step, const QString &action);
+    // Drawing (the "draw" tool): strokes on the selected drawing layer, at
+    // the playhead, in a colour and a width (canvas pixels).
+    Q_PROPERTY(QString drawColour READ drawColour WRITE setDrawColour NOTIFY toolChanged)
+    QString drawColour() const { return m_drawColour.name(QColor::HexArgb); }
+    void setDrawColour(const QString &colour);
+    Q_INVOKABLE void startDrawing();
+    Q_INVOKABLE void beginStroke(double x, double y);
+    Q_INVOKABLE void strokeTo(double x, double y);
+    Q_INVOKABLE void endStroke();
+    Q_INVOKABLE void undoStroke();
     // Rigs the selected layer (see Project::rig: "ik", "lookAt", "wheel"),
     // or takes its rig away; adds an empty in the middle of the view; and
     // with the path tool's points, makes it follow them from the playhead to
@@ -623,6 +633,8 @@ private:
     int handleTarget() const;
     QList<int> handleTargets() const;
     QList<int> m_also;
+    QColor m_drawColour = QColor("#ffffff");
+    bool m_stroking = false;
     QHash<int, QPointF> m_dragOrigins;
     Exporter m_exporter;
     double m_exportProgress = 0;

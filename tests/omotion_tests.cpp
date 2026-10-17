@@ -2219,6 +2219,38 @@ private slots:
         QVERIFY(error.contains("spin"));
     }
 
+    void drawingsHoldUntilTheNextAndMoveWithTheirLayer() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        scene.background = Qt::black;
+        scene.layers.clear();
+        const int drawing = Project::addDrawing(scene, {});
+        QString error;
+        // A red stroke across the top at 0, a green one across the bottom at 1.
+        QVERIFY2(Project::addStroke(scene, assets, drawing, 0, {{10, 20}, {50, 20}, {90, 20}}, Qt::red, 6, &error), qPrintable(error));
+        QVERIFY(Project::addStroke(scene, assets, drawing, 1, {{10, 80}, {90, 80}}, Qt::green, 6, &error));
+        QCOMPARE(scene.layers[drawing].raw["drawing"].toObject()["frames"].toArray().size(), 2);
+        QCOMPARE(renderFrame(scene, assets, .5).pixelColor(50, 20), QColor(Qt::red));
+        QCOMPARE(renderFrame(scene, assets, .5).pixelColor(50, 80), QColor(Qt::black));
+        QCOMPARE(renderFrame(scene, assets, 1.5).pixelColor(50, 80), QColor(Qt::green));
+        QCOMPARE(renderFrame(scene, assets, 1.5).pixelColor(50, 20), QColor(Qt::black));
+        // A second stroke on the same frame joins it; taking one back.
+        QVERIFY(Project::addStroke(scene, assets, drawing, 1.01, {{50, 0}, {50, 100}}, Qt::blue, 4, &error));
+        QCOMPARE(scene.layers[drawing].raw["drawing"].toObject()["frames"].toArray().size(), 2);
+        QCOMPARE(renderFrame(scene, assets, 1.5).pixelColor(50, 40), QColor(Qt::blue));
+        QVERIFY(Project::removeStroke(scene, drawing, 1.5));
+        QCOMPARE(renderFrame(scene, assets, 1.5).pixelColor(50, 40), QColor(Qt::black));
+        // It moves as a layer does.
+        scene.layers[drawing].base["y"] = 30;
+        QCOMPARE(renderFrame(scene, assets, .5).pixelColor(50, 50), QColor(Qt::red));
+        // Through scene.json.
+        Scene again = Scene::fromJson(scene.toJson(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(renderFrame(again, assets, .5).pixelColor(50, 50), QColor(Qt::red));
+        QVERIFY(!Project::addStroke(scene, assets, 5, 0, {{1, 1}}, Qt::red, 2, &error));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

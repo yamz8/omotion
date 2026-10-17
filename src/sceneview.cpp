@@ -444,7 +444,39 @@ void SceneView::paint(QPainter *painter) {
         }
     }
 
-    const QList<QPointF> cut = m_backend->cutPolygon();
+    // Drawing: the drawing before this one, faint (an onion skin), and the
+    // stroke being drawn, as it will be.
+    if (m_backend->tool() == "draw" && selected >= 0 && selected < scene.layers.size()) {
+        const Layer &layer = scene.layers.at(selected);
+        const int shown = drawingFrameAt(layer, now);
+        double before = -1;
+        const QJsonArray frames = layer.raw.value("drawing").toObject().value("frames").toArray();
+        const double shownAt = shown >= 0 ? frames.at(shown).toObject().value("t").toDouble() : 1e300;
+        for (const QJsonValue &f : frames) {
+            const double at = f.toObject().value("t").toDouble();
+            if (at < std::min(shownAt, now + 1e-6) - 1e-6 && at > before)
+                before = at;
+        }
+        if (before >= 0) {
+            painter->save();
+            painter->setTransform(layerTransform(scene, m_backend->assets(), selected, now) * view);
+            painter->setOpacity(.25);
+            drawStrokes(*painter, layer, before);
+            painter->restore();
+        }
+        const QList<QPointF> stroke = m_backend->cutPolygon();
+        if (!stroke.isEmpty()) {
+            QPolygonF line;
+            for (const QPointF &point : stroke)
+                line << view.map(point);
+            painter->setPen(QPen(QColor(m_backend->drawColour()), std::max(1.0, m_backend->brushRadius() / 4 * zoom()), Qt::SolidLine,
+                                 Qt::RoundCap, Qt::RoundJoin));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawPolyline(line);
+        }
+    }
+
+    const QList<QPointF> cut = m_backend->tool() == "draw" ? QList<QPointF>() : m_backend->cutPolygon();
     if (!cut.isEmpty()) {
         QPolygonF shape;
         for (const QPointF &point : cut)

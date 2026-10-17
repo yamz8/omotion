@@ -136,6 +136,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `Shift+P` | Path: click points (or drag) for the selected layer to follow from the playhead to the end, `Enter`; `Shift+Enter` turns it with the way |
 | `Shift+A` | Add an empty: a cross, a point for rigs to aim at |
+| `Shift+B` | Draw, as Grease Pencil does: drag to draw strokes on the selected drawing layer (or a new one), the wheel sizes the pen, right-click takes back a stroke. What's drawn at a frame shows until the next drawing, so moving the playhead and drawing again animates it frame by frame; the drawing before shows faintly. The layer moves, turns and follows like any |
 | Rig | In the inspector: *Reach with* a child makes a two-bone arm (IK) that bends to reach for a new empty; *Look at* turns the layer toward another; *Roll on* makes a wheel turn as the body it's on goes. `omotion rig` does the same |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
 | `Ctrl+D` | Duplicate the layer |
@@ -339,6 +340,9 @@ photo.omotion/
   "speed", "amount"}]` add a motion's change from its first key, from
   `start`; the scene's **`motions`** keep each motion's `keys` (by property,
   times from 0), copied in when it's laid on.
+- A layer with **`drawing`** has no `source`: `{"frames": [{"t", "strokes":
+  [{"color", "width", "points": [[x, y], ...]}]}]}`, points in the layer's
+  pixels; each frame shows from its `t` until the next.
 - **`look`**: the scene's grade over every frame: `exposure` (stops),
   `contrast`, `saturation`, `temperature` and `tint` (-1 to 1), `vignette`
   and `bloom` (0 to 1), `bloomThreshold` (0.75), and depth of field: `focus`

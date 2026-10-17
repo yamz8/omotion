@@ -30,6 +30,7 @@ Rectangle {
                      ["J", "Pins: click to pin, drag a pin to bend the layer, right-click to unpin"],
                      ["Shift+P", "Path: click points for the layer to follow from the playhead (Shift+Enter turns with it)"],
                      ["Shift+A", "Add an empty, a point to aim at"],
+                     ["Shift+B", "Draw strokes, frame by frame (right-click takes one back)"],
                      ["Inspector ▸ Rig", "Reach (IK arm) for an empty, look at a layer, roll as a wheel on a body"],
                      ["N", "A ready-made motion: sway, float, pulse, bounce, spin, fade in, or one you saved"],
                      ["Ctrl+Shift+S", "Save the animation as a motion, for any project"],

@@ -173,6 +173,14 @@ bool removeClip(Scene &scene, int layer, int clip);
 bool setLook(Scene &scene, const QString &name, double value, QString *error);
 const QStringList &lookSettings();
 
+// Drawing, as Grease Pencil does: a new drawing layer on top (its index);
+// a stroke (canvas points) added to its frame at time t, made there if it
+// has none; and the last stroke of the frame shown at t taken away.
+int addDrawing(Scene &scene, const QString &name);
+bool addStroke(Scene &scene, AssetCache &assets, int layer, double t, const QList<QPointF> &canvas, const QColor &colour,
+               double width, QString *error);
+bool removeStroke(Scene &scene, int layer, double t);
+
 // What changed between two versions of a scene, in a few words a line:
 // layers added and taken away, and for each layer (and the camera, the
 // world and the scene) which properties and keys changed.

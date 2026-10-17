@@ -180,6 +180,9 @@ QVariantList Backend::outliner() const {
         if (layer.raw.value("empty").toBool()) {
             kind = "empty";
             detail = "empty";
+        } else if (layer.raw.contains("drawing")) {
+            kind = "drawing";
+            detail = QString("%1 drawings").arg(layer.raw.value("drawing").toObject().value("frames").toArray().size());
         } else if (!layer.particles.isEmpty()) {
             kind = "particles";
             detail = layer.particles.value("kind").toString();
@@ -535,6 +538,72 @@ void Backend::takeBackAgent() {
     emit agentChanged();
 }
 
+void Backend::setDrawColour(const QString &colour) {
+    const QColor c(colour.trimmed());
+    if (!c.isValid())
+        return setError(QString("%1 isn't a colour; try #ffffff.").arg(colour));
+    m_drawColour = c;
+    emit toolChanged();
+}
+
+void Backend::startDrawing() {
+    if (!hasProject())
+        return;
+    if (m_tool == "draw")
+        return setTool("move");
+    // On the selected drawing, or a new one on top.
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("drawing")) {
+        checkpoint();
+        const int index = Project::addDrawing(m_scene, "drawing");
+        changed();
+        select(index);
+    }
+    setTool("draw");
+    setNotice("Draw: drag on the canvas; the wheel sizes the pen, right-click takes back a stroke. Each frame you draw on is a drawing of its own, shown until the next.");
+}
+
+void Backend::beginStroke(double x, double y) {
+    if (m_tool != "draw")
+        return;
+    m_cut = {QPointF(x, y)};
+    m_stroking = true;
+    emit toolChanged();
+}
+
+void Backend::strokeTo(double x, double y) {
+    if (!m_stroking || m_cut.isEmpty() || QLineF(m_cut.last(), QPointF(x, y)).length() < 1.5)
+        return;
+    m_cut.append(QPointF(x, y));
+    emit toolChanged();
+}
+
+void Backend::endStroke() {
+    if (!m_stroking)
+        return;
+    m_stroking = false;
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::addStroke(scene, m_assets, m_selected, m_time, m_cut, m_drawColour, m_brushRadius / 4, &error)) {
+        m_cut.clear();
+        emit toolChanged();
+        return setError(error);
+    }
+    checkpoint();
+    m_scene = scene;
+    m_cut.clear();
+    changed();
+    emit toolChanged();
+}
+
+void Backend::undoStroke() {
+    Scene scene = m_scene;
+    if (!Project::removeStroke(scene, m_selected, m_time))
+        return;
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::rigSelected(const QString &type, const QString &other) {
     if (m_selected < 0)
         return;
@@ -710,6 +779,7 @@ QVariantMap Backend::values() const {
     }
     map.insert("ownFollow", !std::isnan(layer.follow));
     map.insert("empty", layer.raw.value("empty").toBool());
+    map.insert("drawing", layer.raw.contains("drawing"));
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());
     map.insert("body", layer.raw.value("body").toObject().toVariantMap());
     map.insert("clips", layer.raw.value("clips").toArray().toVariantList());
@@ -1547,7 +1617,8 @@ void Backend::endDrag() {
 }
 
 void Backend::setTool(const QString &tool) {
-    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin" && tool != "path")
+    if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin" && tool != "path" &&
+        tool != "draw")
         return;
     if (tool != "brush") {
         m_brushPiece.clear();

@@ -2055,4 +2055,80 @@ bool setLook(Scene &scene, const QString &name, double value, QString *error) {
     return true;
 }
 
+int addDrawing(Scene &scene, const QString &name) {
+    Layer layer;
+    layer.name = scene.uniqueName(name.isEmpty() ? QString("drawing") : name);
+    layer.anchor = QPointF(0, 0);
+    // A pixel of the drawing is a pixel of the world it's drawn in.
+    layer.base["x"] = 0;
+    layer.base["y"] = 0;
+    layer.raw["drawing"] = QJsonObject{{"frames", QJsonArray{}}};
+    scene.layers.append(layer);
+    return int(scene.layers.size()) - 1;
+}
+
+bool addStroke(Scene &scene, AssetCache &assets, int index, double t, const QList<QPointF> &canvas, const QColor &colour,
+               double width, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size() || !scene.layers.at(index).raw.contains("drawing"))
+        return fail("Draw on a drawing layer.");
+    if (canvas.isEmpty())
+        return fail("There's no stroke to add.");
+    bool invertible = false;
+    const QTransform back = layerTransform(scene, assets, index, t).inverted(&invertible);
+    if (!invertible)
+        return fail("The drawing layer is squashed flat; it can't be drawn on.");
+    QJsonArray points;
+    for (const QPointF &p : canvas) {
+        const QPointF local = back.map(p);
+        points.append(QJsonArray{std::round(local.x() * 10) / 10, std::round(local.y() * 10) / 10});
+    }
+    // Widths are on the canvas; the layer's own scale is taken out.
+    const double scale = std::sqrt(std::abs(back.determinant()));
+    const QJsonObject stroke{{"color", colour.name(QColor::HexArgb)}, {"width", std::round(width * scale * 100) / 100}, {"points", points}};
+    QJsonObject drawing = scene.layers.at(index).raw.value("drawing").toObject();
+    QJsonArray frames = drawing.value("frames").toArray();
+    const double half = .5 / std::max(1.0, scene.fps);
+    int frame = -1;
+    for (int i = 0; i < frames.size(); ++i)
+        if (std::abs(frames.at(i).toObject().value("t").toDouble() - t) < half)
+            frame = i;
+    if (frame < 0) {
+        frames.append(QJsonObject{{"t", std::round(t * 1000) / 1000}, {"strokes", QJsonArray{}}});
+        frame = int(frames.size()) - 1;
+    }
+    QJsonObject f = frames.at(frame).toObject();
+    QJsonArray strokes = f.value("strokes").toArray();
+    strokes.append(stroke);
+    f["strokes"] = strokes;
+    frames[frame] = f;
+    drawing["frames"] = frames;
+    scene.layers[index].raw["drawing"] = drawing;
+    return true;
+}
+
+bool removeStroke(Scene &scene, int index, double t) {
+    if (index < 0 || index >= scene.layers.size())
+        return false;
+    const int frame = drawingFrameAt(scene.layers.at(index), t);
+    if (frame < 0)
+        return false;
+    QJsonObject drawing = scene.layers.at(index).raw.value("drawing").toObject();
+    QJsonArray frames = drawing.value("frames").toArray();
+    QJsonObject f = frames.at(frame).toObject();
+    QJsonArray strokes = f.value("strokes").toArray();
+    if (strokes.isEmpty())
+        return false;
+    strokes.removeLast();
+    f["strokes"] = strokes;
+    frames[frame] = f;
+    drawing["frames"] = frames;
+    scene.layers[index].raw["drawing"] = drawing;
+    return true;
+}
+
 }

@@ -379,7 +379,7 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             return fail(QString("Layer \"%1\" has particles of kind \"%2\"; use one of %3.")
                             .arg(layer.name, layer.particles.value("kind").toString(), particleKinds().join(", ")));
         // An empty is a point to aim at or move by, with nothing to draw.
-        if (layer.source.isEmpty() && layer.particles.isEmpty() && !object.value("empty").toBool())
+        if (layer.source.isEmpty() && layer.particles.isEmpty() && !object.value("empty").toBool() && !object.contains("drawing"))
             return fail(QString("Layer \"%1\" has no source image.").arg(layer.name));
         if (names.contains(layer.name))
             return fail(QString("Two layers are named \"%1\"; names must be unique.").arg(layer.name));
@@ -1538,6 +1538,53 @@ void soften(QImage &image, double width) {
     }
 }
 
+int drawingFrameAt(const Layer &layer, double t) {
+    const QJsonArray frames = layer.raw.value("drawing").toObject().value("frames").toArray();
+    int shown = -1;
+    double latest = -1e300;
+    for (int i = 0; i < frames.size(); ++i) {
+        const double at = frames.at(i).toObject().value("t").toDouble();
+        if (at <= t + 1e-6 && at > latest)
+            latest = at, shown = i;
+    }
+    return shown;
+}
+
+void drawStrokes(QPainter &painter, const Layer &layer, double t) {
+    const int shown = drawingFrameAt(layer, t);
+    if (shown < 0)
+        return;
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(Qt::NoBrush);
+    const QJsonArray strokes =
+        layer.raw.value("drawing").toObject().value("frames").toArray().at(shown).toObject().value("strokes").toArray();
+    for (const QJsonValue &value : strokes) {
+        const QJsonObject stroke = value.toObject();
+        const QJsonArray points = stroke.value("points").toArray();
+        QPen pen(QColor(stroke.value("color").toString("#ffffff")), stroke.value("width").toDouble(4), Qt::SolidLine, Qt::RoundCap,
+                 Qt::RoundJoin);
+        painter.setPen(pen);
+        if (points.size() == 1) {
+            const QJsonArray p = points.first().toArray();
+            painter.drawPoint(QPointF(p.at(0).toDouble(), p.at(1).toDouble()));
+            continue;
+        }
+        // Smoothed through the middles of its points, as a hand draws.
+        QPainterPath path;
+        auto at = [&](int i) {
+            const QJsonArray p = points.at(i).toArray();
+            return QPointF(p.at(0).toDouble(), p.at(1).toDouble());
+        };
+        path.moveTo(at(0));
+        for (int i = 1; i + 1 < points.size(); ++i)
+            path.quadTo(at(i), (at(i) + at(i + 1)) / 2);
+        path.lineTo(at(int(points.size()) - 1));
+        painter.drawPath(path);
+    }
+    painter.restore();
+}
+
 void applyLook(QImage &frame, const QJsonObject &look) {
     if (look.isEmpty() || frame.isNull())
         return;
@@ -2214,6 +2261,14 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
                 painter.setCompositionMode(QPainter::CompositionMode_Screen);
                 painter.drawImage(QPointF(0, 0), frame);
             }
+            continue;
+        }
+        // A drawing: its strokes, where the layer is.
+        if (layer.raw.contains("drawing")) {
+            painter.setTransform(layerTransform(scene, assets, i, t) * base);
+            painter.setOpacity(opacity);
+            painter.setCompositionMode(compositionFor(layer.blend));
+            drawStrokes(painter, layer, t);
             continue;
         }
         const QTransform toOutput = layerTransform(scene, assets, i, t) * base;

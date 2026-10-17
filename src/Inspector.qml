@@ -345,6 +345,23 @@ Rectangle {
                 }
             }
 
+            // A drawing's pen.
+            RowLayout {
+                visible: backend.selected >= 0 && !!inspector.v.drawing
+                Layout.fillWidth: true
+                spacing: 8
+                Label { text: "Pen colour"; color: win.text; Layout.preferredWidth: 90 }
+                Rectangle { width: 18; height: 18; radius: 3; color: backend.drawColour; border.color: win.line }
+                SmallField {
+                    id: penField
+                    Layout.fillWidth: true
+                    Component.onCompleted: text = backend.drawColour
+                    Connections { target: backend; function onToolChanged() { if (!penField.activeFocus) penField.text = backend.drawColour } }
+                    onAccepted: { backend.drawColour = text; inspector.done() }
+                }
+                ToolButton { text: "Draw"; font.pixelSize: 12; onClicked: { backend.startDrawing(); inspector.done() } }
+            }
+
             // Rigid bodies, as Blender's: they fall, land and knock about.
             ColumnLayout {
                 visible: backend.selected >= 0 && !inspector.isParticles && !inspector.v.empty

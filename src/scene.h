@@ -312,6 +312,12 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
+// A drawing layer's strokes (its "drawing" in scene.json), as Blender's
+// Grease Pencil: frames of strokes, each shown from its time until the
+// next; each stroke a colour, a width and points in the layer's pixels.
+void drawStrokes(QPainter &painter, const Layer &layer, double t);
+// The frame of a drawing shown at time t: its index, or -1.
+int drawingFrameAt(const Layer &layer, double t);
 // The scene's look (its "look" in scene.json), over a finished frame:
 // exposure (stops), contrast, saturation, temperature and tint (-1 to 1,
 // warmer and greener), a vignette (0 to 1), and bloom: the brightest parts
