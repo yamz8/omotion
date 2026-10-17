@@ -17,6 +17,7 @@
 #include <limits>
 
 #include "gltf.h"
+#include "physics.h"
 #include "project.h"
 #include "steps.h"
 
@@ -317,6 +318,31 @@ QStringList Backend::curveNames() const {
     for (const Curve &curve : curves(2))
         names << curve.property;
     return names;
+}
+
+void Backend::setBody(bool body, bool fixed, double bounce) {
+    if (m_selected < 0)
+        return;
+    Scene scene = m_scene;
+    QString error;
+    const QJsonObject settings = body ? QJsonObject{{"mass", 1}, {"bounce", std::clamp(bounce, 0.0, 1.0)}, {"fixed", fixed}} : QJsonObject();
+    if (!Physics::setBody(scene, m_selected, settings, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
+void Backend::simulate() {
+    Scene scene = m_scene;
+    QString error;
+    const int moved = Physics::bake(scene, m_assets, m_time, m_scene.duration, &error);
+    if (moved < 0)
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice(QString("%1 bodies fall from here to the end. Space plays it; Ctrl+Z takes it back.").arg(moved));
 }
 
 void Backend::setKeyCurve(const QString &property, int index, double x1, double y1, double x2, double y2) {
@@ -665,6 +691,7 @@ QVariantMap Backend::values() const {
     map.insert("ownFollow", !std::isnan(layer.follow));
     map.insert("empty", layer.raw.value("empty").toBool());
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());
+    map.insert("body", layer.raw.value("body").toObject().toVariantMap());
     map.insert("clips", layer.raw.value("clips").toArray().toVariantList());
     // Its rig, in words: what it reaches for, looks at, rolls with, follows.
     QStringList rig;

@@ -20,6 +20,7 @@
 #include "select.h"
 #include "steps.h"
 #include "gltf.h"
+#include "physics.h"
 #include "theme.h"
 #include "world.h"
 
@@ -2031,6 +2032,58 @@ private slots:
         QVERIFY(backend.alsoSelected().isEmpty());
         backend.select(piece);
         QVERIFY(backend.alsoSelected().isEmpty());
+    }
+
+    void bodiesFallLandAndStack() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // 40 px squares on a 100×100 canvas.
+        scene.duration = 3;
+        scene.layers[0].base["y"] = 30;
+        scene.layers[1].base["y"] = -40;
+        scene.layers[1].base["x"] = 55;
+        QString error;
+        QVERIFY(Physics::setBody(scene, 0, {{"bounce", 0}}, &error));
+        QVERIFY(Physics::setBody(scene, 1, {{"bounce", 0}}, &error));
+        QCOMPARE(Physics::bake(scene, assets, 0, 3, &error), 2);
+        // The first lands on the canvas's bottom, the second on top of it.
+        const double under = scene.value(scene.layers[0], "y", 3), over = scene.value(scene.layers[1], "y", 3);
+        QVERIFY2(std::abs(under - 80) < 1.5, qPrintable(QString::number(under)));
+        QVERIFY2(std::abs(over - 40) < 1.5, qPrintable(QString::number(over)));
+        QCOMPARE(scene.value(scene.layers[0], "y", 0), 30.0);
+        // Faster and faster as it falls, before it lands.
+        const double a = scene.value(scene.layers[0], "y", .1) - 30, b = scene.value(scene.layers[0], "y", .2) - 30;
+        QVERIFY(b > 3 * a);
+        // A fixed body holds still and stops what falls on it.
+        Scene fixed = twoSquares(dir, assets);
+        fixed.duration = 2;
+        fixed.layers[1].base["y"] = -40;
+        QVERIFY(Physics::setBody(fixed, 0, {{"fixed", true}}, &error));
+        QVERIFY(Physics::setBody(fixed, 1, {{"bounce", 0}}, &error));
+        QCOMPARE(Physics::bake(fixed, assets, 0, 2, &error), 1);
+        QCOMPARE(fixed.value(fixed.layers[0], "y", 2), 50.0);
+        QVERIFY(std::abs(fixed.value(fixed.layers[1], "y", 2) - 10) < 1.5);
+        QVERIFY(!Physics::setBody(fixed, 5, {{"mass", 1}}, &error));
+
+        // In a world: dropped from up high, it lands on the ground there.
+        QTemporaryDir worldDir;
+        const QString project = madeUpWorld(worldDir);
+        Scene world = Project::load(project, nullptr);
+        AssetCache worldAssets(project);
+        const int piece = world.indexOf("piece");
+        world.layers[piece].base["worldY"] = 3;
+        world.duration = 3;
+        QVERIFY(Physics::setBody(world, piece, {{"bounce", .2}}, &error));
+        QVERIFY2(Physics::bake(world, worldAssets, 0, 3, &error) == 1, qPrintable(error));
+        QList<QVector3D> corners;
+        QVector3D pivot;
+        QVERIFY(World::box(world, worldAssets, piece, 3, &corners, &pivot));
+        float lowest = 1e9f;
+        QVector3D middle;
+        for (const QVector3D &c : corners)
+            lowest = std::min(lowest, c.y()), middle += c / 8;
+        const double ground = World::groundAt(world, worldAssets, middle.x(), middle.z());
+        QVERIFY2(std::abs(lowest - ground) < .05, qPrintable(QString("%1 vs %2").arg(lowest).arg(ground)));
     }
 
     void surfacesWrapSolidsFacingOut() {

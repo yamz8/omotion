@@ -19,6 +19,7 @@
 #include "backend.h"
 #include "exporter.h"
 #include "gltf.h"
+#include "physics.h"
 #include "graphview.h"
 #include "portalfilepicker.h"
 #include "project.h"
@@ -89,6 +90,13 @@ const char *Usage = R"(Usage:
   omotion clip <project> <layer|camera> --none
                                          Lay a saved motion on as a clip (it adds to the animation,
                                          keys untouched), or take the clips away
+  omotion body <project> <layer> [--mass <kg>] [--bounce <0-1>] [--friction <0-1>] [--fixed]
+  omotion body <project> <layer> --none
+                                         Make a layer a rigid body (or a fixed one, that others hit),
+                                         or not
+  omotion simulate <project> [--from <s>] [--to <s>]
+                                         Let the bodies fall, land, bounce and knock into each other,
+                                         from the time they're keyed moving at; baked into keyframes
   omotion empty <project> <name> <x,y> [--parent <layer>]
                                          Add an empty: a point to aim at or move by, drawn as a cross
   omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
@@ -474,6 +482,51 @@ int command(const QStringList &args) {
         if (!Project::save(directory, edited, &error))
             return fail(error);
         QTextStream(stdout) << "Done.\n";
+        return 0;
+    }
+
+    if (args.at(1) == "body") {
+        if (args.size() < 4)
+            return fail("body takes a project and a layer.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QJsonObject body;
+        bool none = false;
+        for (int i = 4; i < args.size(); ++i) {
+            if (args.at(i) == "--none")
+                none = true;
+            else if (args.at(i) == "--fixed")
+                body["fixed"] = true;
+            else if (i + 1 < args.size() && (args.at(i) == "--mass" || args.at(i) == "--bounce" || args.at(i) == "--friction"))
+                body[args.at(i).mid(2)] = args.at(++i).toDouble();
+            else
+                return fail(QString("body doesn't know %1.").arg(args.at(i)));
+        }
+        if (!none && body.isEmpty())
+            body["mass"] = 1;
+        if (!Physics::setBody(edited, layer, none ? QJsonObject() : body, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << QString("%1 %2.\n").arg(args.at(3), none ? "isn't a body" : "is a body");
+        return 0;
+    }
+
+    if (args.at(1) == "simulate") {
+        double from = 0, to = scene.duration;
+        for (int i = 3; i + 1 < args.size(); i += 2) {
+            if (args.at(i) == "--from")
+                from = args.at(i + 1).toDouble();
+            else if (args.at(i) == "--to")
+                to = args.at(i + 1).toDouble();
+            else
+                return fail(QString("simulate doesn't know %1.").arg(args.at(i)));
+        }
+        Scene edited = scene;
+        const int moved = Physics::bake(edited, assets, from, to, &error);
+        if (moved < 0 || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << QString("%1 bodies baked from %2 s to %3 s.\n").arg(moved).arg(from).arg(to);
         return 0;
     }
 
@@ -874,7 +927,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.
@@ -916,7 +969,8 @@ int main(int argc, char *argv[]) {
         return problem.isEmpty() ? 0 : 1;
     }
     if (headless) {
-        const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info" || args.at(1) == "world";
+        const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info" || args.at(1) == "world" ||
+                            args.at(1) == "simulate" || args.at(1) == "steps" || args.at(1) == "redo";
         if (args.size() < (short_ ? 3 : 4))
             return fail(QString("missing arguments.\n\n") + Usage);
         return command(args);

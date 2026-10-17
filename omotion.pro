@@ -12,6 +12,7 @@ HEADERS += \
     src/gltf.h \
     src/graphview.h \
     src/portalfilepicker.h \
+    src/physics.h \
     src/project.h \
     src/scene.h \
     src/sceneview.h \
@@ -29,6 +30,7 @@ SOURCES += \
     src/gltf.cpp \
     src/graphview.cpp \
     src/portalfilepicker.cpp \
+    src/physics.cpp \
     src/project.cpp \
     src/scene.cpp \
     src/sceneview.cpp \

@@ -345,6 +345,48 @@ Rectangle {
                 }
             }
 
+            // Rigid bodies, as Blender's: they fall, land and knock about.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !inspector.isParticles && !inspector.v.empty
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 2
+                readonly property var body: inspector.v.body || {}
+                readonly property bool isBody: Object.keys(body).length > 0
+                Label { text: "Physics"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    CheckBox {
+                        text: "Body"
+                        checked: parent.parent.isBody
+                        onClicked: { backend.setBody(checked, false, .3); inspector.done() }
+                    }
+                    CheckBox {
+                        text: "Fixed"
+                        enabled: parent.parent.isBody
+                        checked: !!parent.parent.body.fixed
+                        onClicked: { backend.setBody(true, checked, parent.parent.body.bounce === undefined ? .3 : parent.parent.body.bounce); inspector.done() }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: parent.isBody
+                    spacing: 8
+                    Label { text: "Bounce"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField {
+                        Layout.fillWidth: true
+                        value: parent.parent.body.bounce === undefined ? .3 : parent.parent.body.bounce
+                        onCommitted: function (n) { backend.setBody(true, !!parent.parent.body.fixed, n) }
+                    }
+                }
+                ToolButton {
+                    visible: parent.isBody
+                    text: "Simulate from the playhead"
+                    font.pixelSize: 12
+                    onClicked: { backend.simulate(); inspector.done() }
+                }
+            }
+
             // Saved motions laid on it as clips.
             ColumnLayout {
                 visible: (inspector.v.clips || []).length > 0

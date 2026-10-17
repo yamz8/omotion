@@ -301,6 +301,10 @@ public:
     Q_INVOKABLE void setModifier(const QString &property, const QString &type, double amount = 0, double speed = 2);
     Q_INVOKABLE void addClip(const QString &motion, int repeat = 1);
     Q_INVOKABLE void removeClip(int clip);
+    // Rigid bodies: the selected layer as one (or a fixed one), or not; and
+    // every body let fall from the playhead to the end, baked into keys.
+    Q_INVOKABLE void setBody(bool body, bool fixed, double bounce);
+    Q_INVOKABLE void simulate();
     // Moves a key of the selected thing's property to a new time and value
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.
