@@ -3276,6 +3276,15 @@ private slots:
         }
         QVERIFY(casting.contains(box));
         QVERIFY(casting.contains(again));
+        // A broken OBJ (corners naming no point) casts by the faces it
+        // has, without reading past its points.
+        writeText(dir.filePath("broken.obj"), "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 0\nf -1 -2 -9\nf x 2 3\nf 1 2 3\nf 1 3 4\n");
+        const int broken = Project::importModel(scene, project, dir.filePath("broken.obj"), QVector3D(-2, 0, 6), 1, &error);
+        QVERIFY2(broken >= 0, qPrintable(error));
+        bool brokenCasts = false;
+        for (const World::Frame::Solid &solid : World::frame(scene, assets, 0).solids)
+            brokenCasts |= solid.box.layer == broken && solid.cells.count('\0') < solid.cells.size();
+        QVERIFY(brokenCasts);
 
         // A model is a body too: dropped, it lands on the ground.
         scene.layers[box].base["worldY"] = 3;

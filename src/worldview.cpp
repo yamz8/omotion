@@ -196,11 +196,15 @@ void WorldSource::update() {
             row[0] = c.centre.x(), row[1] = c.centre.y(), row[2] = c.centre.z();
             row[4] = c.half.x(), row[5] = c.half.y(), row[6] = c.half.z(), row[7] = float(c.layer);
             row[8] = c.rotation.x(), row[9] = c.rotation.y(), row[10] = c.rotation.z(), row[11] = c.rotation.scalar();
+            // Only sent to the GPU again when they're other cells: they're
+            // cached, so the same shape keeps the same data.
             QQuick3DTextureData *cells = solidCells(k);
-            cells->setSize(QSize(World::Frame::solid, World::Frame::solid));
-            cells->setDepth(World::Frame::solid);
-            cells->setFormat(QQuick3DTextureData::R8);
-            cells->setTextureData(f.solids.at(k).cells);
+            if (cells->textureData().constData() != f.solids.at(k).cells.constData()) {
+                cells->setSize(QSize(World::Frame::solid, World::Frame::solid));
+                cells->setDepth(World::Frame::solid);
+                cells->setFormat(QQuick3DTextureData::R8);
+                cells->setTextureData(f.solids.at(k).cells);
+            }
         }
         QQuick3DTextureData *solidBoxes = solids();
         solidBoxes->setSize(QSize(3, most));

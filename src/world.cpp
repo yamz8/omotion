@@ -1069,8 +1069,11 @@ QList<QVector3D> modelTriangles(const QString &path) {
                     const int id = words.at(k).split('/').first().toInt();
                     face << (id < 0 ? int(points.size()) + id : id - 1);
                 }
+                // Corners that name no point (past either end, or not a
+                // number) leave out the triangles they're in.
+                auto known = [&](int i) { return i >= 0 && i < points.size(); };
                 for (int k = 2; k < face.size(); ++k)
-                    if (face.at(0) >= 0 && face.at(k) < points.size() && face.at(k - 1) < points.size() && face.at(0) < points.size())
+                    if (known(face.at(0)) && known(face.at(k - 1)) && known(face.at(k)))
                         corners << points.at(face.at(0)) << points.at(face.at(k - 1)) << points.at(face.at(k));
             }
         }
@@ -1115,7 +1118,8 @@ QList<QVector3D> modelTriangles(const QString &path) {
         const qsizetype stride = view.value("byteStride").toInt(size * width);
         const qsizetype start = view.value("byteOffset").toInteger() + a.value("byteOffset").toInteger();
         const qsizetype count = a.value("count").toInteger();
-        if (start + (count - 1) * stride + size * width > buffer.size())
+        // Nothing outside its buffer, either way, whatever the file says.
+        if (start < 0 || stride < size * width || count <= 0 || start + (count - 1) * stride + size * width > buffer.size())
             return false;
         for (qsizetype i = 0; i < count; ++i)
             for (int k = 0; k < width; ++k) {
@@ -1169,10 +1173,19 @@ QList<QVector3D> modelTriangles(const QString &path) {
                 else
                     for (qsizetype k = 0; k < positions.size() / 3; ++k)
                         order << double(k);
-                for (const double k : order) {
-                    const qsizetype at = qsizetype(k) * 3;
-                    if (at + 2 < positions.size())
-                        corners << world.map(QVector3D(float(positions.at(at)), float(positions.at(at + 1)), float(positions.at(at + 2))));
+                // Whole triangles only, each of three points it has, so one
+                // bad index can't put every later triangle out of step.
+                for (qsizetype t = 0; t + 2 < order.size(); t += 3) {
+                    QVector3D triangle[3];
+                    bool whole = true;
+                    for (int c = 0; c < 3 && whole; ++c) {
+                        const qsizetype at = qsizetype(order.at(t + c)) * 3;
+                        whole = at >= 0 && at + 2 < positions.size();
+                        if (whole)
+                            triangle[c] = world.map(QVector3D(float(positions.at(at)), float(positions.at(at + 1)), float(positions.at(at + 2))));
+                    }
+                    if (whole)
+                        corners << triangle[0] << triangle[1] << triangle[2];
                 }
             }
         for (const QJsonValue &child : node.value("children").toArray())
@@ -1186,17 +1199,25 @@ QList<QVector3D> modelTriangles(const QString &path) {
 }
 
 QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D &high) {
+    // One a file, kept with what it was made from (when the file was saved,
+    // and the box), so a new save replaces it rather than piling up.
+    struct Made {
+        qint64 saved = 0;
+        QVector3D low, high;
+        QByteArray cells;
+    };
     static QMutex lock;
-    static QHash<QString, QByteArray> cache;
-    const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    static QHash<QString, Made> cache;
+    const qint64 saved = QFileInfo(path).lastModified().toMSecsSinceEpoch();
     {
         QMutexLocker locked(&lock);
-        if (cache.contains(key))
-            return cache.value(key);
+        const auto it = cache.constFind(path);
+        if (it != cache.constEnd() && it->saved == saved && it->low == low && it->high == high)
+            return it->cells;
     }
     const QByteArray cells = cellsOfTriangles(modelTriangles(path), low, high);
     QMutexLocker locked(&lock);
-    cache.insert(key, cells);
+    cache.insert(path, Made{saved, low, high, cells});
     return cells;
 }
 
@@ -1544,30 +1565,8 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             o.rotation = QQuaternion::fromAxes(x.normalized(), y.normalized(), z.normalized());
             frame.occluders << o;
         };
-        for (const Placement &model : frame.models) {
-            QVector3D low, high;
-            if (!model.visible || !modelBounds(model.model, &low, &high))
-                continue;
-            // By its own shape, while there's room.
-            if (frame.solids.size() < Frame::mostSolids) {
-                Frame::Solid solid;
-                solid.box.layer = model.layer;
-                solid.box.centre = model.position + model.rotation.rotatedVector(((low + high) / 2 + model.offset) * model.scale);
-                solid.box.half = (high - low) / 2 * model.scale;
-                solid.box.rotation = model.rotation;
-                solid.cells = modelCells(model.model, low, high);
-                if (solid.cells.count('\0') < solid.cells.size()) {
-                    frame.solids << solid;
-                    continue;
-                }
-            }
-            QList<QVector3D> corners;
-            for (int k = 0; k < 8; ++k) {
-                const QVector3D own(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
-                corners << model.position + model.rotation.rotatedVector((own + model.offset) * model.scale);
-            }
-            add(model.layer, corners);
-        }
+        // Shaped pieces first, as they were before models could: theirs
+        // are the shapes made for the world.
         for (const Placement &place : frame.layers) {
             if (!place.visible || scene.layers.at(place.layer).raw.value("shape").toObject().isEmpty())
                 continue;
@@ -1597,6 +1596,30 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
                 o.rotation = place.rotation * part.rotation;
                 frame.occluders << o;
             }
+        }
+        for (const Placement &model : frame.models) {
+            QVector3D low, high;
+            if (!model.visible || !modelBounds(model.model, &low, &high))
+                continue;
+            // By its own shape, while there's room.
+            if (frame.solids.size() < Frame::mostSolids) {
+                Frame::Solid solid;
+                solid.box.layer = model.layer;
+                solid.box.centre = model.position + model.rotation.rotatedVector(((low + high) / 2 + model.offset) * model.scale);
+                solid.box.half = (high - low) / 2 * model.scale;
+                solid.box.rotation = model.rotation;
+                solid.cells = modelCells(model.model, low, high);
+                if (solid.cells.count('\0') < solid.cells.size()) {
+                    frame.solids << solid;
+                    continue;
+                }
+            }
+            QList<QVector3D> corners;
+            for (int k = 0; k < 8; ++k) {
+                const QVector3D own(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
+                corners << model.position + model.rotation.rotatedVector((own + model.offset) * model.scale);
+            }
+            add(model.layer, corners);
         }
     }
     return frame;
