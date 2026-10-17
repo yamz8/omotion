@@ -1,6 +1,7 @@
 #include "graphview.h"
 
 #include <QPainter>
+#include <QLineF>
 #include <QPainterPath>
 #include <cmath>
 
@@ -91,12 +92,53 @@ double GraphView::valueAt(double y, const Range &range) const {
     return range.low + (1 - (y - Top) / h) * (range.high - range.low);
 }
 
+bool GraphView::handles(QPointF *p0, QPointF *h1, QPointF *h2, QPointF *p3, QList<double> *curve) const {
+    if (!m_backend || m_pickIndex < 0)
+        return false;
+    const double duration = std::max(1e-6, m_backend->scene().duration);
+    for (const Backend::Curve &c : shown()) {
+        if (c.property != m_pickProperty || m_pickIndex + 1 >= c.keys.size())
+            continue;
+        const Key &a = c.keys.at(m_pickIndex), &b = c.keys.at(m_pickIndex + 1);
+        // A flat stretch has no shape to give.
+        if (std::abs(b.v - a.v) < 1e-9)
+            return false;
+        const Range range = rangeOf(c);
+        *curve = Scene::curveOf(a.ease);
+        if (curve->size() != 4)
+            *curve = {0, 0, 1, 1};
+        auto at = [&](double ft, double fv) {
+            return QPointF((a.t + ft * (b.t - a.t)) / duration * width(), yOf(a.v + fv * (b.v - a.v), range));
+        };
+        *p0 = at(0, 0);
+        *p3 = at(1, 1);
+        *h1 = at(curve->at(0), curve->at(1));
+        *h2 = at(curve->at(2), curve->at(3));
+        return true;
+    }
+    return false;
+}
+
 void GraphView::press(double x, double y) {
     if (!m_backend)
         return;
     const double duration = std::max(1e-6, m_backend->scene().duration);
     if (m_backend->playing())
         m_backend->togglePlay();
+    // A handle of the picked key's curve first.
+    QPointF p0, h1, h2, p3;
+    QList<double> curve;
+    if (handles(&p0, &h1, &h2, &p3, &curve)) {
+        const QPointF at(x, y);
+        m_handle = QLineF(at, h1).length() < 8 ? 1 : QLineF(at, h2).length() < 8 ? 2 : 0;
+        if (m_handle) {
+            m_from = p0;
+            m_to = p3;
+            m_curve = curve;
+            m_backend->beginGesture();
+            return;
+        }
+    }
     // The nearest key within reach, of the curves shown.
     double best = 9;
     for (const Backend::Curve &curve : shown()) {
@@ -112,6 +154,8 @@ void GraphView::press(double x, double y) {
         }
     }
     if (m_dragIndex >= 0) {
+        m_pickProperty = m_dragProperty;
+        m_pickIndex = m_dragIndex;
         m_backend->beginGesture();
         for (const Backend::Curve &curve : shown())
             if (curve.property == m_dragProperty)
@@ -125,6 +169,17 @@ void GraphView::press(double x, double y) {
 void GraphView::drag(double x, double y, bool lockTime) {
     if (!m_backend)
         return;
+    if (m_handle) {
+        // Where the handle is, as a share of the curve's time and change.
+        const double fx = std::clamp((x - m_from.x()) / std::max(1e-6, m_to.x() - m_from.x()), 0.0, 1.0);
+        const double fy = (y - m_from.y()) / (std::abs(m_to.y() - m_from.y()) < 1e-6 ? 1e-6 : m_to.y() - m_from.y());
+        if (m_handle == 1)
+            m_curve[0] = fx, m_curve[1] = fy;
+        else
+            m_curve[2] = fx, m_curve[3] = fy;
+        m_backend->setKeyCurve(m_pickProperty, m_pickIndex, m_curve[0], m_curve[1], m_curve[2], m_curve[3]);
+        return;
+    }
     const double duration = std::max(1e-6, m_backend->scene().duration);
     if (m_dragIndex < 0) {
         m_backend->seek(std::clamp(x / std::max(1.0, width()), 0.0, 1.0) * duration);
@@ -141,8 +196,9 @@ void GraphView::drag(double x, double y, bool lockTime) {
 }
 
 void GraphView::release() {
-    if (m_dragIndex >= 0 && m_backend)
+    if ((m_dragIndex >= 0 || m_handle) && m_backend)
         m_backend->endGesture();
+    m_handle = 0;
     m_dragIndex = -1;
     m_dragProperty.clear();
     update();
@@ -184,6 +240,19 @@ void GraphView::paint(QPainter *painter) {
             painter->setPen(QPen(QColor("#0e0e10"), 1.5));
             painter->setBrush(held ? QColor(Qt::white) : colour);
             painter->drawEllipse(at, held ? 5.5 : 4, held ? 5.5 : 4);
+        }
+        if (curve.property == m_pickProperty) {
+            QPointF p0, h1, h2, p3;
+            QList<double> shape;
+            if (handles(&p0, &h1, &h2, &p3, &shape)) {
+                painter->setPen(QPen(QColor(255, 255, 255, 150), 1));
+                painter->drawLine(p0, h1);
+                painter->drawLine(p3, h2);
+                painter->setPen(QPen(QColor("#0e0e10"), 1.5));
+                painter->setBrush(m_accent);
+                painter->drawRect(QRectF(h1 - QPointF(4, 4), QSizeF(8, 8)));
+                painter->drawRect(QRectF(h2 - QPointF(4, 4), QSizeF(8, 8)));
+            }
         }
         if (!m_solo.isEmpty()) {
             // Alone, its values show: the highest and lowest.

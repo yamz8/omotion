@@ -319,6 +319,45 @@ QStringList Backend::curveNames() const {
     return names;
 }
 
+void Backend::setKeyCurve(const QString &property, int index, double x1, double y1, double x2, double y2) {
+    Layer *layer = m_scene.at(target());
+    if (!layer || !layer->keys.contains(property) || index < 0 || index >= layer->keys.value(property).size())
+        return;
+    checkpoint();
+    layer->keys[property][index].ease = Scene::cubicEase(x1, y1, x2, y2);
+    changed();
+}
+
+void Backend::setModifier(const QString &property, const QString &type, double amount, double speed) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setModifier(scene, target(), property, type, amount, speed, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
+void Backend::addClip(const QString &motion, int repeat) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::addClip(scene, target(), motion, m_time, repeat, 1, 1, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    setNotice(QString("%1 is a clip from %2 s: it adds to the animation without changing its keys.").arg(motion).arg(m_time, 0, 'f', 2));
+}
+
+void Backend::removeClip(int clip) {
+    Scene scene = m_scene;
+    if (!Project::removeClip(scene, target(), clip))
+        return;
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::moveKey(const QString &property, int index, double t, double v) {
     Layer *layer = m_scene.at(target());
     if (!layer || !layer->keys.contains(property) || !std::isfinite(t) || !std::isfinite(v))
@@ -594,6 +633,8 @@ QVariantMap Backend::values() const {
         map.insert("links", linkTexts(camera));
         map.insert("keyEase", easeHere(camera));
         map.insert("keyCurve", QVariant::fromValue(Scene::curveOf(easeHere(camera))));
+        map.insert("modifiers", camera.raw.value("modifiers").toObject().toVariantMap());
+        map.insert("clips", camera.raw.value("clips").toArray().toVariantList());
         return map;
     }
     if (m_selected < 0 || m_selected >= m_scene.layers.size())
@@ -623,6 +664,8 @@ QVariantMap Backend::values() const {
     }
     map.insert("ownFollow", !std::isnan(layer.follow));
     map.insert("empty", layer.raw.value("empty").toBool());
+    map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());
+    map.insert("clips", layer.raw.value("clips").toArray().toVariantList());
     // Its rig, in words: what it reaches for, looks at, rolls with, follows.
     QStringList rig;
     for (const QJsonValue &entry : layer.raw.value("constraints").toArray()) {

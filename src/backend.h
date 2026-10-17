@@ -281,6 +281,13 @@ public:
     Q_INVOKABLE void finishPath(bool turn);
     // The empty whose cross is within reach of a canvas point, or -1.
     int emptyNear(double x, double y, double reach) const;
+    // Gives a key of the selected thing's property a curve out of it, by
+    // its handles (as setCurve, for just that key).
+    Q_INVOKABLE void setKeyCurve(const QString &property, int index, double x1, double y1, double x2, double y2);
+    // Curve modifiers and clips on the selected thing (see Project).
+    Q_INVOKABLE void setModifier(const QString &property, const QString &type, double amount = 0, double speed = 2);
+    Q_INVOKABLE void addClip(const QString &motion, int repeat = 1);
+    Q_INVOKABLE void removeClip(int clip);
     // Moves a key of the selected thing's property to a new time and value
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.

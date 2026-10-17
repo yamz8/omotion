@@ -114,7 +114,8 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
-| `Ctrl+Tab` | The graph editor (or Curves on the timeline): the selected layer's or camera's animated properties as curves over the scene, each fitted to the height; drag a key in time and value (Shift: value only), click a property to see it alone with its values |
+| Modifiers, clips | In the graph editor, a property seen alone can *Cycle* (its keys over and over) or get *Noise* (a smooth wobble: a hand-held camera). In `N`, a saved motion goes on *as a clip*: it adds to the animation from the playhead without touching its keys, and the inspector lists the clips. `omotion modifier` and `omotion clip` do the same |
+| `Ctrl+Tab` | The graph editor (or Curves on the timeline): the selected layer's or camera's animated properties as curves over the scene, each fitted to the height; drag a key in time and value (Shift: value only), and a picked key's curve by its two handles; click a property to see it alone with its values |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
 | `V` | Select the camera (or its row at the top of the timeline): drag the canvas to pan, wheel to zoom, `[ ]` to turn, `K` to keyframe |
 | `D` | Split the picture into layers by depth (AI) |
@@ -307,6 +308,12 @@ photo.omotion/
   meets the horizon (the canvas centre if left out), and the focal
   `distance` in pixels (the canvas width if left out; a layer that far back
   is half size).
+- **`modifiers`** on a layer (or the camera), by property: `[{"type": "cycle"}]`
+  repeats its keys past the last; `{"type": "noise", "amount", "speed",
+  "seed"}` adds a smooth wobble. **`clips`**: `[{"motion", "start", "repeat",
+  "speed", "amount"}]` add a motion's change from its first key, from
+  `start`; the scene's **`motions`** keep each motion's `keys` (by property,
+  times from 0), copied in when it's laid on.
 - **`constraints`** on a layer rig it, as Blender's do: `{"type": "ik", "lower",
   "target", "pivot", "tip", "bend"}` turns it (the upper bone) and its child
   `lower` so the lower's `tip` (from its pivot, in its pixels) reaches the

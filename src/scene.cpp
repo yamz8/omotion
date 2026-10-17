@@ -757,16 +757,9 @@ bool Scene::constrained(const Layer &layer, const QString &property, double t, d
     return false;
 }
 
-double Scene::ownValue(const Layer &layer, const QString &property, double t) const {
-    const auto it = layer.keys.constFind(property);
-    if (it == layer.keys.constEnd() || it->isEmpty()) {
-        // The camera looks at the canvas centre until it's told otherwise.
-        if (&layer == &camera && (property == "x" || property == "y"))
-            return layer.base.value(property, property == "x" ? width / 2.0 : height / 2.0);
-        return layer.base.value(property, defaultValue(property));
-    }
-
-    const QList<Key> &keys = *it;
+namespace {
+// Between keyframes, by each one's easing.
+double interpolate(const QList<Key> &keys, double t, const QString &property) {
     if (t <= keys.first().t)
         return keys.first().v;
     if (t >= keys.last().t)
@@ -777,11 +770,83 @@ double Scene::ownValue(const Layer &layer, const QString &property, double t) co
             const double span = b.t - a.t;
             const double p = span <= 0 ? 1 : (t - a.t) / span;
             // Up is less y on the canvas, more worldY in a world.
-            const double lift = property == "y" ? -arcLift(a.ease, p) : property == "worldY" ? arcLift(a.ease, p) : 0;
-            return a.v + (b.v - a.v) * ease(a.ease, p) + lift;
+            const double lift = property == "y" ? -Scene::arcLift(a.ease, p) : property == "worldY" ? Scene::arcLift(a.ease, p) : 0;
+            return a.v + (b.v - a.v) * Scene::ease(a.ease, p) + lift;
         }
     }
     return keys.last().v;
+}
+
+// Smooth noise from -1 to 1: two octaves of values at whole steps, eased
+// between, the same for the same seed every time.
+double smoothNoise(double x, quint32 seed) {
+    auto at = [seed](qint64 i) {
+        quint32 h = quint32(i) * 374761393u + seed * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return ((h ^ (h >> 16)) & 0xffff) / 32767.5 - 1;
+    };
+    auto octave = [&](double y) {
+        const double whole = std::floor(y), f = y - whole;
+        const double s = f * f * (3 - 2 * f);
+        return at(qint64(whole)) * (1 - s) + at(qint64(whole) + 1) * s;
+    };
+    return (octave(x) * 2 + octave(x * 2.3 + 17)) / 3;
+}
+}
+
+double Scene::ownValue(const Layer &layer, const QString &property, double t) const {
+    // Curve modifiers, as Blender's: cycles repeat the keys, noise wobbles.
+    const QJsonArray modifiers = layer.raw.isEmpty() || !layer.raw.contains("modifiers")
+                                     ? QJsonArray()
+                                     : layer.raw.value("modifiers").toObject().value(property).toArray();
+    const auto it = layer.keys.constFind(property);
+    double v;
+    if (it == layer.keys.constEnd() || it->isEmpty()) {
+        // The camera looks at the canvas centre until it's told otherwise.
+        if (&layer == &camera && (property == "x" || property == "y"))
+            v = layer.base.value(property, property == "x" ? width / 2.0 : height / 2.0);
+        else
+            v = layer.base.value(property, defaultValue(property));
+    } else {
+        double at = t;
+        for (const QJsonValue &m : modifiers) {
+            const double first = it->first().t, span = it->last().t - first;
+            if (m.toObject().value("type").toString() == "cycle" && span > 0 && (at > it->last().t || at < first))
+                at = first + std::fmod(std::fmod(at - first, span) + span, span);
+        }
+        v = interpolate(*it, at, property);
+    }
+    for (const QJsonValue &m : modifiers) {
+        const QJsonObject modifier = m.toObject();
+        if (modifier.value("type").toString() == "noise")
+            v += modifier.value("amount").toDouble(1) *
+                 smoothNoise(t * modifier.value("speed").toDouble(2), quint32(qHash(property) + modifier.value("seed").toInt(1) * 7919u));
+    }
+    // Clips: saved motions laid on the layer, each adding how far its own
+    // keys have moved from where they start, from its start, repeated.
+    if (!layer.raw.isEmpty() && layer.raw.contains("clips")) {
+        const QJsonObject motions = raw.value("motions").toObject();
+        for (const QJsonValue &c : layer.raw.value("clips").toArray()) {
+            const QJsonObject clip = c.toObject();
+            const QJsonArray list = motions.value(clip.value("motion").toString()).toObject().value("keys").toObject().value(property).toArray();
+            if (list.isEmpty())
+                continue;
+            QList<Key> keys;
+            for (const QJsonValue &k : list)
+                keys << Key{k.toObject().value("t").toDouble(), k.toObject().value("v").toDouble(), k.toObject().value("ease").toString("linear")};
+            const double length = keys.last().t - keys.first().t;
+            const int repeat = std::max(1, clip.value("repeat").toInt(1));
+            double local = (t - clip.value("start").toDouble()) * clip.value("speed").toDouble(1);
+            if (local < 0)
+                continue;
+            if (length > 0 && local < length * repeat)
+                local = std::fmod(local, length);
+            else
+                local = length;
+            v += clip.value("amount").toDouble(1) * (interpolate(keys, keys.first().t + local, property) - keys.first().v);
+        }
+    }
+    return v;
 }
 
 double Scene::linkValue(const Layer &layer, const QString &property, double t) const {

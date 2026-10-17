@@ -1915,6 +1915,71 @@ private slots:
         QVERIFY(std::abs(scene.value(scene.layers.at(4), "rotation", 1.5) - 90) < 1e-6);
     }
 
+    void modifiersAndClipsLayerOnTheKeys() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        scene.duration = 10;
+        scene.layers[1].keys["x"] = {Key{0, 0}, Key{1, 100}};
+        QString error;
+        // Cycles: past the last key, round again.
+        QVERIFY(Project::setModifier(scene, 1, "x", "cycle", 0, 0, &error));
+        QCOMPARE(scene.value(scene.layers[1], "x", 2.5), 50.0);
+        QCOMPARE(scene.value(scene.layers[1], "x", .5), 50.0);
+        // Noise: smooth, small, the same every time, and gone when taken away.
+        const Scene cycled = scene;
+        QVERIFY(Project::setModifier(scene, 1, "x", "noise", 4, 3, &error));
+        QCOMPARE(scene.layers[1].raw["modifiers"].toObject()["x"].toArray().size(), 2);
+        double most = 0;
+        for (int i = 0; i < 300; ++i) {
+            const double t = i / 30.0;
+            most = std::max(most, std::abs(scene.value(scene.layers[1], "x", t) - cycled.value(cycled.layers[1], "x", t)));
+        }
+        Scene plain = scene;
+        Project::setModifier(plain, 1, "x", "none", 0, 0, &error);
+        QVERIFY(most > .5 && most <= 4.0001);
+        QCOMPARE(scene.value(scene.layers[1], "x", 3.3), scene.value(scene.layers[1], "x", 3.3));
+        QVERIFY(std::abs(scene.value(scene.layers[1], "x", 3.3) - scene.value(scene.layers[1], "x", 3.3 + 1 / 300.0)) < 1);
+        QCOMPARE(plain.value(plain.layers[1], "x", 2.5), 100.0);
+        QVERIFY(!plain.layers[1].raw.contains("modifiers"));
+        QVERIFY(!Project::setModifier(scene, 1, "colour", "cycle", 0, 0, &error));
+
+        // A clip: a saved motion added on top from its start, keys untouched.
+        Project::setMotionDirectory(dir.filePath("motions"));
+        QVERIFY(Project::saveMotion("hop", {{"y", Key{0, 500}}, {"y", Key{.5, 450}}, {"y", Key{1, 500}}}, &error));
+        QVERIFY2(Project::addClip(plain, 0, "hop", 2, 2, 1, 1, &error), qPrintable(error));
+        const double rest = plain.value(plain.layers[0], "y", 0);
+        QCOMPARE(plain.value(plain.layers[0], "y", 2.5), rest - 50);
+        QCOMPARE(plain.value(plain.layers[0], "y", 3.5), rest - 50);  // Repeated.
+        QCOMPARE(plain.value(plain.layers[0], "y", 4.5), rest);       // Done.
+        QVERIFY(plain.layers[0].keys.isEmpty());
+        // It goes with the project, through scene.json.
+        Scene again = Scene::fromJson(plain.toJson(), &error);
+        QCOMPARE(again.value(again.layers[0], "y", 2.5), rest - 50);
+        QVERIFY(Project::removeClip(plain, 0, 0));
+        QCOMPARE(plain.value(plain.layers[0], "y", 2.5), rest);
+        // On the camera too.
+        QVERIFY(Project::setModifier(plain, Scene::CameraIndex, "x", "noise", 10, 1, &error));
+        again = Scene::fromJson(plain.toJson(), &error);
+        QVERIFY(again.camera.raw.contains("modifiers"));
+        Project::setMotionDirectory({});
+    }
+
+    void keysTakeCurvesFromTheirHandles() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(writePicture(dir.filePath("p.png"))));
+        backend.select(0);
+        backend.keyProperty("x");
+        backend.seek(1);
+        backend.setProperty("x", 300);
+        backend.setKeyCurve("x", 0, .1, .9, .2, 1);
+        QCOMPARE(backend.scene().layers.at(0).keys.value("x").at(0).ease, Scene::cubicEase(.1, .9, .2, 1));
+        // Eased out fast: most of the way there by a quarter of the time.
+        const double start = backend.scene().layers.at(0).keys.value("x").at(0).v;
+        QVERIFY(backend.scene().value(backend.scene().layers.at(0), "x", .25) > start + (300 - start) * .6);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

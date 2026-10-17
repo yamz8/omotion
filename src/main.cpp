@@ -81,6 +81,14 @@ const char *Usage = R"(Usage:
                                          the empty, the arm follows); look turns it toward a layer;
                                          wheel rolls it as the body it's on moves; path moves it
                                          along canvas points over a time; none takes the rig away
+  omotion modifier <project> <layer|camera> <property> cycle|noise|none [--amount <n>] [--speed <n>]
+                                         A curve modifier, as Blender's: cycle repeats the property's
+                                         keys over and over; noise adds a smooth wobble of that
+                                         amount, speed times a second; none takes them away
+  omotion clip <project> <layer|camera> <motion> [--at <s>] [--repeat <n>] [--speed <x>] [--amount <x>]
+  omotion clip <project> <layer|camera> --none
+                                         Lay a saved motion on as a clip (it adds to the animation,
+                                         keys untouched), or take the clips away
   omotion empty <project> <name> <x,y> [--parent <layer>]
                                          Add an empty: a point to aim at or move by, drawn as a cross
   omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
@@ -436,6 +444,36 @@ int command(const QStringList &args) {
         if (!Project::save(directory, edited, &error))
             return fail(error);
         QTextStream(stdout) << QString("%1: %2.\n").arg(args.at(3), kind == "none" ? QString("no rig") : "rigged, " + kind);
+        return 0;
+    }
+
+    if (args.at(1) == "modifier" || args.at(1) == "clip") {
+        if (args.size() < 5)
+            return fail(args.at(1) == "modifier" ? "modifier takes a project, a layer, a property and cycle, noise or none."
+                                                 : "clip takes a project, a layer and a saved motion.");
+        Scene edited = scene;
+        const int layer = args.at(3) == "camera" ? Scene::CameraIndex : edited.indexOf(args.at(3));
+        if (layer == -1)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QHash<QString, double> options;
+        const int first = args.at(1) == "modifier" ? 6 : 5;
+        for (int i = first; i + 1 < args.size(); i += 2)
+            options.insert(args.at(i), args.at(i + 1).toDouble());
+        if (args.at(1) == "modifier") {
+            if (args.size() < 6)
+                return fail("modifier takes cycle, noise or none.");
+            if (!Project::setModifier(edited, layer, args.at(4), args.at(5), options.value("--amount", 1), options.value("--speed", 2), &error))
+                return fail(error);
+        } else if (args.at(4) == "--none") {
+            while (Project::removeClip(edited, layer, 0)) {
+            }
+        } else if (!Project::addClip(edited, layer, args.at(4), options.value("--at", 0), int(options.value("--repeat", 1)),
+                                     options.value("--speed", 1), options.value("--amount", 1), &error)) {
+            return fail(error);
+        }
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << "Done.\n";
         return 0;
     }
 
@@ -836,7 +874,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

@@ -154,6 +154,19 @@ bool rig(Scene &scene, AssetCache &assets, int layer, const QString &type, const
 // aimed at stay.
 bool unrig(Scene &scene, int layer);
 
+// Curve modifiers on a layer's (or the camera's) property, as Blender's:
+// "cycle" repeats its keys over and over, "noise" adds a smooth wobble of
+// amount (its units) at speed (wobbles a second); "none" takes them away.
+bool setModifier(Scene &scene, int layer, const QString &property, const QString &type, double amount, double speed,
+                 QString *error);
+// Lays a saved motion on a layer as a clip, as Blender's NLA does: from
+// start (seconds), repeated, at a speed, scaled by amount; it adds to the
+// layer's own animation without changing its keys. The motion is copied
+// into the scene, so it goes where the project goes.
+bool addClip(Scene &scene, int layer, const QString &motion, double start, int repeat, double speed, double amount,
+             QString *error);
+bool removeClip(Scene &scene, int layer, int clip);
+
 // What changed between two versions of a scene, in a few words a line:
 // layers added and taken away, and for each layer (and the camera, the
 // world and the scene) which properties and keys changed.

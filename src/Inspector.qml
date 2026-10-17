@@ -345,6 +345,32 @@ Rectangle {
                 }
             }
 
+            // Saved motions laid on it as clips.
+            ColumnLayout {
+                visible: (inspector.v.clips || []).length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 2
+                Label { text: "Clips"; color: win.text; font.bold: true }
+                Repeater {
+                    model: inspector.v.clips || []
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            color: win.text
+                            font.pixelSize: 12
+                            text: modelData.motion + " from " + Number(modelData.start || 0).toFixed(2) + " s"
+                                  + ((modelData.repeat || 1) > 1 ? ", ×" + modelData.repeat : "")
+                        }
+                        ToolButton { text: "✕"; font.pixelSize: 12; implicitHeight: 26; onClicked: { backend.removeClip(index); inspector.done() } }
+                    }
+                }
+            }
+
             // The world's own look, with nothing else selected.
             ColumnLayout {
                 visible: !inspector.hasLayer && backend.world.active

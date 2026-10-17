@@ -918,6 +918,15 @@ ApplicationWindow {
                             Label { text: index < 3 ? String(index + 7) : ""; color: theme.accent; font.bold: true; width: 14 }
                             Label { text: modelData; color: win.text; font.bold: true }
                         }
+                        // As a clip: on top of its animation, its keys untouched.
+                        ToolButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "as a clip"
+                            font.pixelSize: 12
+                            z: 1
+                            onClicked: { win.presetMenuVisible = false; backend.addClip(modelData, 1) }
+                        }
                         MouseArea {
                             id: savedMouse
                             anchors.fill: parent

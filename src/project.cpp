@@ -1918,4 +1918,87 @@ bool unrig(Scene &scene, int index) {
     return had;
 }
 
+bool setModifier(Scene &scene, int index, const QString &property, const QString &type, double amount, double speed,
+                 QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    Layer *layer = scene.at(index);
+    if (!layer)
+        return fail("There's no such layer.");
+    const QStringList known = index == Scene::CameraIndex ? Scene::cameraProperties() : Scene::propertiesOf(*layer);
+    if (!known.contains(property))
+        return fail(QString("There's no property called %1.").arg(property));
+    if (type != "cycle" && type != "noise" && type != "none")
+        return fail("A modifier is cycle, noise or none.");
+    QJsonObject modifiers = layer->raw.value("modifiers").toObject();
+    QJsonArray list;
+    for (const QJsonValue &m : modifiers.value(property).toArray())
+        if (type != "none" && m.toObject().value("type").toString() != type)
+            list.append(m);
+    if (type == "cycle")
+        list.append(QJsonObject{{"type", "cycle"}});
+    else if (type == "noise")
+        list.append(QJsonObject{{"type", "noise"}, {"amount", amount}, {"speed", speed > 0 ? speed : 2}});
+    if (list.isEmpty())
+        modifiers.remove(property);
+    else
+        modifiers[property] = list;
+    if (modifiers.isEmpty())
+        layer->raw.remove("modifiers");
+    else
+        layer->raw["modifiers"] = modifiers;
+    return true;
+}
+
+bool addClip(Scene &scene, int index, const QString &motion, double start, int repeat, double speed, double amount,
+             QString *error) {
+    Layer *layer = scene.at(index);
+    if (!layer) {
+        if (error)
+            *error = "There's no such layer.";
+        return false;
+    }
+    const QList<KeyClip> keys = loadMotion(motion, error);
+    if (keys.isEmpty())
+        return false;
+    QJsonObject properties;
+    for (const KeyClip &item : keys) {
+        QJsonArray list = properties.value(item.property).toArray();
+        list.append(QJsonObject{{"t", item.key.t}, {"v", item.key.v}, {"ease", item.key.ease}});
+        properties[item.property] = list;
+    }
+    QJsonObject motions = scene.raw.value("motions").toObject();
+    motions[motion] = QJsonObject{{"keys", properties}};
+    scene.raw["motions"] = motions;
+    QJsonArray clips = layer->raw.value("clips").toArray();
+    QJsonObject clip{{"motion", motion}, {"start", std::round(start * 1000) / 1000}};
+    if (repeat > 1)
+        clip["repeat"] = repeat;
+    if (speed != 1)
+        clip["speed"] = speed;
+    if (amount != 1)
+        clip["amount"] = amount;
+    clips.append(clip);
+    layer->raw["clips"] = clips;
+    return true;
+}
+
+bool removeClip(Scene &scene, int index, int clip) {
+    Layer *layer = scene.at(index);
+    if (!layer)
+        return false;
+    QJsonArray clips = layer->raw.value("clips").toArray();
+    if (clip < 0 || clip >= clips.size())
+        return false;
+    clips.removeAt(clip);
+    if (clips.isEmpty())
+        layer->raw.remove("clips");
+    else
+        layer->raw["clips"] = clips;
+    return true;
+}
+
 }

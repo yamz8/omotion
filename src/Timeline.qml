@@ -66,7 +66,7 @@ Rectangle {
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideLeft
                 text: timeline.curves
-                      ? "drag a key in time and value (Shift: value only)    click a property to see it alone    Ctrl+Tab keys"
+                      ? "drag a key in time and value (Shift: value only), its curve's handles to ease it    click a property to see it alone    Ctrl+Tab keys"
                       : "drag ◆ to retime    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
                 color: win.muted
             }
@@ -214,6 +214,39 @@ Rectangle {
                         anchors.fill: parent
                         onClicked: { graph.solo = graph.solo === modelData ? "" : modelData; timeline.done() }
                     }
+                }
+            }
+            // Curve modifiers for the property seen alone, as Blender's.
+            ColumnLayout {
+                visible: graph.solo !== ""
+                Layout.preferredWidth: 150
+                Layout.fillHeight: true
+                spacing: 0
+                readonly property var mods: (backend.values.modifiers || {})[graph.solo] || []
+                function has(type) {
+                    for (let i = 0; i < mods.length; ++i)
+                        if (mods[i].type === type) return true;
+                    return false;
+                }
+                // A wobble about the size this property moves by.
+                function noiseAmount(p) {
+                    return ({"x": 8, "y": 8, "rotation": 3, "scale": .03, "zoom": .03, "opacity": .1,
+                             "worldX": .05, "worldY": .05, "worldZ": .05, "yaw": 2, "pitch": 2, "roll": 2})[p] || 1;
+                }
+                Label { text: "Modifiers"; color: win.muted; font.pixelSize: 11; topPadding: 6 }
+                CheckBox {
+                    text: "Cycle"
+                    checked: parent.has("cycle")
+                    onClicked: { backend.setModifier(graph.solo, checked ? "cycle" : "none"); timeline.done() }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Repeat its keys over and over, past the last one"
+                }
+                CheckBox {
+                    text: "Noise"
+                    checked: parent.has("noise")
+                    onClicked: { backend.setModifier(graph.solo, checked ? "noise" : "none", parent.noiseAmount(graph.solo), 2); timeline.done() }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "A smooth wobble on top: a hand-held camera, a shake, a flicker"
                 }
             }
             GraphView {

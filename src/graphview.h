@@ -62,4 +62,13 @@ private:
     QString m_dragProperty;
     int m_dragIndex = -1;
     Range m_dragRange;
+    // The key last picked, whose curve out shows its handles; and a handle
+    // being dragged (1 or 2), with its curve's ends where the drag began.
+    QString m_pickProperty;
+    int m_pickIndex = -1;
+    int m_handle = 0;
+    QPointF m_from, m_to;
+    QList<double> m_curve;
+    // The picked key's curve out, as view points: its ends and handles.
+    bool handles(QPointF *p0, QPointF *h1, QPointF *h2, QPointF *p3, QList<double> *curve) const;
 };
