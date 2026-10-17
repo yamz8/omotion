@@ -2086,6 +2086,44 @@ private slots:
         QVERIFY2(std::abs(lowest - ground) < .05, qPrintable(QString("%1 vs %2").arg(lowest).arg(ground)));
     }
 
+    void emittersTrailFromWhereTheLayerWas() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // 100×100, 40 px squares.
+        scene.width = 400;
+        scene.camera.base["x"] = 200;  // The camera looks at the wider canvas's middle.
+        scene.duration = 2;
+        scene.background = Qt::black;
+        scene.layers.removeAt(1);
+        scene.layers[0].keys["x"] = {Key{0, 40, "linear"}, Key{2, 360, "linear"}};
+        QString error;
+        const int dust = Project::addParticles(scene, "embers",
+                                               {{"from", scene.layers[0].name}, {"rate", 60}, {"life", .6}, {"speed", 0},
+                                                {"inherit", 0}, {"gravity", 0}, {"twinkle", 0}, {"color", "#00ff00"}}, &error);
+        QVERIFY2(dust >= 0, qPrintable(error));
+        QCOMPARE(scene.layers[dust].particles["from"].toString(), scene.layers[0].name);
+        // At 1 s the square is at x 200: the trail is behind it, to the left,
+        // as far as it's gone in the particles' life; nothing ahead.
+        const QImage frame = renderFrame(scene, assets, 1);
+        auto green = [&](int x) {
+            int most = 0;
+            for (int y = 0; y < 100; ++y) {
+                const QColor c = frame.pixelColor(x, y);
+                most = std::max(most, c.green() - c.red() - c.blue());
+            }
+            return most;
+        };
+        QVERIFY(green(130) > 5);     // 0.4 s ago, fading but alive.
+        QVERIFY(green(170) > 20);
+        QCOMPARE(green(300), 0);      // Ahead of it.
+        QCOMPARE(green(60), 0);       // Too long ago: gone.
+        // Before it started emitting there's nothing to draw.
+        QVERIFY(!Project::particleSetting("rate", "fast", nullptr, &error));
+        QJsonValue value;
+        QVERIFY(Project::particleSetting("at", "12,30", &value, &error));
+        QCOMPARE(value.toArray().at(1).toDouble(), 30.0);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

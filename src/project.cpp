@@ -1279,7 +1279,24 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
             *error = message;
         return false;
     };
-    static const QStringList numbers{"count", "size", "speed", "direction", "spread", "sway", "twinkle", "seed"};
+    static const QStringList numbers{"count", "size", "speed", "direction", "spread", "sway", "twinkle", "seed",
+                                     "rate", "life", "inherit", "gravity", "wind", "drag"};
+    // An emitter: the layer they come from, and the point on it (its pixels).
+    if (name == "from") {
+        *json = value.toString();
+        return true;
+    }
+    if (name == "at") {
+        const QStringList xy = value.toString().split(',');
+        if (value.typeId() == QMetaType::QVariantList && value.toList().size() == 2) {
+            *json = QJsonArray{value.toList().at(0).toDouble(), value.toList().at(1).toDouble()};
+            return true;
+        }
+        if (xy.size() != 2)
+            return fail("at is a point on the layer they come from: x,y in its pixels.");
+        *json = QJsonArray{xy.at(0).toDouble(), xy.at(1).toDouble()};
+        return true;
+    }
     if (name == "color") {
         if (!QColor(value.toString()).isValid() || value.typeId() != QMetaType::QString)
             return fail(QString("\"%1\" isn't a colour, like #ffffff.").arg(value.toString()));
@@ -1287,7 +1304,7 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
         return true;
     }
     if (!numbers.contains(name))
-        return fail(QString("Particles have no setting \"%1\"; they have %2, color.").arg(name, numbers.join(", ")));
+        return fail(QString("Particles have no setting \"%1\"; they have %2, color, from, at.").arg(name, numbers.join(", ")));
     bool ok = false;
     const double number = value.toDouble(&ok);
     if (!ok || !std::isfinite(number))
@@ -1296,6 +1313,10 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
         *json = std::clamp(int(std::lround(number)), 0, name == "count" ? 5000 : 1 << 30);
     else if (name == "twinkle")
         *json = std::clamp(number, 0.0, 1.0);
+    else if (name == "rate")
+        *json = std::clamp(number, 0.0, 2000.0);
+    else if (name == "life")
+        *json = std::clamp(number, .05, 30.0);
     else
         *json = number;
     return true;

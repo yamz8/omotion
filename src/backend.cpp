@@ -686,6 +686,15 @@ QVariantMap Backend::values() const {
         QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
         for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
             settings.insert(it.key(), it.value());
+        // An emitter's settings left out are what it draws with.
+        if (!settings.value("from").toString().isEmpty()) {
+            const QString kind = settings.value("kind").toString();
+            const QJsonObject emitter{{"rate", 40}, {"life", 1.5}, {"inherit", .5}, {"wind", 0},
+                                      {"gravity", kind == "rain" ? 900 : kind == "embers" ? -120 : kind == "dust" ? -20 : 80}};
+            for (auto it = emitter.begin(); it != emitter.end(); ++it)
+                if (!settings.contains(it.key()))
+                    settings.insert(it.key(), it.value());
+        }
         map.insert("particles", settings.toVariantMap());
     }
     map.insert("ownFollow", !std::isnan(layer.follow));

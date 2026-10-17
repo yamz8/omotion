@@ -511,6 +511,44 @@ Rectangle {
                 ParticleRow { name: "spread"; label: "Spread°" }
                 ParticleRow { name: "sway"; label: "Sway px" }
                 ParticleRow { name: "twinkle"; label: "Twinkle"; decimals: 2 }
+                // An emitter: from a layer, where it goes, rather than all over.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Item { width: 14; height: 1 }
+                    Label { text: "From"; color: win.text; Layout.preferredWidth: 90 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        font.pixelSize: 12
+                        implicitHeight: 34
+                        model: {
+                            const names = ["everywhere"];
+                            for (let i = backend.layers.length - 1; i >= 0; --i)
+                                if (backend.layers[i].name !== inspector.v.name && !backend.layers[i].particles)
+                                    names.push(backend.layers[i].name);
+                            return names;
+                        }
+                        currentIndex: Math.max(0, model.indexOf(inspector.isParticles ? inspector.v.particles.from || "everywhere" : "everywhere"))
+                        onActivated: function (i) { backend.setParticle("from", i === 0 ? "" : model[i]); inspector.done() }
+                    }
+                }
+                ColumnLayout {
+                    visible: inspector.isParticles && !!inspector.v.particles.from
+                    Layout.fillWidth: true
+                    spacing: 4
+                    ParticleRow { name: "rate"; label: "A second" }
+                    ParticleRow { name: "life"; label: "Life s"; decimals: 2 }
+                    ParticleRow { name: "inherit"; label: "Its speed ×"; decimals: 2 }
+                    ParticleRow { name: "gravity"; label: "Gravity px/s²" }
+                    ParticleRow { name: "wind"; label: "Wind px/s²" }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: win.muted
+                        font.pixelSize: 12
+                        text: "They come from its pivot (\"at\" in scene.json picks another point), carry on with some of its speed, and fall or rise. Link its opacity to switch them on and off."
+                    }
+                }
                 ParticleRow { name: "seed"; label: "Seed" }
                 RowLayout {
                     Layout.fillWidth: true

@@ -1857,10 +1857,115 @@ void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double 
 
 }
 
-void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow) {
+namespace {
+// One particle as its kind looks: a streak along its way for rain, a soft
+// glowing dot for dust, embers and fireflies, a tumbling leaf, a dot.
+void drawOne(QPainter &painter, const QString &kind, const QPointF &at, double r, const QColor &c, const QPointF &way,
+             double streak, double turn, double squash) {
+    if (kind == "rain") {
+        const double length = std::hypot(way.x(), way.y());
+        const QPointF along = length > 0 ? way / length : QPointF(0, 1);
+        painter.setPen(QPen(c, r * .45, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(at, at - along * streak);
+        painter.setPen(Qt::NoPen);
+    } else if (kind == "fireflies" || kind == "embers" || kind == "dust") {
+        const double reach = r * (kind == "dust" ? 1.5 : 3.5);
+        QRadialGradient light(at, reach);
+        light.setColorAt(0, c);
+        QColor edge = c;
+        edge.setAlpha(0);
+        light.setColorAt(kind == "dust" ? 1 : .35, kind == "dust" ? edge : c);
+        light.setColorAt(1, edge);
+        painter.setBrush(light);
+        painter.drawEllipse(at, reach, reach);
+    } else if (kind == "leaves") {
+        painter.save();
+        painter.translate(at);
+        painter.rotate(turn);
+        painter.scale(1, squash);
+        painter.setBrush(c);
+        painter.drawEllipse(QPointF(0, 0), r, r * .5);
+        painter.restore();
+    } else {
+        painter.setBrush(c);
+        painter.drawEllipse(at, r, r);
+    }
+}
+
+// An emitter's particles, each from its birth on the source layer, worked
+// out from the time alone so any frame can be drawn by itself.
+void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
+                 const QTransform &canvasToOutput) {
+    const int source = scene.indexOf(settings.value("from").toString());
+    if (source < 0)
+        return;
+    const Layer &from = scene.layers.at(source);
+    const QString kind = settings.value("kind").toString();
+    const double rate = std::max(0.0, settings.value("rate").toDouble(40));
+    const double life = std::max(.05, settings.value("life").toDouble(1.5));
+    if (rate <= 0)
+        return;
+    const QSizeF size = assets.size(from.source);
+    const QJsonArray at = settings.value("at").toArray();
+    const QPointF point = at.size() == 2 ? QPointF(at.at(0).toDouble(), at.at(1).toDouble())
+                                         : QPointF(from.anchor.x() * size.width(), from.anchor.y() * size.height());
+    const double speed = settings.value("speed").toDouble(), r0 = std::max(.2, settings.value("size").toDouble());
+    const double direction = qDegreesToRadians(settings.value("direction").toDouble());
+    const double spread = qDegreesToRadians(settings.value("spread").toDouble());
+    const double inherit = settings.value("inherit").toDouble(.5);
+    const double gravity = settings.value("gravity").toDouble(kind == "rain" ? 900 : kind == "embers" ? -120 : kind == "dust" ? -20 : 80);
+    const double wind = settings.value("wind").toDouble(0), drag = std::max(0.0, settings.value("drag").toDouble(1));
+    const double twinkle = std::clamp(settings.value("twinkle").toDouble(), 0.0, 1.0);
+    const QColor colour(settings.value("color").toString("#ffffff"));
+    const quint32 seed = quint32(settings.value("seed").toInt(1));
+    const double step = 1 / std::max(1.0, scene.fps);
+    auto emitter = [&](double when) { return layerTransform(scene, assets, source, when).map(point); };
+    const qint64 first = std::max<qint64>(0, qint64(std::floor((t - life) * rate))), last = qint64(std::floor(t * rate));
+    painter.save();
+    painter.setTransform(canvasToOutput, true);
+    painter.setPen(Qt::NoPen);
+    for (qint64 i = first; i <= last && i - first < 20000; ++i) {
+        const double born = i / rate, age = t - born;
+        if (age < 0 || age > life)
+            continue;
+        QRandomGenerator random(seed * 2654435761u + quint32(i) * 40503u);
+        const double pace = .6 + .8 * random.generateDouble();
+        const double angle = direction + spread * (random.generateDouble() * 2 - 1);
+        const double grow = .5 + random.generateDouble(), flicker = random.generateDouble() * 2 * M_PI, turn = random.generateDouble();
+        const QPointF start = emitter(born);
+        const QPointF carried = (emitter(born + step) - emitter(std::max(0.0, born - step))) / (born >= step ? 2 * step : step);
+        const QPointF velocity = QPointF(std::cos(angle), std::sin(angle)) * speed * pace + carried * inherit;
+        // Slowed by the air, and pulled down and along.
+        const double slowed = drag > 0 ? (1 - std::exp(-drag * age)) / drag : age;
+        const QPointF place = start + velocity * slowed + QPointF(wind, gravity) * (.5 * age * age);
+        const QPointF way = velocity * std::exp(-drag * age) + QPointF(wind, gravity) * age;
+        const double grown = age / life;
+        QColor c = colour;
+        const double glow = 1 - twinkle * (.5 + .5 * std::sin(6 * age + flicker));
+        c.setAlphaF(std::clamp(c.alphaF() * glow * std::min(1.0, age / .08) * std::pow(1 - grown, 1.2), 0.0, 1.0));
+        const double r = r0 * grow * (kind == "dust" ? 1 + 2.5 * grown : 1);
+        drawOne(painter, kind, place, r, c, way, 8 + std::hypot(way.x(), way.y()) * .03, 360 * (turn + age * .7), .55 + .45 * std::cos(4 * age + flicker));
+    }
+    painter.restore();
+}
+}
+
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow, AssetCache *assets,
+                   const QTransform &toOutput, const QTransform &canvasToOutput) {
+    Q_UNUSED(toOutput)
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
         settings.insert(it.key(), it.value());
+    if (!settings.value("from").toString().isEmpty()) {
+        if (assets) {
+            // On the canvas, wherever the particle layer itself is.
+            painter.save();
+            painter.setTransform(QTransform());
+            drawEmitted(painter, scene, settings, t, *assets, canvasToOutput);
+            painter.restore();
+        }
+        return;
+    }
     const QString kind = settings.value("kind").toString();
     const int count = std::clamp(settings.value("count").toInt(), 0, 5000);
     const double size = std::max(.2, settings.value("size").toDouble());
@@ -1998,7 +2103,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
             if (blur <= 0 && glowSize <= 0) {
                 painter.setTransform(toOutput);
                 painter.setCompositionMode(compositionFor(layer.blend));
-                drawParticles(painter, scene, layer, t, followOf(scene, i));
+                drawParticles(painter, scene, layer, t, followOf(scene, i), &assets, toOutput, base);
                 continue;
             }
             const QRect device(0, 0, painter.device()->width(), painter.device()->height());
@@ -2008,7 +2113,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
                 QPainter into(&frame);
                 into.setRenderHint(QPainter::Antialiasing);
                 into.setTransform(toOutput);
-                drawParticles(into, scene, layer, t, followOf(scene, i));
+                drawParticles(into, scene, layer, t, followOf(scene, i), &assets, toOutput, base);
             }
             soften(frame, blur);
             painter.setTransform(QTransform());

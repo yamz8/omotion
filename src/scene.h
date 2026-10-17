@@ -302,8 +302,15 @@ struct PinSet {
 PinSet pinsAt(const Scene &scene, const Layer &layer, double t);
 QPointF bendWith(const PinSet &pins, const QPointF &point);
 bool isBent(const Scene &scene, const Layer &layer, double t);
-// A particle layer's particles at time t, in world pixels.
-void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1);
+// A particle layer's particles at time t, in world pixels. With "from" in
+// its settings it's an emitter: they come from a point on that layer (its
+// "at", in its pixels; its pivot when left out), "rate" a second, each
+// living "life" seconds, starting off with "inherit" of the layer's own
+// speed and pulled by "gravity" (down) and "wind" (right), slowed by
+// "drag"; drawn on the canvas, so assets and the particle layer's own
+// transform to the output (toOutput) are needed for them.
+void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
+                   AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
 // Softens an Alpha8 or 32-bit image in place, spreading edges about width
 // pixels: three box blurs, which come close to a Gaussian.

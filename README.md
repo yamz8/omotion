@@ -94,6 +94,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `S` | Give the selected piece of the world a 3D shape |
 | Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click a piece of a world | Pick it where it is in 3D: a box shows round it, arrows drag it along x (red), y (green) and z (blue), and three rings turn it: about y (yaw), x (pitch) and z (roll). Ctrl while dragging snaps to 10 cm and 15° |
+| Emitters | A particle layer's *From* (in the inspector) makes it come from a layer: a wheel throwing dust, a chimney's embers. So many a second, each living a while, carrying on with some of the layer's speed, under gravity and wind. `omotion particles <project> dust --from car --rate 60` does the same |
 | Physics | In the inspector: make a layer a rigid *Body* (or a *Fixed* one that others land on, with how much it bounces), then *Simulate from the playhead*: the bodies fall, land on the ground (a world's, or the canvas's bottom), bounce and knock into each other, baked into keys. `omotion body` and `omotion simulate` do the same |
 | Ctrl+click | Add a layer to the selection, or take it out (also in the outliner): they move together, by the arrows, rings and G in a world, by dragging on a flat canvas |
 | `G` | Grab the selected piece of a world: it follows the mouse, `X` `Y` `Z` keep it to an axis, a click or `Enter` places it, right-click or `Esc` puts it back |
@@ -316,6 +317,10 @@ photo.omotion/
   "speed", "amount"}]` add a motion's change from its first key, from
   `start`; the scene's **`motions`** keep each motion's `keys` (by property,
   times from 0), copied in when it's laid on.
+- A particle layer with **`from`** in its `particles` is an emitter: from
+  that layer's `at` point (its pixels; its pivot when left out), `rate` a
+  second, each living `life` seconds, with `inherit` of the layer's speed,
+  pulled by `gravity` (down, px/s²) and `wind` (right), slowed by `drag`.
 - **`body`** on a layer makes it a rigid body: `mass`, `bounce` (0 to 1),
   `friction` (0 to 1), `fixed`. A flat scene's bodies land on its bottom,
   or at the scene's `floor` (canvas y) when set.
