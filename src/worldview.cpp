@@ -187,9 +187,10 @@ void WorldSource::update() {
         texture->setFormat(QQuick3DTextureData::RGBA32F);
         texture->setTextureData(packed);
         frame["occluderCount"] = f.occluders.size();
-        QByteArray boxes(4 * 3 * 4 * int(sizeof(float)), '\0');
+        constexpr int most = World::Frame::mostSolids;
+        QByteArray boxes(most * 3 * 4 * int(sizeof(float)), '\0');
         float *boxRows = reinterpret_cast<float *>(boxes.data());
-        for (int k = 0; k < f.solids.size() && k < 4; ++k) {
+        for (int k = 0; k < f.solids.size() && k < most; ++k) {
             const World::Occluder &c = f.solids.at(k).box;
             float *row = boxRows + k * 12;
             row[0] = c.centre.x(), row[1] = c.centre.y(), row[2] = c.centre.z();
@@ -202,10 +203,10 @@ void WorldSource::update() {
             cells->setTextureData(f.solids.at(k).cells);
         }
         QQuick3DTextureData *solidBoxes = solids();
-        solidBoxes->setSize(QSize(3, 4));
+        solidBoxes->setSize(QSize(3, most));
         solidBoxes->setFormat(QQuick3DTextureData::RGBA32F);
         solidBoxes->setTextureData(boxes);
-        frame["solidCount"] = std::min<qsizetype>(4, f.solids.size());
+        frame["solidCount"] = std::min<qsizetype>(most, f.solids.size());
         // The world's own picture as the light all round, for imported
         // models' materials, so they take its colours.
         // A small copy of its own, in the cache: the picture's file is the
@@ -271,7 +272,7 @@ QQuick3DTextureData *WorldSource::solids() {
 }
 
 QQuick3DTextureData *WorldSource::solidCells(int i) {
-    std::shared_ptr<QQuick3DTextureData> &cells = m_solidCells[std::clamp(i, 0, 3)];
+    std::shared_ptr<QQuick3DTextureData> &cells = m_solidCells[std::clamp(i, 0, World::Frame::mostSolids - 1)];
     if (!cells) {
         cells = std::make_shared<QQuick3DTextureData>();
         // Something to sample before there's a shape: one empty cell.

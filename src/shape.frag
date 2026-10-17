@@ -75,6 +75,14 @@ float shadowed(vec3 p, vec3 light)
         lit *= throughCells(solid2, 2, p, light);
     if (solidCount > 3.5)
         lit *= throughCells(solid3, 3, p, light);
+    if (solidCount > 4.5)
+        lit *= throughCells(solid4, 4, p, light);
+    if (solidCount > 5.5)
+        lit *= throughCells(solid5, 5, p, light);
+    if (solidCount > 6.5)
+        lit *= throughCells(solid6, 6, p, light);
+    if (solidCount > 7.5)
+        lit *= throughCells(solid7, 7, p, light);
     return lit;
 }
 

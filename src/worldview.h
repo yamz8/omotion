@@ -75,7 +75,7 @@ private:
     QHash<int, World::Mesh> m_meshes;
     QHash<int, std::shared_ptr<QQuick3DTextureData>> m_sheets;
     std::shared_ptr<QQuick3DTextureData> m_occluders, m_solids;
-    std::shared_ptr<QQuick3DTextureData> m_solidCells[4];
+    std::shared_ptr<QQuick3DTextureData> m_solidCells[World::Frame::mostSolids];
     QByteArray m_dustVertices;
     QByteArray m_dustIndices;
     QByteArray m_meshKey;

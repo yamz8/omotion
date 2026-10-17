@@ -3265,6 +3265,18 @@ private slots:
         QVERIFY(names(dir.filePath("twice.glb")).contains(scene.layers[again].name));
         QVERIFY(names(dir.filePath("twice.glb")).count(boxName) > names(dir.filePath("with-box.glb")).count(boxName));
 
+        // With a light about, models cast shadows by their own shapes: an
+        // OBJ's faces and a GLB's meshes, as cells.
+        Project::addLight(scene, "lamp", QVector3D(0, 5, 4), QJsonObject{{"power", 2}});
+        const World::Frame lit = World::frame(scene, assets, 0);
+        QSet<int> casting;
+        for (const World::Frame::Solid &solid : lit.solids) {
+            casting << solid.box.layer;
+            QVERIFY(solid.cells.count('\0') < solid.cells.size());
+        }
+        QVERIFY(casting.contains(box));
+        QVERIFY(casting.contains(again));
+
         // A model is a body too: dropped, it lands on the ground.
         scene.layers[box].base["worldY"] = 3;
         scene.duration = 3;

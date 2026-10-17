@@ -27,7 +27,11 @@ Item {
         Texture { textureData: view.source ? view.source.solidCells(0) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
         Texture { textureData: view.source ? view.source.solidCells(1) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
         Texture { textureData: view.source ? view.source.solidCells(2) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
-        Texture { textureData: view.source ? view.source.solidCells(3) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge }
+        Texture { textureData: view.source ? view.source.solidCells(3) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(4) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(5) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(6) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(7) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge }
     ]
     // The occluders' data, one texture for every material.
     readonly property Texture occluderTexture: Texture {
@@ -216,6 +220,10 @@ Item {
                         property TextureInput solid1: TextureInput { texture: view.cellTextures[1] }
                         property TextureInput solid2: TextureInput { texture: view.cellTextures[2] }
                         property TextureInput solid3: TextureInput { texture: view.cellTextures[3] }
+                        property TextureInput solid4: TextureInput { texture: view.cellTextures[4] }
+                        property TextureInput solid5: TextureInput { texture: view.cellTextures[5] }
+                        property TextureInput solid6: TextureInput { texture: view.cellTextures[6] }
+                        property TextureInput solid7: TextureInput { texture: view.cellTextures[7] }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10
@@ -276,6 +284,10 @@ Item {
                         property TextureInput solid1: TextureInput { texture: view.cellTextures[1] }
                         property TextureInput solid2: TextureInput { texture: view.cellTextures[2] }
                         property TextureInput solid3: TextureInput { texture: view.cellTextures[3] }
+                        property TextureInput solid4: TextureInput { texture: view.cellTextures[4] }
+                        property TextureInput solid5: TextureInput { texture: view.cellTextures[5] }
+                        property TextureInput solid6: TextureInput { texture: view.cellTextures[6] }
+                        property TextureInput solid7: TextureInput { texture: view.cellTextures[7] }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10

@@ -3,6 +3,7 @@
 #include "liquid.h"
 
 #include <QCryptographicHash>
+#include <QUrl>
 #include <QDateTime>
 #include <functional>
 #include <QDir>
@@ -988,31 +989,21 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
 namespace {
 // Which cells of a grid over a shape's box its surface passes through,
 // thickened a cell, so a line through it can't slip between.
-QByteArray cellsOf(const Mesh &shape) {
-    static QMutex lock;
-    static QHash<QByteArray, QByteArray> cache;
-    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
-    {
-        QMutexLocker locked(&lock);
-        if (cache.contains(key))
-            return cache.value(key);
-    }
+// The cells of a grid over a box (low to high) that triangles pass through
+// (three corners each).
+QByteArray cellsOfTriangles(const QList<QVector3D> &corners, const QVector3D &low, const QVector3D &high) {
     constexpr int n = Frame::solid;
     QByteArray cells(n * n * n, '\0');
-    const QVector3D low = shape.minimum, size = shape.maximum - shape.minimum;
+    const QVector3D size = high - low;
     const QVector3D cell(std::max(size.x(), 1e-6f) / n, std::max(size.y(), 1e-6f) / n, std::max(size.z(), 1e-6f) / n);
     const float smallest = std::min({cell.x(), cell.y(), cell.z()});
-    const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
-    const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
-    const qsizetype triangles = shape.indices.size() / qsizetype(3 * sizeof(quint32));
-    auto at = [&](quint32 k) { return QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]); };
     auto mark = [&](const QVector3D &p) {
         const int x = std::clamp(int((p.x() - low.x()) / cell.x()), 0, n - 1), y = std::clamp(int((p.y() - low.y()) / cell.y()), 0, n - 1),
                   z = std::clamp(int((p.z() - low.z()) / cell.z()), 0, n - 1);
         cells[(z * n + y) * n + x] = char(255);
     };
-    for (qsizetype i = 0; i < triangles; ++i) {
-        const QVector3D a = at(index[3 * i]), b = at(index[3 * i + 1]), c = at(index[3 * i + 2]);
+    for (qsizetype i = 0; i + 2 < corners.size(); i += 3) {
+        const QVector3D a = corners.at(i), b = corners.at(i + 1), c = corners.at(i + 2);
         const float longest = std::max({(b - a).length(), (c - a).length(), (c - b).length()});
         const int steps = std::clamp(int(std::ceil(longest / smallest * 2)), 1, 256);
         for (int u = 0; u <= steps; ++u)
@@ -1033,10 +1024,182 @@ QByteArray cellsOf(const Mesh &shape) {
                                 thick[(zz * n + yy) * n + xx] = char(255);
                         }
             }
-    QMutexLocker locked(&lock);
-    cache.insert(key, thick);
     return thick;
 }
+
+QByteArray cellsOf(const Mesh &shape) {
+    static QMutex lock;
+    static QHash<QByteArray, QByteArray> cache;
+    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
+    {
+        QMutexLocker locked(&lock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
+    const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
+    QList<QVector3D> corners;
+    for (qsizetype i = 0; i < shape.indices.size() / qsizetype(sizeof(quint32)); ++i) {
+        const quint32 k = index[i];
+        corners << QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]);
+    }
+    const QByteArray cells = cellsOfTriangles(corners, shape.minimum, shape.maximum);
+    QMutexLocker locked(&lock);
+    cache.insert(key, cells);
+    return cells;
+}
+
+// An imported model's triangles, in its own units: an OBJ's faces, or a
+// glTF's meshes through the nodes above them.
+QList<QVector3D> modelTriangles(const QString &path) {
+    QList<QVector3D> corners;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return corners;
+    const QByteArray bytes = file.readAll();
+    if (QFileInfo(path).suffix().toLower() == "obj") {
+        QList<QVector3D> points;
+        for (const QByteArray &raw : bytes.split('\n')) {
+            const QList<QByteArray> words = raw.simplified().split(' ');
+            if (words.first() == "v" && words.size() >= 4)
+                points << QVector3D(words.at(1).toFloat(), words.at(2).toFloat(), words.at(3).toFloat());
+            else if (words.first() == "f" && words.size() >= 4) {
+                QList<int> face;
+                for (int k = 1; k < words.size(); ++k) {
+                    const int id = words.at(k).split('/').first().toInt();
+                    face << (id < 0 ? int(points.size()) + id : id - 1);
+                }
+                for (int k = 2; k < face.size(); ++k)
+                    if (face.at(0) >= 0 && face.at(k) < points.size() && face.at(k - 1) < points.size() && face.at(0) < points.size())
+                        corners << points.at(face.at(0)) << points.at(face.at(k - 1)) << points.at(face.at(k));
+            }
+        }
+        return corners;
+    }
+    QByteArray text = bytes, binary;
+    if (bytes.startsWith("glTF"))
+        for (qsizetype at = 12; at + 8 <= bytes.size();) {
+            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + at);
+            const quint32 type = *reinterpret_cast<const quint32 *>(bytes.constData() + at + 4);
+            if (type == 0x4E4F534A)
+                text = bytes.mid(at + 8, length);
+            else if (type == 0x004E4942)
+                binary = bytes.mid(at + 8, length);
+            at += 8 + length;
+        }
+    const QJsonObject gltf = QJsonDocument::fromJson(text).object();
+    const QDir beside = QFileInfo(path).absoluteDir();
+    QList<QByteArray> buffers;
+    for (const QJsonValue &b : gltf.value("buffers").toArray()) {
+        const QString uri = b.toObject().value("uri").toString();
+        if (uri.isEmpty())
+            buffers << binary;
+        else if (uri.startsWith("data:"))
+            buffers << QByteArray::fromBase64(uri.mid(uri.indexOf(',') + 1).toLatin1());
+        else {
+            QFile f(beside.filePath(QUrl::fromPercentEncoding(uri.toUtf8())));
+            buffers << (f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray());
+        }
+    }
+    const QJsonArray views = gltf.value("bufferViews").toArray(), accessors = gltf.value("accessors").toArray(),
+                     meshes = gltf.value("meshes").toArray(), nodes = gltf.value("nodes").toArray();
+    // An accessor's values, as numbers, its count of them by its kind.
+    auto read = [&](int index, int width, QList<double> *out) {
+        const QJsonObject a = accessors.at(index).toObject();
+        if (!a.contains("bufferView"))
+            return false;
+        const QJsonObject view = views.at(a.value("bufferView").toInt()).toObject();
+        const QByteArray &buffer = buffers.value(view.value("buffer").toInt());
+        const int type = a.value("componentType").toInt();
+        const int size = type == 5126 || type == 5125 ? 4 : type == 5123 || type == 5122 ? 2 : 1;
+        const qsizetype stride = view.value("byteStride").toInt(size * width);
+        const qsizetype start = view.value("byteOffset").toInteger() + a.value("byteOffset").toInteger();
+        const qsizetype count = a.value("count").toInteger();
+        if (start + (count - 1) * stride + size * width > buffer.size())
+            return false;
+        for (qsizetype i = 0; i < count; ++i)
+            for (int k = 0; k < width; ++k) {
+                const char *p = buffer.constData() + start + i * stride + k * size;
+                double value = 0;
+                if (type == 5126)
+                    value = *reinterpret_cast<const float *>(p);
+                else if (type == 5125)
+                    value = *reinterpret_cast<const quint32 *>(p);
+                else if (type == 5123)
+                    value = *reinterpret_cast<const quint16 *>(p);
+                else if (type == 5121)
+                    value = *reinterpret_cast<const quint8 *>(p);
+                else
+                    return false;
+                *out << value;
+            }
+        return true;
+    };
+    std::function<void(int, const QMatrix4x4 &, int)> visit = [&](int index, const QMatrix4x4 &above, int depth) {
+        if (depth > 64 || index < 0 || index >= nodes.size())
+            return;
+        const QJsonObject node = nodes.at(index).toObject();
+        QMatrix4x4 local;
+        const QJsonArray m = node.value("matrix").toArray();
+        if (m.size() == 16) {
+            float values[16];
+            for (int k = 0; k < 16; ++k)
+                values[k] = float(m.at(k).toDouble());
+            local = QMatrix4x4(values).transposed();
+        } else {
+            const QJsonArray tr = node.value("translation").toArray(), r = node.value("rotation").toArray(), sc = node.value("scale").toArray();
+            if (tr.size() == 3)
+                local.translate(float(tr.at(0).toDouble()), float(tr.at(1).toDouble()), float(tr.at(2).toDouble()));
+            if (r.size() == 4)
+                local.rotate(QQuaternion(float(r.at(3).toDouble()), float(r.at(0).toDouble()), float(r.at(1).toDouble()), float(r.at(2).toDouble())));
+            if (sc.size() == 3)
+                local.scale(float(sc.at(0).toDouble()), float(sc.at(1).toDouble()), float(sc.at(2).toDouble()));
+        }
+        const QMatrix4x4 world = above * local;
+        if (node.contains("mesh"))
+            for (const QJsonValue &p : meshes.at(node.value("mesh").toInt()).toObject().value("primitives").toArray()) {
+                const QJsonObject primitive = p.toObject();
+                if (primitive.value("mode").toInt(4) != 4)
+                    continue;
+                QList<double> positions, order;
+                if (!read(primitive.value("attributes").toObject().value("POSITION").toInt(-1), 3, &positions))
+                    continue;
+                if (primitive.contains("indices"))
+                    read(primitive.value("indices").toInt(), 1, &order);
+                else
+                    for (qsizetype k = 0; k < positions.size() / 3; ++k)
+                        order << double(k);
+                for (const double k : order) {
+                    const qsizetype at = qsizetype(k) * 3;
+                    if (at + 2 < positions.size())
+                        corners << world.map(QVector3D(float(positions.at(at)), float(positions.at(at + 1)), float(positions.at(at + 2))));
+                }
+            }
+        for (const QJsonValue &child : node.value("children").toArray())
+            visit(child.toInt(), world, depth + 1);
+    };
+    const QJsonArray scenes = gltf.value("scenes").toArray();
+    for (const QJsonValue &root : scenes.at(gltf.value("scene").toInt(0)).toObject().value("nodes").toArray())
+        visit(root.toInt(), QMatrix4x4(), 0);
+    corners.resize(corners.size() / 3 * 3);
+    return corners;
+}
+
+QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D &high) {
+    static QMutex lock;
+    static QHash<QString, QByteArray> cache;
+    const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    {
+        QMutexLocker locked(&lock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const QByteArray cells = cellsOfTriangles(modelTriangles(path), low, high);
+    QMutexLocker locked(&lock);
+    cache.insert(key, cells);
+    return cells;
+}
+
 }
 
 namespace {
@@ -1385,6 +1548,19 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             QVector3D low, high;
             if (!model.visible || !modelBounds(model.model, &low, &high))
                 continue;
+            // By its own shape, while there's room.
+            if (frame.solids.size() < Frame::mostSolids) {
+                Frame::Solid solid;
+                solid.box.layer = model.layer;
+                solid.box.centre = model.position + model.rotation.rotatedVector(((low + high) / 2 + model.offset) * model.scale);
+                solid.box.half = (high - low) / 2 * model.scale;
+                solid.box.rotation = model.rotation;
+                solid.cells = modelCells(model.model, low, high);
+                if (solid.cells.count('\0') < solid.cells.size()) {
+                    frame.solids << solid;
+                    continue;
+                }
+            }
             QList<QVector3D> corners;
             for (int k = 0; k < 8; ++k) {
                 const QVector3D own(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
@@ -1399,7 +1575,7 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             if (shape.isNull())
                 continue;
             // The first few by their shape itself, cell by cell.
-            if (frame.solids.size() < 4) {
+            if (frame.solids.size() < Frame::mostSolids) {
                 Frame::Solid solid;
                 solid.box.layer = place.layer;
                 solid.box.centre = place.position + place.rotation.rotatedVector((shape.minimum + shape.maximum) / 2 * place.scale);

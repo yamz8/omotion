@@ -204,13 +204,15 @@ struct Frame {
     QColor haze{200, 140, 160};
     QList<Shadow> shadows;
     QList<Occluder> occluders;  // Thirty-two at most, only with lights about.
-    // Shaped pieces casting shadows by their shape itself (four at most):
+    // Shaped pieces and models casting shadows by their shape itself
+    // (eight at most):
     // its box where it is, and which of its cells its shape fills.
     struct Solid {
         Occluder box;
         QByteArray cells;  // Solid × solid × solid, 255 filled, x fastest.
     };
     static constexpr int solid = 32;
+    static constexpr int mostSolids = 8;
     QList<Solid> solids;
     QList<Burst> bursts;
     QList<Puff> puffs;

@@ -91,15 +91,15 @@ a face; with their own outlines and shapes, so round things roll); models in glT
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property (its drag fixed, found by the window's mouse test); several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
-video's frame under the playhead; shadows from added lights (shaped pieces by their own shape,
-cell by cell, in the shaders); the picture as a light probe for models; the camera solved in depth
+video's frame under the playhead; shadows from added lights (shaped pieces and models by their own
+shapes, cell by cell, in the shaders); the picture as a light probe for models; the camera solved in depth
 from tracks on a world; water as 3D drops over a world's ground; emitters on a world's pieces throw
 particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire as a 2D
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
-Still to do there: models' shadows by their own shapes (they're the rounded
-shape of their box), and more than four shaped pieces casting by shape.
+Still to do there: more than eight things casting shadows by their own
+shapes (past eight they cast rounded parts).
 
 ## Realism (folded into the world)
 
