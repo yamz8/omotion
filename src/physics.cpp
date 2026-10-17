@@ -74,8 +74,13 @@ void rub(Body &a, const QVector3D &ra, Body *b, const QVector3D &rb, const QVect
 // The corners of its box where it is now; a flat body's only across and
 // up, as it only turns in the picture's plane.
 QList<QVector3D> corners(const Body &b) {
-    const bool flat = b.half.z() > 1e5f;
     QList<QVector3D> list;
+    if (!b.points.isEmpty()) {
+        for (const QVector3D &p : b.points)
+            list << b.centre + b.turn.rotatedVector(p);
+        return list;
+    }
+    const bool flat = b.half.z() > 1e5f;
     for (int c = 0; c < (flat ? 4 : 8); ++c) {
         const QVector3D own((c & 1 ? 1 : -1) * b.half.x(), (c & 2 ? 1 : -1) * b.half.y(), flat ? 0 : (c & 4 ? 1 : -1) * b.half.z());
         list << b.centre + b.turn.rotatedVector(own);
@@ -88,7 +93,95 @@ QList<QVector3D> corners(const Body &b) {
 // apart, they overlap, and least along one of those: which way (from a to
 // b), how deep, and where they touch (the corners of one inside the other
 // at the face they meet, or between their edges where edges cross).
+// Two bodies' own shapes against each other, by the same test: every way a
+// face of either looks (and across their main axes in 3D) tried as a line
+// that might keep them apart, their points' spans along it compared.
+bool overlapShapes(const Body &a, const Body &b, QVector3D *normal, float *depth, QList<QVector3D> *contacts) {
+    const bool flat = a.half.z() > 1e5f || b.half.z() > 1e5f;
+    auto facesOf = [&](const Body &body) {
+        QList<QVector3D> list;
+        if (!body.faces.isEmpty())
+            for (const QVector3D &f : body.faces)
+                list << body.turn.rotatedVector(f);
+        else
+            for (int k = 0; k < (flat ? 2 : 3); ++k) {
+                QVector3D unit;
+                unit[k] = 1;
+                list << body.turn.rotatedVector(unit) << -body.turn.rotatedVector(unit);
+            }
+        return list;
+    };
+    const QList<QVector3D> pa = corners(a), pb = corners(b), fa = facesOf(a), fb = facesOf(b);
+    QList<QVector3D> axes = fa + fb;
+    if (!flat)
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) {
+                QVector3D ui, uj;
+                ui[i] = 1;
+                uj[j] = 1;
+                const QVector3D across = QVector3D::crossProduct(a.turn.rotatedVector(ui), b.turn.rotatedVector(uj));
+                if (across.length() > 1e-3f)
+                    axes << across.normalized();
+            }
+    auto span = [](const QList<QVector3D> &points, const QVector3D &along) {
+        double low = 1e30, high = -1e30;
+        for (const QVector3D &p : points) {
+            const double d = QVector3D::dotProduct(p, along);
+            low = std::min(low, d), high = std::max(high, d);
+        }
+        return std::make_pair(low, high);
+    };
+    double least = 1e30;
+    QVector3D best;
+    for (const QVector3D &along : axes) {
+        const auto [la, ha] = span(pa, along);
+        const auto [lb, hb] = span(pb, along);
+        const double gap = std::min(ha, hb) - std::max(la, lb);
+        if (gap <= 0)
+            return false;
+        if (gap < least)
+            least = gap, best = (lb + hb) / 2 >= (la + ha) / 2 ? along : -along;
+    }
+    *normal = best;
+    *depth = float(least);
+    // Points of each inside the other (within all its faces), where they
+    // touch; else between the points of each deepest in the other.
+    auto inside = [&](const QList<QVector3D> &points, const QList<QVector3D> &faces, const QList<QVector3D> &own) {
+        QList<QVector3D> found;
+        for (const QVector3D &p : points) {
+            bool in = true;
+            for (const QVector3D &f : faces) {
+                double most = -1e30;
+                for (const QVector3D &q : own)
+                    most = std::max(most, double(QVector3D::dotProduct(q, f)));
+                if (QVector3D::dotProduct(p, f) > most + 1e-3 * std::max(1.0, std::abs(most))) {
+                    in = false;
+                    break;
+                }
+            }
+            if (in)
+                found << p;
+        }
+        return found;
+    };
+    *contacts = inside(pb, fa, pa) + inside(pa, fb, pb);
+    if (contacts->isEmpty()) {
+        auto deepest = [](const QList<QVector3D> &points, const QVector3D &way) {
+            QVector3D found;
+            double most = -1e30;
+            for (const QVector3D &p : points)
+                if (QVector3D::dotProduct(p, way) > most)
+                    most = QVector3D::dotProduct(p, way), found = p;
+            return found;
+        };
+        *contacts << (deepest(pa, best) + deepest(pb, -best)) / 2;
+    }
+    return true;
+}
+
 bool overlap(const Body &a, const Body &b, QVector3D *normal, float *depth, QList<QVector3D> *contacts) {
+    if (!a.points.isEmpty() || !b.points.isEmpty())
+        return overlapShapes(a, b, normal, depth, contacts);
     const bool flat = a.half.z() > 1e5f || b.half.z() > 1e5f;
     const int sides = flat ? 2 : 3;
     QVector3D axesA[3], axesB[3];
@@ -221,8 +314,9 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
                         push(b, r, up * float(pressed));
                         rub(b, r, nullptr, {}, up, b.friction, pressed);
                     }
-                // A box rolls badly: turning on the ground dies away.
-                b.spin *= float(std::max(0.0, 1 - h * 2));
+                // A box rolls badly: turning on the ground dies away; an
+                // outline of its own rolls as far as its shape lets it.
+                b.spin *= float(std::max(0.0, 1 - h * (b.points.isEmpty() ? 2 : .3)));
             }
             // Each pair that overlaps is pushed apart the way they overlap
             // least, and pushed off each other where they touch: bouncing,
@@ -292,6 +386,66 @@ QRectF solid(const QImage &image) {
 }
 }
 
+namespace {
+// The outline of a picture's solid part, as a convex polygon of at most
+// some points (dropping those that add least to it), in its pixels.
+QList<QPointF> hullOf(const QImage &image) {
+    const QImage argb = image.convertToFormat(QImage::Format_ARGB32);
+    QList<QPointF> edge;
+    for (int y = 0; y < argb.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(argb.constScanLine(y));
+        int first = -1, last = -1;
+        for (int x = 0; x < argb.width(); ++x)
+            if (qAlpha(line[x]) > 128) {
+                if (first < 0)
+                    first = x;
+                last = x;
+            }
+        if (first >= 0)
+            edge << QPointF(first, y) << QPointF(last + 1, y) << QPointF(first, y + 1) << QPointF(last + 1, y + 1);
+    }
+    if (edge.size() < 3)
+        return {};
+    std::sort(edge.begin(), edge.end(), [](const QPointF &a, const QPointF &b) { return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y()); });
+    auto cross = [](const QPointF &o, const QPointF &a, const QPointF &b) { return (a.x() - o.x()) * (b.y() - o.y()) - (a.y() - o.y()) * (b.x() - o.x()); };
+    // Andrew's monotone chain: the lower and upper runs.
+    QList<QPointF> hull;
+    for (int pass = 0; pass < 2; ++pass) {
+        const qsizetype start = hull.size();
+        for (qsizetype k = 0; k < edge.size(); ++k) {
+            const QPointF &p = pass == 0 ? edge.at(k) : edge.at(edge.size() - 1 - k);
+            while (hull.size() >= start + 2 && cross(hull.at(hull.size() - 2), hull.last(), p) <= 0)
+                hull.removeLast();
+            hull << p;
+        }
+        hull.removeLast();
+    }
+    while (hull.size() > 24) {
+        qsizetype weakest = 0;
+        double smallest = 1e30;
+        for (qsizetype k = 0; k < hull.size(); ++k) {
+            const double area = std::abs(cross(hull.at((k + hull.size() - 1) % hull.size()), hull.at(k), hull.at((k + 1) % hull.size())));
+            if (area < smallest)
+                smallest = area, weakest = k;
+        }
+        hull.removeAt(weakest);
+    }
+    return hull;
+}
+
+// The ways to look for a 3D shape's farthest points: along the axes, and
+// across their edges and corners.
+QList<QVector3D> lookouts() {
+    QList<QVector3D> ways;
+    for (int x = -1; x <= 1; ++x)
+        for (int y = -1; y <= 1; ++y)
+            for (int z = -1; z <= 1; ++z)
+                if (x || y || z)
+                    ways << QVector3D(float(x), float(y), float(z)).normalized();
+    return ways;
+}
+}
+
 int bake(Scene &scene, AssetCache &assets, double from, double to, QString *error) {
     auto fail = [error](const QString &message) {
         if (error)
@@ -317,6 +471,7 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
     struct Place {
         QVector3D centre, half;
         QQuaternion turn;
+        QList<QVector3D> points, faces;  // Its own shape, when it has one.
     };
     auto where = [&](int index, double t) -> Place {
         if (world) {
@@ -328,8 +483,34 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
             const QVector3D x = corners.at(1) - corners.at(0), y = corners.at(2) - corners.at(0), z = corners.at(4) - corners.at(0);
             if (x.length() < 1e-6f || y.length() < 1e-6f || z.length() < 1e-6f)
                 return {};
-            return {(corners.at(0) + corners.at(7)) / 2, QVector3D(x.length(), y.length(), z.length()) / 2,
-                    QQuaternion::fromAxes(x.normalized(), y.normalized(), z.normalized())};
+            Place place{(corners.at(0) + corners.at(7)) / 2, QVector3D(x.length(), y.length(), z.length()) / 2,
+                        QQuaternion::fromAxes(x.normalized(), y.normalized(), z.normalized()), {}, {}};
+            // A shaped piece: its mesh's farthest points every way, put
+            // where its box is now (its rest box's corners give the map).
+            const Layer &layer = scene.layers.at(index);
+            const World::Mesh shape = layer.raw.value("shape").toObject().isEmpty() ? World::Mesh() : World::mesh(scene, assets, index);
+            if (!shape.isNull()) {
+                const QVector3D low = shape.minimum, size = shape.maximum - shape.minimum;
+                const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
+                const qsizetype count = shape.vertices.size() / qsizetype(shape.stride * sizeof(float));
+                const QQuaternion back = place.turn.inverted();
+                for (const QVector3D &way : lookouts()) {
+                    double most = -1e30;
+                    QVector3D found;
+                    for (qsizetype k = 0; k < count; ++k) {
+                        const QVector3D rest(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]);
+                        if (QVector3D::dotProduct(rest, way) > most)
+                            most = QVector3D::dotProduct(rest, way), found = rest;
+                    }
+                    const QVector3D f = (found - low) / QVector3D(std::max(size.x(), 1e-6f), std::max(size.y(), 1e-6f), std::max(size.z(), 1e-6f));
+                    const QVector3D now = corners.at(0) + x * f.x() + y * f.y() + z * f.z();
+                    const QVector3D own = back.rotatedVector(now - place.centre);
+                    if (!place.points.contains(own))
+                        place.points << own;
+                    place.faces << way;
+                }
+            }
+            return place;
         }
         const Layer &layer = scene.layers.at(index);
         const QTransform m = layerTransform(scene, assets, index, t);
@@ -338,8 +519,34 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
         const double sx = std::hypot(m.m11(), m.m12()), sy = std::hypot(m.m21(), m.m22());
         const double angle = qRadiansToDegrees(std::atan2(m.m12(), m.m11()));
         // As deep as can be, so they only ever push each other across and up.
-        return {QVector3D(float(centre.x()), float(-centre.y()), 0), QVector3D(float(box.width() / 2 * sx), float(box.height() / 2 * sy), 1e6f),
-                QQuaternion::fromAxisAndAngle(0, 0, 1, float(-angle))};
+        Place place{QVector3D(float(centre.x()), float(-centre.y()), 0), QVector3D(float(box.width() / 2 * sx), float(box.height() / 2 * sy), 1e6f),
+                    QQuaternion::fromAxisAndAngle(0, 0, 1, float(-angle)), {}, {}};
+        // Its outline, when it isn't near enough its box: a ball, a wheel,
+        // a rock, in its own axes (up is +y), its faces' outward ways.
+        const QList<QPointF> hull = hullOf(assets.image(layer.source));
+        double area = 0;
+        for (qsizetype k = 0; k < hull.size(); ++k)
+            area += hull.at(k).x() * hull.at((k + 1) % hull.size()).y() - hull.at((k + 1) % hull.size()).x() * hull.at(k).y();
+        if (hull.size() >= 3 && std::abs(area) / 2 < box.width() * box.height() * .9) {
+            const QQuaternion back = place.turn.inverted();
+            QList<QVector3D> own;
+            for (const QPointF &p : hull) {
+                const QPointF c = m.map(p);
+                own << back.rotatedVector(QVector3D(float(c.x()), float(-c.y()), 0) - place.centre);
+            }
+            // Wound the same way whatever the picture: faces look outward.
+            double turning = 0;
+            for (qsizetype k = 0; k < own.size(); ++k)
+                turning += own.at(k).x() * own.at((k + 1) % own.size()).y() - own.at((k + 1) % own.size()).x() * own.at(k).y();
+            for (qsizetype k = 0; k < own.size(); ++k) {
+                const QVector3D along = own.at((k + 1) % own.size()) - own.at(k);
+                QVector3D out = turning > 0 ? QVector3D(along.y(), -along.x(), 0) : QVector3D(-along.y(), along.x(), 0);
+                if (out.length() > 1e-6f)
+                    place.faces << out.normalized();
+            }
+            place.points = own;
+        }
+        return place;
     };
     QList<Body> bodies;
     for (const int index : layers) {
@@ -353,6 +560,8 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
         body.centre = place.centre;
         body.half = place.half;
         body.turn = place.turn;
+        body.points = place.points;
+        body.faces = place.faces;
         body.velocity = from + dt <= scene.duration ? (later - place.centre) / float(dt) : QVector3D();
         body.mass = std::max(1e-3, settings.value("mass").toDouble(1));
         body.bounce = std::clamp(settings.value("bounce").toDouble(.3), 0.0, 1.0);

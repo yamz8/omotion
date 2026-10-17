@@ -6,7 +6,9 @@
 // onto the bottom of the canvas. Bodies are boxes that turn: they meet the
 // ground with their corners, so a knock off their middle or a landing on
 // an edge spins them, and they tip over onto a face as they come to rest;
-// against each other they meet as turned boxes too.
+// against each other they meet as turned boxes too. A body with a shape of
+// its own (a flat layer's outline, a 3D piece's mesh) meets things by
+// that instead, so a round one rolls.
 
 #include <QList>
 #include <QString>
@@ -29,6 +31,10 @@ struct Body {
     double friction = .5;  // How much sliding slows it.
     bool fixed = false;    // Collided with but never moved.
     bool tumble = true;    // False keeps it upright: it only slides.
+    // Its own shape, when it has one rather than its box: the points of its
+    // outline (convex), and the outward ways of its faces, in its own axes
+    // from its middle. It meets the ground and other bodies with these.
+    QList<QVector3D> points, faces;
 };
 
 // Where a body is at one frame, and how it has turned since the start.

@@ -415,7 +415,9 @@ photo.omotion/
   `friction` (0 to 1), `fixed`, `tumble` (true unless set false: bodies
   are boxes that turn, meeting the ground and each other with their
   corners and faces, so they rock on an edge, roll over when thrown hard,
-  slide off a slope, and come to rest on a face). A flat scene's bodies land on its bottom,
+  slide off a slope, and come to rest on a face). A layer whose picture
+  isn't near its box (a ball, a wheel, a rock) is its outline instead, and
+  a world piece with a 3D shape is its shape, so round things roll. A flat scene's bodies land on its bottom,
   or at the scene's `floor` (canvas y) when set.
 - **`constraints`** on a layer rig it, as Blender's do: `{"type": "ik", "lower",
   "target", "pivot", "tip", "bend"}` turns it (the upper bone) and its child

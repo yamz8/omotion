@@ -87,7 +87,7 @@ materials; video layers and tracking; imported models; billowing layers.
 
 Done since: bodies tumble (turned boxes meeting the ground and each
 other with their corners: they rock, roll over, slide off slopes and rest on
-a face); models in glTF exports and in physics; films previewed in the
+a face; with their own outlines and shapes, so round things roll); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property; several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
@@ -96,7 +96,7 @@ particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire 
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
-Still to do there: bodies with their own shapes rather than boxes; particles
+Still to do there: particles
 hidden behind what's nearer (they're drawn over the world, but stop at the
 ground); fluids in 3D; light probes, and true shadow maps (a light's
 shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).

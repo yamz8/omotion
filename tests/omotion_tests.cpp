@@ -2321,6 +2321,31 @@ private slots:
             QVERIFY2(std::abs(lying - std::round(lying / 90) * 90) < 3, qPrintable(QString::number(lying)));
         }
 
+        // A body with an outline of its own meets the floor by it: a ball
+        // thrown along rolls on, turning, where a box would stop.
+        {
+            QImage disc(40, 40, QImage::Format_ARGB32);
+            disc.fill(Qt::transparent);
+            QPainter painter(&disc);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setBrush(Qt::red);
+            painter.setPen(Qt::NoPen);
+            painter.drawEllipse(QRectF(0, 0, 40, 40));
+            painter.end();
+            disc.save(dir.filePath("disc.png"));
+            Scene rolling = Scene::fromJson(QJsonDocument::fromJson(R"({"width": 600, "height": 100, "duration": 2, "layers": [
+                {"name": "ball", "source": "disc.png", "x": 30, "y": 79,
+                 "keys": {"x": [{"t": 0, "v": 30}, {"t": 0.1, "v": 50}]}}]})").object());
+            QVERIFY(Physics::setBody(rolling, 0, {{"bounce", 0}, {"friction", .8}}, &error));
+            QCOMPARE(Physics::bake(rolling, assets, 0, 2, &error), 1);
+            const double turned = std::abs(rolling.value(rolling.layers[0], "rotation", 2));
+            const double went = rolling.value(rolling.layers[0], "x", 2) - 30;
+            QVERIFY2(turned > 180, qPrintable(QString::number(turned)));
+            QVERIFY2(went > 100, qPrintable(QString::number(went)));
+            // Rolling, not sliding: as far as its edge has turned.
+            QVERIFY2(std::abs(went - turned / 180 * M_PI * 20) < went * .35, qPrintable(QString("%1 %2").arg(went).arg(turned)));
+        }
+
         // In a world: dropped from up high, it lands on the ground there.
         QTemporaryDir worldDir;
         const QString project = madeUpWorld(worldDir);
