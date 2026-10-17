@@ -1725,6 +1725,81 @@ private slots:
         QVERIFY(backend.curveNames().isEmpty());
     }
 
+    void changesAreDescribedInWords() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene before = twoSquares(dir, assets);
+        Scene after = before;
+        after.layers[1].keys["x"] = {Key{0, 10}, Key{1, 90}};
+        after.layers[0].blend = "screen";
+        after.camera.base["zoom"] = 2;
+        after.duration = 6;
+        after.layers.removeAt(0);
+        Layer extra;
+        extra.name = "rain";
+        after.layers << extra;
+        const QStringList lines = Project::describeChanges(before, after);
+        QVERIFY2(lines.contains("added rain"), qPrintable(lines.join(" | ")));
+        QVERIFY(lines.contains("took away under"));
+        QVERIFY(lines.contains("over: keys on x"));
+        QVERIFY(lines.contains("camera: zoom"));
+        QVERIFY(lines.contains("scene: duration"));
+        QVERIFY(Project::describeChanges(before, before).isEmpty());
+    }
+
+    void searchRanksOperatorsByWhatsTyped() {
+        const QStringList names{"Export a video", "Free view", "Cut tool", "Fill the hole by the AI", "Keyframe everything", "Undo"};
+        QCOMPARE(Project::rankMatches("cut", names), QList<int>({2}));
+        QCOMPARE(Project::rankMatches("fr vi", names), QList<int>({1}));
+        // Starting the name counts most, then starting a word, then inside one.
+        QCOMPARE(Project::rankMatches("e", names).first(), 0);
+        QCOMPARE(Project::rankMatches("ai", names), QList<int>({3}));
+        QVERIFY(Project::rankMatches("zebra", names).isEmpty());
+        QCOMPARE(Project::rankMatches("", names).size(), names.size());
+    }
+
+    void anAgentsChangesAreOneStepToKeepOrTakeBack() {
+        QTemporaryDir dir;
+        // An agent that slows the scene down by editing scene.json, as one
+        // would, and says so; another that fails halfway.
+        const QString agent = dir.filePath("agent.sh");
+        writeText(agent, "#!/bin/sh\n[ \"$1\" = -p ] || exit 3\nsed -i 's/\"fps\": 30/\"fps\": 24/' scene.json\necho 'Made it 24 fps.'\n");
+        const QString failing = dir.filePath("failing.sh");
+        writeText(failing, "#!/bin/sh\nsed -i 's/\"fps\": 30/\"fps\": 12/' scene.json\necho 'no credit' >&2\nexit 1\n");
+        QFile::setPermissions(agent, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QFile::setPermissions(failing, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        qputenv("OMOTION_AGENT", agent.toUtf8());
+        Backend backend;
+        QVERIFY(backend.agentAvailable());
+        QVERIFY(backend.open(writePicture(dir.filePath("p.png"))));
+        backend.select(0);
+        backend.adjust("x", 5);  // Something to undo from before.
+        backend.askAgent("make it slower");
+        QVERIFY(backend.agentBusy());
+        QVERIFY(!backend.busy().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.agentBusy(), 10000);
+        QCOMPARE(backend.scene().fps, 24.0);
+        QVERIFY(backend.agentReview());
+        QCOMPARE(backend.agentReply(), QString("Made it 24 fps."));
+        QVERIFY2(backend.agentChanges().contains("scene: fps"), qPrintable(backend.agentChanges().join(" | ")));
+        backend.takeBackAgent();
+        QCOMPARE(backend.scene().fps, 30.0);
+        QVERIFY(!backend.agentReview());
+        // One undo took it all back; the edit before it is still there.
+        QCOMPARE(backend.values()["x"].toDouble(), backend.scene().layers.at(0).base.value("x"));
+        QVERIFY(backend.canUndo());
+        // An agent that fails leaves nothing behind, and says why.
+        qputenv("OMOTION_AGENT", failing.toUtf8());
+        backend.askAgent("break it");
+        QTRY_VERIFY_WITH_TIMEOUT(!backend.agentBusy(), 10000);
+        QCOMPARE(backend.scene().fps, 30.0);
+        QVERIFY(!backend.agentReview());
+        QVERIFY(backend.error().contains("no credit"));
+        backend.flush();
+        QCOMPARE(Project::load(backend.projectPath(), nullptr).fps, 30.0);
+        qunsetenv("OMOTION_AGENT");
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

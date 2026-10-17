@@ -1589,4 +1589,148 @@ int importImage(Scene &scene, const QString &directory, const QString &path, QSt
     return scene.layers.size() - 1;
 }
 
+QStringList describeChanges(const Scene &before, const Scene &after) {
+    QStringList lines;
+    const QJsonObject a = before.toJson(), b = after.toJson();
+    auto byName = [](const QJsonObject &scene) {
+        QMap<QString, QJsonObject> layers;
+        for (const QJsonValue &value : scene.value("layers").toArray())
+            layers.insert(value.toObject().value("name").toString(), value.toObject());
+        return layers;
+    };
+    // Which fields of an object differ: animated properties as "keys on x",
+    // the rest by name.
+    auto fields = [](const QJsonObject &from, const QJsonObject &to) {
+        QStringList changed, keyed;
+        QSet<QString> names;
+        for (const QString &key : from.keys())
+            names.insert(key);
+        for (const QString &key : to.keys())
+            names.insert(key);
+        QStringList sorted(names.begin(), names.end());
+        std::sort(sorted.begin(), sorted.end());
+        for (const QString &name : sorted) {
+            if (name == "name" || from.value(name) == to.value(name))
+                continue;
+            if (name == "keys") {
+                const QJsonObject k1 = from.value(name).toObject(), k2 = to.value(name).toObject();
+                QSet<QString> props;
+                for (const QString &key : k1.keys())
+                    props.insert(key);
+                for (const QString &key : k2.keys())
+                    props.insert(key);
+                QStringList list(props.begin(), props.end());
+                std::sort(list.begin(), list.end());
+                for (const QString &prop : list)
+                    if (k1.value(prop) != k2.value(prop))
+                        keyed << prop;
+            } else {
+                changed << name;
+            }
+        }
+        QStringList words;
+        if (!changed.isEmpty())
+            words << changed.join(", ");
+        if (!keyed.isEmpty())
+            words << "keys on " + keyed.join(", ");
+        return words.join("; ");
+    };
+    const auto was = byName(a), now = byName(b);
+    for (auto it = now.begin(); it != now.end(); ++it)
+        if (!was.contains(it.key()))
+            lines << "added " + it.key();
+    for (auto it = was.begin(); it != was.end(); ++it)
+        if (!now.contains(it.key()))
+            lines << "took away " + it.key();
+    for (auto it = now.begin(); it != now.end(); ++it)
+        if (was.contains(it.key())) {
+            const QString what = fields(was.value(it.key()), it.value());
+            if (!what.isEmpty())
+                lines << it.key() + ": " + what;
+        }
+    // The camera is left out of the file while it's untouched, so it's
+    // compared property by property.
+    QStringList cameraChanged, cameraKeyed;
+    for (const QString &property : Scene::cameraProperties()) {
+        const double was = before.camera.base.value(property, Scene::defaultValue(property));
+        const double is = after.camera.base.value(property, Scene::defaultValue(property));
+        // x and y default to the canvas's middle.
+        const bool middle = property == "x" || property == "y";
+        if (!middle && was != is)
+            cameraChanged << property;
+        if (middle && before.camera.base.value(property, property == "x" ? before.width / 2.0 : before.height / 2.0) !=
+                          after.camera.base.value(property, property == "x" ? after.width / 2.0 : after.height / 2.0))
+            cameraChanged << property;
+        const auto keysOf = [&](const Scene &scene) {
+            QList<QPair<double, double>> list;
+            for (const Key &key : scene.camera.keys.value(property))
+                list << qMakePair(key.t, key.v);
+            return list;
+        };
+        if (keysOf(before) != keysOf(after))
+            cameraKeyed << property;
+    }
+    QStringList camera;
+    if (!cameraChanged.isEmpty())
+        camera << cameraChanged.join(", ");
+    if (!cameraKeyed.isEmpty())
+        camera << "keys on " + cameraKeyed.join(", ");
+    if (!camera.isEmpty())
+        lines << "camera: " + camera.join("; ");
+    const QString world = fields(a.value("world").toObject(), b.value("world").toObject());
+    if (!world.isEmpty())
+        lines << "world: " + world;
+    QJsonObject sceneA = a, sceneB = b;
+    for (const QString &key : {"layers", "camera", "world"}) {
+        sceneA.remove(key);
+        sceneB.remove(key);
+    }
+    const QString rest = fields(sceneA, sceneB);
+    if (!rest.isEmpty())
+        lines << "scene: " + rest;
+    // The order of layers, when that's all that changed among them.
+    QStringList orderA, orderB;
+    for (const QJsonValue &value : a.value("layers").toArray())
+        orderA << value.toObject().value("name").toString();
+    for (const QJsonValue &value : b.value("layers").toArray())
+        orderB << value.toObject().value("name").toString();
+    QStringList keptA = orderA, keptB = orderB;
+    keptA.removeIf([&](const QString &name) { return !orderB.contains(name); });
+    keptB.removeIf([&](const QString &name) { return !orderA.contains(name); });
+    if (keptA != keptB)
+        lines << "the layers' order";
+    return lines;
+}
+
+QList<int> rankMatches(const QString &query, const QStringList &names) {
+    const QStringList words = query.toLower().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    QList<QPair<int, int>> scored;
+    for (int i = 0; i < names.size(); ++i) {
+        const QString name = names.at(i).toLower();
+        const QStringList parts = name.split(QRegularExpression("[^\\w]+"), Qt::SkipEmptyParts);
+        int score = 0;
+        bool all = true;
+        for (const QString &word : words) {
+            int best = 0;
+            for (int p = 0; p < parts.size(); ++p)
+                if (parts.at(p).startsWith(word))
+                    best = std::max(best, p == 0 ? 30 : 20);
+            if (best == 0 && name.contains(word))
+                best = 5;
+            if (best == 0) {
+                all = false;
+                break;
+            }
+            score += best;
+        }
+        if (all)
+            scored << qMakePair(-score, i);  // Highest first; ties keep the list's order.
+    }
+    std::stable_sort(scored.begin(), scored.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
+    QList<int> order;
+    for (const auto &pair : scored)
+        order << pair.second;
+    return order;
+}
+
 }

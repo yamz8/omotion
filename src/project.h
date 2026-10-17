@@ -136,6 +136,17 @@ void renameCutSource(Scene &scene, const QString &from, const QString &to);
 // Moves a layer's pivot to a canvas point without moving the layer.
 void setPivot(Scene &scene, AssetCache &assets, int layer, const QPointF &point, double t);
 
+// What changed between two versions of a scene, in a few words a line:
+// layers added and taken away, and for each layer (and the camera, the
+// world and the scene) which properties and keys changed.
+QStringList describeChanges(const Scene &before, const Scene &after);
+
+// How well a typed query matches each of some names (operators, for the
+// search box), best first: the indexes of those that match at all. Every
+// word typed must start a word of the name, or appear in it; starts of
+// words and the name's start count most.
+QList<int> rankMatches(const QString &query, const QStringList &names);
+
 // Copies an image into the project's assets and adds it as a layer on top.
 int importImage(Scene &scene, const QString &directory, const QString &path, QString *error);
 

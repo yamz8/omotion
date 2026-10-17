@@ -5,6 +5,7 @@
 #include <QFileSystemWatcher>
 #include <QJsonObject>
 #include <QObject>
+#include <QProcess>
 #include <functional>
 #include <QPointF>
 #include <QPolygonF>
@@ -92,6 +93,14 @@ class Backend : public QObject {
     // The graph editor: the selected layer's (or the camera's) animated
     // properties, by name.
     Q_PROPERTY(QStringList curveNames READ curveNames NOTIFY valuesChanged)
+    // Saying what you want: an agent (Claude Code, or OMOTION_AGENT) works on
+    // the project through scene.json and the CLI while the window follows;
+    // then what it changed waits to be kept or taken back.
+    Q_PROPERTY(bool agentAvailable READ agentAvailable CONSTANT)
+    Q_PROPERTY(bool agentBusy READ agentBusy NOTIFY agentChanged)
+    Q_PROPERTY(bool agentReview READ agentReview NOTIFY agentChanged)
+    Q_PROPERTY(QString agentReply READ agentReply NOTIFY agentChanged)
+    Q_PROPERTY(QStringList agentChanges READ agentChanges NOTIFY agentChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -187,6 +196,13 @@ public:
     };
     QList<Curve> curves(int samples = 240) const;
     QStringList curveNames() const;
+    bool agentAvailable() const { return !agentProgram().isEmpty(); }
+    bool agentBusy() const { return m_agent != nullptr; }
+    bool agentReview() const { return m_agentReview; }
+    QString agentReply() const { return m_agentReply; }
+    QStringList agentChanges() const { return m_agentChanges; }
+    // The agent's program: OMOTION_AGENT, or Claude Code where it's installed.
+    static QString agentProgram();
 
     const Scene &scene() const { return m_scene; }
     AssetCache &assets() { return m_assets; }
@@ -259,6 +275,16 @@ public:
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.
     Q_INVOKABLE void moveKey(const QString &property, int index, double t, double v);
+    // Hands words to the agent, with what's selected and the playhead;
+    // stopping it puts everything back. Its changes are one undo step, kept
+    // or taken back when it's done.
+    Q_INVOKABLE void askAgent(const QString &request);
+    Q_INVOKABLE void cancelAgent();
+    Q_INVOKABLE void keepAgent();
+    Q_INVOKABLE void takeBackAgent();
+    // The search box's order for a query over operator names (see
+    // Project::rankMatches).
+    Q_INVOKABLE QVariantList rankCommands(const QString &query, const QStringList &names) const;
     // Redoes every step that's out of date, in order, in the background.
     Q_INVOKABLE void redoStale();
     // A world setting: hazeColor, hazeDensity, grain, shutter (degrees) or
@@ -414,6 +440,7 @@ signals:
     void aiPromptChanged();
     void downloadChanged();
     void viewChanged();
+    void agentChanged();
 
 private:
     void setError(const QString &error);
@@ -535,6 +562,14 @@ private:
     Scene m_keyDragBase;
     bool m_keyDragging = false;
     QList<KeyClip> m_clipboard;
+    QProcess *m_agent = nullptr;
+    Scene m_agentBefore;
+    int m_agentUndoMark = 0;
+    bool m_agentReview = false;
+    bool m_agentCancelled = false;
+    QString m_agentReply;
+    QStringList m_agentChanges;
+    void agentFinished();
     bool m_freeView = false;
     // The free view orbits a point: from yaw and pitch (degrees) at a
     // distance (meters).

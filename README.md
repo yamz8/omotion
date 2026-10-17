@@ -84,6 +84,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF or PNG frames (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
+| `F3` / `Ctrl+K` | Say or search: type to find any operator by name and `Enter` runs it; or say what you want ("make the car jump over the crest") and `Ctrl+Enter` hands it to Claude Code (see [Saying what you want](#saying-what-you-want)) |
 | `Space` | Play / pause |
 | `,` `.` | Previous / next frame |
 | `<` `>` | Previous / next keyframe |
@@ -140,6 +141,20 @@ layer it stands in, so it rides the camera move with its surroundings, and
 
 In the inspector, the ◆ beside a property means it's animated. Clicking ◇
 starts animating just that property at the playhead.
+
+
+## Saying what you want
+
+`F3` (or `Ctrl+K`, or *Say or search…* in the top bar) finds any operator
+by name. Words that aren't an operator go to an agent: Claude Code, where
+it's installed and signed in (or the program `OMOTION_AGENT` names). It
+runs in the project folder with omotion's command line and scene.json to
+work with, told what's selected and where the playhead is; the window shows
+its changes as it saves them, and `Esc` stops it and puts everything back.
+When it's done, it says what it did and the window lists what changed in
+the scene: `Enter` keeps it, `Esc` takes it back, and later one `Ctrl+Z`
+does. Claude Code talks to Anthropic's servers, so the request and the
+parts of the project it reads go there.
 
 ## AI
 

@@ -332,6 +332,139 @@ void Backend::moveKey(const QString &property, int index, double t, double v) {
     changed();
 }
 
+QString Backend::agentProgram() {
+    const QString chosen = qEnvironmentVariable("OMOTION_AGENT");
+    if (!chosen.isEmpty())
+        return QFileInfo(chosen).isExecutable() ? chosen : QStandardPaths::findExecutable(chosen);
+    // Started from the launcher, the PATH may not have where Claude Code
+    // lives; its usual places are looked in too.
+    const QString home = QDir::homePath();
+    const QString found = QStandardPaths::findExecutable("claude");
+    if (!found.isEmpty())
+        return found;
+    return QStandardPaths::findExecutable("claude", {home + "/.local/bin", home + "/.claude/local",
+                                                     home + "/.local/share/mise/shims",
+                                                     home + "/.local/share/mise/command-wrappers/bin", "/usr/local/bin"});
+}
+
+QVariantList Backend::rankCommands(const QString &query, const QStringList &names) const {
+    QVariantList order;
+    for (const int index : Project::rankMatches(query, names))
+        order << index;
+    return order;
+}
+
+void Backend::askAgent(const QString &request) {
+    if (!hasProject() || m_agent || request.trimmed().isEmpty())
+        return;
+    const QString program = agentProgram();
+    if (program.isEmpty())
+        return setError("Saying what you want needs Claude Code: install it (claude.com/claude-code) and sign in, "
+                        "or point OMOTION_AGENT at another agent.");
+    if (m_playing)
+        togglePlay();
+    // What's on screen goes to disk first: the agent works from the file.
+    flush();
+    m_agentBefore = m_scene;
+    m_agentUndoMark = int(m_undo.size());
+    m_agentReview = false;
+    m_agentCancelled = false;
+    m_agentReply.clear();
+    m_agentChanges.clear();
+    const QString omotion = QCoreApplication::applicationFilePath();
+    const QString selected = m_cameraSelected ? QString("the camera")
+                             : m_selected >= 0  ? QString("the layer \"%1\"").arg(m_scene.layers.at(m_selected).name)
+                                                : QString("nothing");
+    const QString context =
+        QString("You are directing an omotion animation project: the current folder. scene.json is the truth; "
+                "the omotion window has it open and shows every change to it as it's saved. Work through the "
+                "omotion command line, %1 (run \"%1 --help\" for all it does, and \"%1 info .\" for the scene "
+                "with each layer's place), or by editing scene.json, keeping it valid JSON and every field you "
+                "don't mean to change. Stay in this folder. The person is looking at %2, with the playhead at "
+                "%3 s of %4 s. When you're done, reply with one short sentence on what you changed.")
+            .arg(omotion, selected)
+            .arg(m_time, 0, 'f', 2)
+            .arg(m_scene.duration, 0, 'f', 2);
+    m_agent = new QProcess(this);
+    m_agent->setWorkingDirectory(m_directory);
+    m_agent->setProcessChannelMode(QProcess::SeparateChannels);
+    connect(m_agent, &QProcess::finished, this, &Backend::agentFinished);
+    connect(m_agent, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            agentFinished();
+    });
+    m_agent->start(program, {"-p", request, "--append-system-prompt", context, "--permission-mode", "acceptEdits",
+                             "--allowedTools", QString("Bash(%1:*)").arg(omotion), "Read", "Edit", "Write", "Glob", "Grep"});
+    setBusy("Claude is on it: " + request.left(80) + (request.size() > 80 ? "…" : "") + "   ·   Esc stops");
+    emit agentChanged();
+}
+
+void Backend::cancelAgent() {
+    if (!m_agent)
+        return;
+    m_agentCancelled = true;
+    m_agent->kill();
+}
+
+void Backend::agentFinished() {
+    if (!m_agent)
+        return;
+    QProcess *agent = m_agent;
+    m_agent = nullptr;
+    const bool started = agent->error() != QProcess::FailedToStart;
+    const QString reply = QString::fromUtf8(agent->readAllStandardOutput()).trimmed();
+    const QString errors = QString::fromUtf8(agent->readAllStandardError()).trimmed();
+    const bool ok = started && agent->exitStatus() == QProcess::NormalExit && agent->exitCode() == 0;
+    agent->deleteLater();
+    setBusy({});
+    // Whatever it saved last is read now, not when the watcher gets to it.
+    m_reloadTimer.stop();
+    reloadFromDisk();
+    // Everything it did is one step back to how it was.
+    const QJsonObject before = m_agentBefore.toJson();
+    while (m_undo.size() > m_agentUndoMark)
+        m_undo.removeLast();
+    const bool changedAnything = m_scene.toJson() != before;
+    if (m_agentCancelled || !ok) {
+        if (changedAnything) {
+            m_scene = m_agentBefore;
+            changed();
+        }
+        emit historyChanged();
+        emit agentChanged();
+        if (!m_agentCancelled)
+            setError("The agent stopped: " + (errors.isEmpty() ? reply.isEmpty() ? QString("it didn't start.") : reply : errors.left(400)));
+        else
+            setNotice("Stopped; nothing it did was kept.");
+        return;
+    }
+    if (changedAnything) {
+        m_undo.append(before);
+        m_redo.clear();
+    }
+    emit historyChanged();
+    m_agentReply = reply.isEmpty() ? QString("Done.") : reply;
+    m_agentChanges = changedAnything ? Project::describeChanges(m_agentBefore, m_scene) : QStringList{"Nothing in the scene changed."};
+    m_agentReview = true;
+    emit agentChanged();
+}
+
+void Backend::keepAgent() {
+    if (!m_agentReview)
+        return;
+    m_agentReview = false;
+    emit agentChanged();
+}
+
+void Backend::takeBackAgent() {
+    if (!m_agentReview)
+        return;
+    m_agentReview = false;
+    if (Project::serialize(m_scene) != Project::serialize(m_agentBefore))
+        undo();
+    emit agentChanged();
+}
+
 void Backend::setWorldValue(const QString &name, const QVariant &value) {
     if (!World::info(m_scene).valid)
         return;

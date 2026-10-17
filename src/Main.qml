@@ -29,9 +29,12 @@ ApplicationWindow {
     property bool particleMenuVisible: false
     property bool saveMotionVisible: false
     property bool quitConfirmVisible: false
+    readonly property bool commandBoxVisible: commandBox.visible
     // Editing shortcuts go quiet while an overlay is up.
-    readonly property bool ready: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible && !saveMotionVisible
-                                  && backend.aiPrompt === "" && backend.busy === ""
+    // Ready but for the search box: what its operators can do once it closes.
+    readonly property bool idle: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible && !saveMotionVisible
+                                 && backend.aiPrompt === "" && backend.busy === ""
+    readonly property bool ready: idle && !commandBoxVisible
     readonly property bool hasLayer: ready && backend.selected >= 0
     // Something whose properties edits act on: a layer, or the camera.
     readonly property bool hasTarget: ready && (backend.selected >= 0 || backend.cameraSelected)
@@ -65,6 +68,9 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: {
             if (win.quitConfirmVisible) win.quitConfirmVisible = false;
+            else if (commandBox.visible) commandBox.close();
+            else if (backend.agentBusy) backend.cancelAgent();
+            else if (backend.agentReview) backend.takeBackAgent();
             else if (backend.handle >= 0) backend.endHandle(false);
             else if (backend.aiPrompt !== "") backend.dismissAiPrompt();
             else if (backend.downloading) backend.cancelDownload();
@@ -163,6 +169,9 @@ ApplicationWindow {
 
     // The 3D view: the free view, looking at what's selected, and grabbing
     // a piece of the world (G), kept to an axis with X, Y or Z.
+    // Say or search: every operator by name, or words for the agent.
+    Shortcut { sequences: ["F3", "Ctrl+K"]; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !backend.agentBusy && !commandBox.visible; onActivated: commandBox.open() }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.agentReview && backend.tool === "move" && !commandBox.visible; onActivated: backend.keepAgent() }
     Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: timeline.curves = !timeline.curves }
     Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
@@ -249,6 +258,11 @@ ApplicationWindow {
                     visible: backend.exporting
                     text: "Exporting " + Math.round(backend.exportProgress * 100) + "%  ·  Esc cancels"
                     color: win.muted
+                }
+                ToolButton {
+                    text: "Say or search…  F3"
+                    visible: backend.hasProject && !backend.agentBusy
+                    onClicked: commandBox.open()
                 }
                 ToolButton {
                     // AI steps made from something that has changed since.
@@ -1073,6 +1087,55 @@ ApplicationWindow {
                 Label { text: "Enter " + (backend.aiPrompt === "download" ? "downloads" : "installs") + "   ·   Esc not now"; color: theme.accent }
             }
         }
+    }
+
+    // What the agent did, to keep or take back.
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 230
+        visible: backend.agentReview
+        width: Math.min(640, parent.width - 40)
+        height: reviewColumn.implicitHeight + 28
+        radius: 10
+        color: "#f0141417"
+        border.color: theme.accent
+        ColumnLayout {
+            id: reviewColumn
+            anchors.fill: parent
+            anchors.margins: 14
+            spacing: 6
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: backend.agentReply
+                color: win.text
+                font.pixelSize: 15
+            }
+            Repeater {
+                model: backend.agentChanges
+                delegate: Label {
+                    required property string modelData
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: "·  " + modelData
+                    color: win.muted
+                    font.pixelSize: 12
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Space plays it   ·   Enter keeps   ·   Esc takes it back"; color: theme.accent; Layout.fillWidth: true }
+                ToolButton { text: "Keep"; onClicked: { backend.keepAgent(); win.focusCanvas() } }
+                ToolButton { text: "Take back"; onClicked: { backend.takeBackAgent(); win.focusCanvas() } }
+            }
+        }
+    }
+
+    CommandBox {
+        id: commandBox
+        anchors.fill: parent
+        onClosed: win.focusCanvas()
     }
 
     HelpOverlay {

@@ -4,6 +4,7 @@
         <file alias="Timeline.qml">Timeline.qml</file>
         <file alias="Inspector.qml">Inspector.qml</file>
         <file alias="Outliner.qml">Outliner.qml</file>
+        <file alias="CommandBox.qml">CommandBox.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="WorldView.qml">WorldView.qml</file>
         <file alias="shadow.png">shadow.png</file>
