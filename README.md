@@ -151,6 +151,27 @@ In the inspector, the ◆ beside a property means it's animated. Clicking ◇
 starts animating just that property at the playhead.
 
 
+## Films
+
+Several shots in a row, as Blender's sequencer does: a film is a small
+JSON file beside the projects, listing them in order, each with the
+stretch of it to use and how it joins the one before.
+
+```json
+{"fps": 30, "shots": [
+  {"project": "arrival.omotion"},
+  {"project": "jump.omotion", "transition": "dissolve", "length": 0.6},
+  {"project": "world.omotion", "from": 0.5, "to": 3, "transition": "fade", "length": 0.8}]}
+```
+
+`transition` is `cut` (the default), `dissolve` and `wipe` (overlapping
+the shot before by `length` seconds), or `fade` (down to black and up
+again over `length`). The film is the first shot's size unless it says
+`width` and `height`; other shapes are fitted in with bars. Render it with
+`omotion film film.json film.mp4` (or a folder for frames, `--scale 0.5`
+for half size), or look at a moment with `--frame <seconds> frame.png`.
+Sound isn't carried over yet.
+
 ## Saying what you want
 
 `F3` (or `Ctrl+K`, or *Say or search…* in the top bar) finds any operator

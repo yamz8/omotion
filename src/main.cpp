@@ -18,6 +18,7 @@
 #include "ai.h"
 #include "backend.h"
 #include "exporter.h"
+#include "film.h"
 #include "gltf.h"
 #include "physics.h"
 #include "graphview.h"
@@ -103,6 +104,11 @@ const char *Usage = R"(Usage:
                                          from the time they're keyed moving at; baked into keyframes
   omotion empty <project> <name> <x,y> [--parent <layer>]
                                          Add an empty: a point to aim at or move by, drawn as a cross
+  omotion film <film.json> <output> [--scale <factor>]
+  omotion film <film.json> --frame <seconds> <output.png>
+                                         Shots in a row, from a film file: each an omotion project
+                                         (or a stretch of one) joined by cuts, dissolves, fades or
+                                         wipes; rendered as render does (see the README's Films)
   omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
                                          pictures, its pieces and camera moving as they do; a flat
                                          scene as cards moving as its layers do
@@ -951,7 +957,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.
@@ -991,6 +997,36 @@ int main(int argc, char *argv[]) {
         const QString problem = Ai::instance().problem();
         out << (problem.isEmpty() ? QString("The AI is ready (models in %1).").arg(Ai::modelDirectory()) : problem) << "\n";
         return problem.isEmpty() ? 0 : 1;
+    }
+    // A film isn't a project: its file names the projects.
+    if (headless && args.at(1) == "film") {
+        auto filmFail = [](const QString &message) {
+            QTextStream(stderr) << "omotion: " << message << "\n";
+            return 1;
+        };
+        if (args.size() < 4)
+            return filmFail("film takes a film file and an output.");
+        Film film;
+        QString error;
+        if (!film.load(args.at(2), &error))
+            return filmFail(error);
+        if (args.at(3) == "--frame") {
+            if (args.size() != 6)
+                return filmFail("film --frame takes a time and a .png.");
+            if (!film.frame(args.at(4).toDouble(), film.size()).save(args.at(5)))
+                return filmFail(QString("Couldn't write %1.").arg(args.at(5)));
+            return 0;
+        }
+        const double scale = args.size() == 6 && args.at(4) == "--scale" ? args.at(5).toDouble() : 1;
+        if (!(scale > 0 && scale <= 4))
+            return filmFail("Scale films between 0 and 4 times their size.");
+        QSize size(int(std::lround(film.size().width() * scale)), int(std::lround(film.size().height() * scale)));
+        size = QSize(std::max(2, size.width() - size.width() % 2), std::max(2, size.height() - size.height() % 2));
+        const Exporter::Source source = [&film](int frame, const QSize &at) { return film.frame(frame / film.fps(), at); };
+        if (!Exporter::runFrames(source, film.frameCount(), film.fps(), size, QFileInfo(args.at(3)).absoluteFilePath(), &error))
+            return filmFail(error);
+        QTextStream(stdout) << QFileInfo(args.at(3)).absoluteFilePath() << "\n";
+        return 0;
     }
     if (headless) {
         const bool short_ = args.at(1) == "split" || args.at(1) == "clean" || args.at(1) == "info" || args.at(1) == "world" ||

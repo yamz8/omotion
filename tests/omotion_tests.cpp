@@ -19,6 +19,7 @@
 #include "scene.h"
 #include "select.h"
 #include "steps.h"
+#include "film.h"
 #include "gltf.h"
 #include "physics.h"
 #include "theme.h"
@@ -2171,6 +2172,51 @@ private slots:
         scene.raw["look"] = QJsonObject{};
         const QImage backSharp = renderFrame(scene, assets, 0);
         QVERIFY(differences(back, backSharp) > 20);
+    }
+
+    void filmsJoinShots() {
+        QTemporaryDir dir;
+        // Three one-colour shots: red, green and blue, two seconds each.
+        auto shot = [&](const QString &name, const QColor &colour) {
+            QImage image(64, 32, QImage::Format_RGB32);
+            image.fill(colour);
+            const QString picture = dir.filePath(name + ".png");
+            image.save(picture);
+            const QString project = Project::open(picture, nullptr);
+            Scene scene = Project::load(project, nullptr);
+            scene.duration = 2;
+            Project::save(project, scene, nullptr);
+            return QFileInfo(project).fileName();
+        };
+        const QString red = shot("red", Qt::red), green = shot("green", Qt::green), blue = shot("blue", Qt::blue);
+        writeText(dir.filePath("film.json"), QJsonDocument(QJsonObject{{"fps", 10}, {"shots", QJsonArray{
+            QJsonObject{{"project", red}},
+            QJsonObject{{"project", green}, {"transition", "dissolve"}, {"length", 1}},
+            QJsonObject{{"project", blue}, {"from", .5}, {"transition", "fade"}, {"length", 1}}}}}).toJson());
+        Film film;
+        QString error;
+        QVERIFY2(film.load(dir.filePath("film.json"), &error), qPrintable(error));
+        // 2 + 2 - 1 overlapped + 1.5.
+        QCOMPARE(film.duration(), 4.5);
+        QCOMPARE(film.frameCount(), 45);
+        const QSize size = film.size();
+        QCOMPARE(film.frame(.5, size).pixelColor(10, 10), QColor(Qt::red));
+        // Half way through the dissolve, half and half.
+        const QColor mixed = film.frame(1.5, size).pixelColor(10, 10);
+        QVERIFY(std::abs(mixed.red() - 128) < 4 && std::abs(mixed.green() - 128) < 4);
+        QCOMPARE(film.frame(2.5, size).pixelColor(10, 10), QColor(Qt::green));
+        // Through black: green goes down to it, then blue comes up.
+        QVERIFY(film.frame(2.95, size).pixelColor(10, 10).green() < 40);
+        QVERIFY(film.frame(3.05, size).pixelColor(10, 10).blue() < 40);
+        QCOMPARE(film.frame(4, size).pixelColor(10, 10), QColor(Qt::blue));
+        // Written out as frames.
+        const Exporter::Source source = [&film](int frame, const QSize &at) { return film.frame(frame / film.fps(), at); };
+        QVERIFY2(Exporter::runFrames(source, film.frameCount(), film.fps(), size, dir.filePath("frames/"), &error), qPrintable(error));
+        QVERIFY(QFile::exists(dir.filePath("frames/0045.png")));
+        // Broken films say why.
+        writeText(dir.filePath("bad.json"), R"({"shots": [{"project": "red.omotion", "transition": "spin"}]})");
+        QVERIFY(!film.load(dir.filePath("bad.json"), &error));
+        QVERIFY(error.contains("spin"));
     }
 
     void surfacesWrapSolidsFacingOut() {

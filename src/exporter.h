@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <functional>
 
 #include "scene.h"
 
@@ -32,6 +33,12 @@ public:
     // Runs an export to the end on a local event loop; for the command line.
     static bool run(const Scene &scene, const QString &directory, const QString &output, QString *error,
                     double scale = 1);
+    // The same for frames from anywhere (a film's): count of them at fps,
+    // each made at size by source.
+    using Source = std::function<QImage(int frame, const QSize &size)>;
+    bool startFrames(const Source &source, int count, double fps, const QSize &size, const QString &output);
+    static bool runFrames(const Source &source, int count, double fps, const QSize &size, const QString &output,
+                          QString *error);
 
 signals:
     void progress(double fraction);
@@ -42,8 +49,10 @@ private:
     void writeFrames();
     void done(bool ok, const QString &message);
 
+    QImage next(int frame);
     Scene m_scene;
     AssetCache m_assets;
+    Source m_source;
     QProcess *m_process = nullptr;
     QString m_output;
     QString m_partial;

@@ -155,8 +155,7 @@ void Exporter::feed() {
     // One frame a turn: the window keeps drawing between them, and ffmpeg
     // asks for the next as it takes in this one.
     if (m_next < m_count && m_process->bytesToWrite() < MaxBuffered) {
-        const QImage frame = renderFrame(m_scene, m_assets, m_scene.frameTime(m_next), m_size)
-                                 .convertToFormat(QImage::Format_ARGB32);
+        const QImage frame = next(m_next).convertToFormat(QImage::Format_ARGB32);
         // Rows can be padded, so write them one by one at their real width.
         for (int y = 0; y < frame.height(); ++y)
             m_process->write(reinterpret_cast<const char *>(frame.constScanLine(y)), frame.width() * 4);
@@ -177,7 +176,7 @@ void Exporter::writeFrames() {
     // A few frames per turn of the event loop keeps the window responsive.
     const int stop = std::min(m_count, m_next + 4);
     for (; m_next < stop; ++m_next) {
-        const QImage frame = renderFrame(m_scene, m_assets, m_scene.frameTime(m_next), m_size);
+        const QImage frame = next(m_next);
         const QString path = QDir(m_output).filePath(QString("%1.png").arg(m_next + 1, 4, 10, QChar('0')));
         if (!frame.save(path, "PNG")) {
             done(false, QString("Couldn't write %1.").arg(path));
@@ -189,6 +188,44 @@ void Exporter::writeFrames() {
         done(true, m_output);
     else
         QTimer::singleShot(0, this, &Exporter::writeFrames);
+}
+
+QImage Exporter::next(int frame) {
+    return m_source ? m_source(frame, m_size) : renderFrame(m_scene, m_assets, m_scene.frameTime(frame), m_size);
+}
+
+bool Exporter::startFrames(const Source &source, int count, double fps, const QSize &size, const QString &output) {
+    // A stand-in scene of the frames' size and length, with no sound.
+    Scene frames;
+    frames.width = size.width();
+    frames.height = size.height();
+    frames.fps = fps;
+    frames.duration = count / std::max(1.0, fps);
+    if (!start(frames, {}, output, 1))
+        return false;
+    m_source = source;
+    m_count = count;
+    return true;
+}
+
+bool Exporter::runFrames(const Source &source, int count, double fps, const QSize &size, const QString &output,
+                         QString *error) {
+    Exporter exporter;
+    if (!exporter.startFrames(source, count, fps, size, output)) {
+        if (error)
+            *error = exporter.error();
+        return false;
+    }
+    bool result = false;
+    QEventLoop loop;
+    QObject::connect(&exporter, &Exporter::finished, &loop, [&](bool ok, const QString &message) {
+        result = ok;
+        if (!ok && error)
+            *error = message;
+        loop.quit();
+    });
+    loop.exec();
+    return result;
 }
 
 void Exporter::cancel() {
