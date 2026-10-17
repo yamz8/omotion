@@ -89,7 +89,8 @@ Done since: bodies tumble (spin from knocks and the ground, rest on a
 side); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property; several tracked points solving the footage's move (in its
-plane: shift, turn, growth) or stabilizing it.
+plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
+video's frame under the playhead.
 
 Still to do there: collisions with shapes rather than boxes; 3D particles
 beyond dust; cloth and real fluids; light probes and shadows from added

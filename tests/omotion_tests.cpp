@@ -2630,6 +2630,15 @@ private slots:
         QCOMPARE(path.size(), 10);
         QVERIFY2(std::abs(path.last().x() - (37 + 54)) < 3, qPrintable(QString::number(path.last().x())));
         QVERIFY(std::abs(path.last().y() - 47) < 3);
+        // Cut from the video at 0.5 s, the piece is that frame's square,
+        // and the video is left whole.
+        Scene cutting = scene;
+        const int piece = Project::cutOut(cutting, assets, clip, QPolygonF({{55, 35}, {80, 35}, {80, 60}, {55, 60}}), .5, true, &error);
+        QVERIFY2(piece >= 0, qPrintable(error));
+        const QImage still = assets.image(cutting.layers.at(piece).source);
+        QVERIFY(qGray(still.pixel(still.width() / 2, still.height() / 2)) > 220);
+        QCOMPARE(cutting.layers.at(clip).source, scene.layers.at(clip).source);
+        QVERIFY(!cutting.layers.at(piece).raw["cut"].toObject()["punch"].toBool());
         // The empty it made follows: where the square is, there it is.
         const Layer &empty = scene.layers.at(follower);
         QVERIFY(empty.raw["empty"].toBool());

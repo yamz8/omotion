@@ -359,8 +359,10 @@ photo.omotion/
   picture), `"speed", "seed"}`, looping with the scene.
 - A video layer has **`video`**: `{"frames"` (a folder of the project, with
   `00001.jpg` on), `"count", "fps", "start"` (seconds into the scene),
-  `"speed", "loop"}`; its `source` is its first frame. Cuts and AI select
-  work on that first frame.
+  `"speed", "loop"}`; its `source` is its first frame. Cuts, colour and AI
+  select work on the frame under the playhead: a piece cut from a video is
+  a still of that frame (its cut's `"frame"`), and leaves no hole, as the
+  video plays on whole under it.
 - A layer with **`drawing`** has no `source`: `{"frames": [{"t", "strokes":
   [{"color", "width", "points": [[x, y], ...]}]}]}`, points in the layer's
   pixels; each frame shows from its `t` until the next.

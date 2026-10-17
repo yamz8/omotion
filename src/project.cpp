@@ -481,12 +481,22 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
     const QDir assetDir(dir.filePath("assets"));
     bool punched = false;
 
+    const bool video = source.raw.contains("video");
     for (const int i : piecesOf(scene, source.name)) {
         Layer &piece = scene.layers[i];
         QJsonObject cut = piece.raw.value("cut").toObject();
         const QPolygonF polygon = polygonFrom(cut.value("polygon"));
         const double feather = std::max(0.0, cut.value("feather").toDouble());
-        const bool punch = cut.value("punch").toBool(true);
+        // Cut from a video, a piece is a still of the frame it was cut at,
+        // and leaves no hole: the video plays on under it.
+        QImage still;
+        if (video) {
+            still = assets.image(cut.value("frame").toString(root)).convertToFormat(QImage::Format_ARGB32);
+            if (still.isNull())
+                return fail(QString("Couldn't read %1, the frame %2 was cut from.").arg(cut.value("frame").toString(), piece.name));
+        }
+        QImage &pixels = video ? still : remaining;
+        const bool punch = !video && cut.value("punch").toBool(true);
         const bool fill = punch && cut.value("fill").toBool(false);
         const int margin = int(std::ceil(feather));
         // A shape is an outline, or for shapes like depth layers that come in
@@ -505,7 +515,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         } else if (polygon.size() >= 3) {
             shape = polygon.boundingRect().toAlignedRect();
         }
-        const QRect area = shape.adjusted(-margin, -margin, margin, margin) & remaining.rect();
+        const QRect area = shape.adjusted(-margin, -margin, margin, margin) & pixels.rect();
         if (area.isEmpty())
             return fail(QString("The shape of %1 doesn't cover any of %2.").arg(piece.name, source.name));
 
@@ -529,11 +539,11 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         } else {
             mask = maskFor(polygon, feather, area);
         }
-        const QImage before = fill ? remaining.copy(area) : QImage();
+        const QImage before = fill ? pixels.copy(area) : QImage();
         QImage image(area.size(), QImage::Format_ARGB32);
         bool opaque = false;
         for (int y = 0; y < area.height(); ++y) {
-            QRgb *from = reinterpret_cast<QRgb *>(remaining.scanLine(area.y() + y)) + area.x();
+            QRgb *from = reinterpret_cast<QRgb *>(pixels.scanLine(area.y() + y)) + area.x();
             QRgb *to = reinterpret_cast<QRgb *>(image.scanLine(y));
             const uchar *coverage = mask.constScanLine(y);
             for (int x = 0; x < area.width(); ++x) {
@@ -557,7 +567,7 @@ bool rebuildCuts(Scene &scene, AssetCache &assets, int index, QString *error, in
         if (!opaque)
             return fail(QString("The shape of %1 only covers transparent pixels.").arg(piece.name));
         if (fill)
-            fillHole(remaining, before, area, cut.value("fillWith").toString() == "ai");
+            fillHole(pixels, before, area, cut.value("fillWith").toString() == "ai");
 
         // A reshaped piece keeps its pivot on the same spot of the picture,
         // so its position and every keyframe still mean what they did.
@@ -645,6 +655,15 @@ int cutOut(Scene &scene, AssetCache &assets, int index, const QPolygonF &polygon
                                    {"fill", punch && fill},
                                    {"fillWith", punch && fill && aiFill ? "ai" : "smooth"},
                                    {"order", order}};
+    if (source.raw.contains("video")) {
+        // The frame under the playhead, kept as a still; the video keeps
+        // playing whole beneath it.
+        QJsonObject cut = layer.raw.value("cut").toObject();
+        cut["frame"] = sourceAt(source, t);
+        cut["punch"] = false;
+        cut["fill"] = false;
+        layer.raw["cut"] = cut;
+    }
 
     Scene edited = scene;
     edited.layers.insert(index + 1, layer);
@@ -857,7 +876,8 @@ QPolygonF smartOutline(const Scene &scene, AssetCache &assets, int index, const 
         *regions = 0;
     if (index < 0 || index >= scene.layers.size())
         return {};
-    const QString source = scene.layers.at(index).source;
+    // A video's frame under the playhead, as it's seen.
+    const QString source = sourceAt(scene.layers.at(index), t);
     const QSizeF full = assets.size(source);
     if (full.isEmpty())
         return {};
@@ -909,7 +929,8 @@ QPolygonF aiOutline(const Scene &scene, AssetCache &assets, int index, const QLi
         *choices = 0;
     if (index < 0 || index >= scene.layers.size() || take.isEmpty())
         return {};
-    const QString source = scene.layers.at(index).source;
+    // A video's frame under the playhead, as it's seen.
+    const QString source = sourceAt(scene.layers.at(index), t);
     const QSizeF full = assets.size(source);
     if (full.isEmpty())
         return {};
