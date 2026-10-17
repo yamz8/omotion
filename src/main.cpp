@@ -18,6 +18,7 @@
 #include "ai.h"
 #include "backend.h"
 #include "exporter.h"
+#include "graphview.h"
 #include "portalfilepicker.h"
 #include "project.h"
 #include "steps.h"
@@ -795,6 +796,7 @@ int main(int argc, char *argv[]) {
 
     QQuickStyle::setStyle("Material");
     qmlRegisterType<SceneView>("Omotion", 1, 0, "SceneView");
+    qmlRegisterType<GraphView>("Omotion", 1, 0, "GraphView");
 
     Theme theme;
     PortalFilePicker picker;

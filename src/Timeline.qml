@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import Omotion
 
 // The layer stack, top layer first, with each layer's keyframes along time.
 Rectangle {
@@ -14,6 +15,8 @@ Rectangle {
     readonly property real duration: backend.sceneInfo.duration || 1
     readonly property int nameWidth: 230
     property int renaming: -1
+    // The graph editor in place of the tracks: the selected thing's curves.
+    property bool curves: false
 
     function rename(index) { renaming = index; }
     function picked(layer, t) {
@@ -42,6 +45,12 @@ Rectangle {
                 text: backend.playing ? "❚❚" : "▶"
                 onClicked: { backend.togglePlay(); timeline.done() }
             }
+            ToolButton {
+                text: timeline.curves ? "Keys" : "Curves"
+                onClicked: { timeline.curves = !timeline.curves; timeline.done() }
+                ToolTip.visible: hovered
+                ToolTip.text: "Ctrl+Tab: the graph editor, the selected layer's properties as curves"
+            }
             Label {
                 text: timeline.format(backend.time) + " / " + timeline.format(timeline.duration) + " s"
                 color: win.text
@@ -56,7 +65,9 @@ Rectangle {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideLeft
-                text: "drag ◆ to retime    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
+                text: timeline.curves
+                      ? "drag a key in time and value (Shift: value only)    click a property to see it alone    Ctrl+Tab keys"
+                      : "drag ◆ to retime    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
                 color: win.muted
             }
         }
@@ -70,7 +81,7 @@ Rectangle {
             Label {
                 Layout.preferredWidth: timeline.nameWidth
                 leftPadding: 12
-                text: "LAYERS"
+                text: timeline.curves ? "CURVES" : "LAYERS"
                 color: win.muted
                 font.pixelSize: 11
                 font.letterSpacing: 1
@@ -164,8 +175,71 @@ Rectangle {
             }
         }
 
+        // The graph editor: the properties beside their curves.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: timeline.curves
+            spacing: 0
+            ListView {
+                id: curveNames
+                Layout.preferredWidth: timeline.nameWidth
+                Layout.fillHeight: true
+                clip: true
+                model: backend.curveNames
+                boundsBehavior: Flickable.StopAtBounds
+                header: Label {
+                    width: curveNames.width
+                    leftPadding: 12
+                    topPadding: 4
+                    bottomPadding: 2
+                    text: (backend.cameraSelected ? "Camera" : backend.values.name || "") + (graph.solo ? "" : ", all fitted")
+                    color: win.muted
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+                delegate: Rectangle {
+                    required property string modelData
+                    width: curveNames.width
+                    height: 22
+                    color: graph.solo === modelData ? "#1e2130" : "transparent"
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 12
+                        spacing: 8
+                        Rectangle { width: 10; height: 3; radius: 1; anchors.verticalCenter: parent.verticalCenter; color: graph.colour(modelData) }
+                        Label { text: modelData; color: graph.solo === "" || graph.solo === modelData ? win.text : win.muted }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { graph.solo = graph.solo === modelData ? "" : modelData; timeline.done() }
+                    }
+                }
+            }
+            GraphView {
+                id: graph
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.rightMargin: 14
+                editor: backend
+                accent: theme.accent
+                // A property no longer animated (or on another layer) isn't soloed.
+                Connections {
+                    target: backend
+                    function onValuesChanged() { if (graph.solo !== "" && backend.curveNames.indexOf(graph.solo) < 0) graph.solo = "" }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onPressed: function (mouse) { graph.press(mouse.x, mouse.y) }
+                    onPositionChanged: function (mouse) { graph.drag(mouse.x, mouse.y, (mouse.modifiers & Qt.ShiftModifier) !== 0) }
+                    onReleased: { graph.release(); timeline.done() }
+                }
+            }
+        }
+
         ListView {
             id: rows
+            visible: !timeline.curves
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

@@ -275,6 +275,63 @@ void Backend::redoStale() {
     });
 }
 
+QList<Backend::Curve> Backend::curves(int samples) const {
+    QList<Curve> list;
+    const Layer *layer = targetLayer();
+    if (!layer)
+        return list;
+    for (auto it = layer->keys.begin(); it != layer->keys.end(); ++it) {
+        if (it->isEmpty())
+            continue;
+        Curve curve;
+        curve.property = it.key();
+        curve.keys = *it;
+        curve.low = std::numeric_limits<double>::max();
+        curve.high = std::numeric_limits<double>::lowest();
+        for (int i = 0; i <= samples; ++i) {
+            const double v = m_scene.ownValue(*layer, curve.property, m_scene.duration * i / samples);
+            curve.samples << v;
+            curve.low = std::min(curve.low, v);
+            curve.high = std::max(curve.high, v);
+        }
+        for (const Key &key : curve.keys) {
+            curve.low = std::min(curve.low, key.v);
+            curve.high = std::max(curve.high, key.v);
+        }
+        list << curve;
+    }
+    // In the order the inspector lists them.
+    const QStringList order = Scene::propertiesOf(*layer) + Scene::cameraProperties();
+    std::stable_sort(list.begin(), list.end(), [&](const Curve &a, const Curve &b) {
+        return order.indexOf(a.property) < order.indexOf(b.property);
+    });
+    return list;
+}
+
+QStringList Backend::curveNames() const {
+    QStringList names;
+    for (const Curve &curve : curves(2))
+        names << curve.property;
+    return names;
+}
+
+void Backend::moveKey(const QString &property, int index, double t, double v) {
+    Layer *layer = m_scene.at(target());
+    if (!layer || !layer->keys.contains(property) || !std::isfinite(t) || !std::isfinite(v))
+        return;
+    QList<Key> &keys = layer->keys[property];
+    if (index < 0 || index >= keys.size())
+        return;
+    checkpoint();
+    // A frame's room either side, so keys keep their order.
+    const double frame = 1 / std::max(1.0, m_scene.fps);
+    const double earliest = index > 0 ? keys.at(index - 1).t + frame : 0;
+    const double latest = index + 1 < keys.size() ? keys.at(index + 1).t - frame : m_scene.duration;
+    keys[index].t = std::clamp(t, earliest, std::max(earliest, latest));
+    keys[index].v = v;
+    changed();
+}
+
 void Backend::setWorldValue(const QString &name, const QVariant &value) {
     if (!World::info(m_scene).valid)
         return;

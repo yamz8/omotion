@@ -113,6 +113,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
+| `Ctrl+Tab` | The graph editor (or Curves on the timeline): the selected layer's or camera's animated properties as curves over the scene, each fitted to the height; drag a key in time and value (Shift: value only), click a property to see it alone with its values |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
 | `V` | Select the camera (or its row at the top of the timeline): drag the canvas to pan, wheel to zoom, `[ ]` to turn, `K` to keyframe |
 | `D` | Split the picture into layers by depth (AI) |

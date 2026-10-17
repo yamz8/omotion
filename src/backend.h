@@ -89,6 +89,9 @@ class Backend : public QObject {
     // out of date across the scene.
     Q_PROPERTY(QVariantList steps READ steps NOTIFY valuesChanged)
     Q_PROPERTY(int staleSteps READ staleSteps NOTIFY sceneChanged)
+    // The graph editor: the selected layer's (or the camera's) animated
+    // properties, by name.
+    Q_PROPERTY(QStringList curveNames READ curveNames NOTIFY valuesChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -173,6 +176,17 @@ public:
         QList<QPolygonF> grid;
     };
     Gizmo gizmo() const;
+    // An animated property of what's selected, as the graph editor shows it:
+    // its keys, and its own value (links left out, so keys lie on it) at
+    // even steps over the scene, with the lowest and highest it gets.
+    struct Curve {
+        QString property;
+        QList<Key> keys;
+        QList<double> samples;
+        double low = 0, high = 1;
+    };
+    QList<Curve> curves(int samples = 240) const;
+    QStringList curveNames() const;
 
     const Scene &scene() const { return m_scene; }
     AssetCache &assets() { return m_assets; }
@@ -241,6 +255,10 @@ public:
     // Does one of the selected layer's steps again, or differently (an
     // action from its list); the AI's run in the background.
     Q_INVOKABLE void runStep(const QString &step, const QString &action);
+    // Moves a key of the selected thing's property to a new time and value
+    // (between its neighbours); a drag of them is one undo step, from
+    // beginGesture to endGesture.
+    Q_INVOKABLE void moveKey(const QString &property, int index, double t, double v);
     // Redoes every step that's out of date, in order, in the background.
     Q_INVOKABLE void redoStale();
     // A world setting: hazeColor, hazeDensity, grain, shutter (degrees) or

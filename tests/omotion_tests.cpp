@@ -1692,6 +1692,39 @@ private slots:
         QCOMPARE(Steps::of(scene, assets, root).first().actions, QStringList({"make"}));
     }
 
+    void graphEditorShowsCurvesAndMovesKeys() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(writePicture(dir.filePath("p.png"))));
+        backend.select(0);
+        QVERIFY(backend.curves().isEmpty());
+        backend.keyProperty("x");
+        backend.seek(1);
+        backend.setProperty("x", 300);
+        backend.keyProperty("opacity");
+        QCOMPARE(backend.curveNames(), QStringList({"x", "opacity"}));
+        const Backend::Curve x = backend.curves(10).first();
+        QCOMPARE(x.keys.size(), 2);
+        QCOMPARE(x.samples.size(), 11);
+        QCOMPARE(x.high, 300.0);
+        // A key dragged later and higher, as one undo step; it can't pass
+        // its neighbour.
+        backend.beginGesture();
+        backend.moveKey("x", 0, .5, 50);
+        backend.moveKey("x", 0, 2.5, 80);
+        backend.endGesture();
+        const QList<Key> keys = backend.scene().layers.at(0).keys.value("x");
+        QCOMPARE(keys.at(0).v, 80.0);
+        QVERIFY(keys.at(0).t < keys.at(1).t);
+        QVERIFY(std::abs(keys.at(0).t - (1 - 1.0 / 30)) < 1e-9);
+        backend.undo();
+        QCOMPARE(backend.scene().layers.at(0).keys.value("x").at(0).t, 0.0);
+        QCOMPARE(backend.scene().layers.at(0).keys.value("x").at(0).v, backend.scene().layers.at(0).base.value("x"));
+        // The camera's curves, when it's selected.
+        backend.selectCamera();
+        QVERIFY(backend.curveNames().isEmpty());
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

@@ -163,6 +163,7 @@ ApplicationWindow {
 
     // The 3D view: the free view, looking at what's selected, and grabbing
     // a piece of the world (G), kept to an axis with X, Y or Z.
+    Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: timeline.curves = !timeline.curves }
     Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
     Shortcut {
@@ -700,7 +701,8 @@ ApplicationWindow {
         Timeline {
             id: timeline
             Layout.fillWidth: true
-            Layout.preferredHeight: 200
+            // Curves want more room than rows of keys.
+            Layout.preferredHeight: curves ? 320 : 200
             visible: backend.hasProject
             onDone: win.focusCanvas()
         }
