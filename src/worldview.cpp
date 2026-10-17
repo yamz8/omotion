@@ -31,6 +31,10 @@ void WorldSource::setScene(const Scene &scene, const QString &directory, double 
     m_info = World::info(scene);
     // Meshes only change with the world and the layers' pictures and pivots.
     QJsonObject key{{"world", scene.raw.value("world")}, {"directory", directory}};
+    // The layer behind has triangles only where its picture shows, so a
+    // picture made again under the same name means its mesh again too.
+    if (m_info.valid && !m_info.farPicture.isEmpty())
+        key["far"] = QString::number(QFileInfo(QDir(directory).filePath(m_info.farPicture)).lastModified().toMSecsSinceEpoch());
     QVariantList layers;
     QJsonArray parts;
     if (m_info.valid && !m_info.farDepth.isEmpty())
@@ -470,7 +474,7 @@ struct WorldRenderer::Private {
         control.commandBuffer()->resourceUpdate(batch);
         control.endFrame();
         const QSize got = result.pixelSize;
-        if (Q_BYTE_ORDER != Q_LITTLE_ENDIAN || result.data.size() < qsizetype(got.width()) * got.height() * 4) {
+        if (Q_BYTE_ORDER != Q_LITTLE_ENDIAN || result.data.size() != qsizetype(got.width()) * got.height() * 4) {
             QImage image(reinterpret_cast<const uchar *>(result.data.constData()), got.width(), got.height(),
                          QImage::Format_RGBA8888_Premultiplied);
             if (rhi->isYUpInFramebuffer())
@@ -479,6 +483,7 @@ struct WorldRenderer::Private {
         }
         // Turned the right way up and its red and blue swapped in one pass,
         // rather than a copy for each: a shutter draws a frame many times.
+        // (Rows padded out, which the size would show, take the way above.)
         QImage image(got, QImage::Format_ARGB32_Premultiplied);
         const bool flip = rhi->isYUpInFramebuffer();
         const quint32 *from = reinterpret_cast<const quint32 *>(result.data.constData());

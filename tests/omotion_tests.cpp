@@ -3590,6 +3590,13 @@ private slots:
             const float u = bv[bt[i] * 5 + 3];
             QVERIFY2(u > .25f - .15f && u < .35f + .15f, qPrintable(QString::number(u)));
         }
+        // Showing nowhere, there's no layer behind (not one with no
+        // triangles, which would be drawn as if its points were them).
+        strip.fill(Qt::transparent);
+        QVERIFY(strip.save(QDir(project).filePath("assets/world/none.png")));
+        world["far"] = QJsonObject{{"depth", "assets/world/d.png"}, {"picture", "assets/world/none.png"}};
+        scene.raw["world"] = world;
+        QVERIFY(World::mesh(scene, assets, World::FarLayer).isNull());
     }
 
     void aiSaysWhatsMissing() {

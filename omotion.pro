@@ -2,11 +2,7 @@ QT += core gui gui-private quick3d qml quick quickcontrols2 dbus network concurr
 
 CONFIG += c++17 release
 
-# The simulations and picture work are tight loops over grids and pixels,
-# which GCC vectorizes fully only at -O3 (no fast-math, so results are the
-# same to the bit).
-QMAKE_CXXFLAGS_RELEASE -= -O2
-QMAKE_CXXFLAGS_RELEASE += -O3
+include(flags.pri)
 TARGET = omotion
 TEMPLATE = app
 

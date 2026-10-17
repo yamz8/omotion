@@ -683,7 +683,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
         // three cells round them, for what its smaller copies spill): the
         // rest would be millions of invisible ones drawn every frame.
         std::vector<uchar> shows(size_t(cols) * rows, 0);
-        const QImage seen = QImage(QDir(assets.directory()).filePath(world.farPicture)).convertToFormat(QImage::Format_Alpha8);
+        const QImage seen = assets.image(world.farPicture).convertToFormat(QImage::Format_Alpha8);
         if (seen.isNull())
             std::fill(shows.begin(), shows.end(), 1);
         for (int y = 0; y < seen.height(); ++y) {
@@ -693,7 +693,9 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
                 if (line[x])
                     shows[r * cols + size_t(std::min(cols - 1, int(qint64(x) * cols / seen.width())))] = 1;
         }
-        constexpr int Spill = 3;
+        // Three cells, or eight of the picture's pixels where cells are
+        // smaller, so its copies three times smaller still show whole.
+        const int Spill = seen.isNull() ? 0 : std::max(3, int(std::ceil(8.0 * cols / seen.width())));
         std::vector<uchar> across(shows.size(), 0);
         for (int r = 0; r < rows; ++r)
             for (int c = 0; c < cols; ++c)
@@ -707,6 +709,10 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
                 shows[size_t(r) * cols + c] = any;
             }
         const qsizetype kept = std::count(shows.begin(), shows.end(), uchar(1));
+        // Nowhere it shows: no layer behind at all, rather than one with no
+        // triangles (which would be drawn as if its points were them).
+        if (kept == 0)
+            return {};
         mesh.indices.resize(kept * 6 * qsizetype(sizeof(quint32)));
         quint32 *i = reinterpret_cast<quint32 *>(mesh.indices.data());
         for (int r = 0; r < rows; ++r)

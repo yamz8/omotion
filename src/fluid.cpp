@@ -155,8 +155,8 @@ void step(Field &f, const Settings &s, const QPointF &source, double t, double d
                 f.v[i] -= float(s.swirl * 10 * (gx / length) * turn[i] * dt);
             }
     }
-    f.carry({&f.u}, dt);
-    f.carry({&f.v}, dt);
+    // The air carries itself: all of its flow by the flow as it was.
+    f.carry({&f.u, &f.v}, dt);
     f.project();
     // Only fire has heat: smoke's stays nothing.
     if (s.fire)
@@ -453,9 +453,7 @@ void step3(Field3 &f, const Settings &s, const QVector3D &source, double t, doub
                     f.u[i] += push.x(), f.v[i] += push.y(), f.z[i] += push.z();
                 }
     }
-    f.carry({&f.u}, dt);
-    f.carry({&f.v}, dt);
-    f.carry({&f.z}, dt);
+    f.carry({&f.u, &f.v, &f.z}, dt);
     f.project();
     if (s.fire)
         f.carry({&f.smoke, &f.heat}, dt);
