@@ -50,7 +50,7 @@ Rectangle {
                 readonly property string kind: modelData.kind
                 readonly property bool selected: kind === "camera" ? backend.cameraSelected
                                                  : kind === "world" ? backend.selected < 0 && !backend.cameraSelected
-                                                 : backend.selected === modelData.index
+                                                 : backend.selected === modelData.index || backend.alsoSelected.indexOf(modelData.index) >= 0
                 width: list.width
                 height: 24
                 color: selected ? "#1e2130" : "transparent"
@@ -59,7 +59,9 @@ Rectangle {
 
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: {
+                    onClicked: function (mouse) {
+                        // Ctrl+click adds to the selection.
+                        if ((mouse.modifiers & Qt.ControlModifier) && row.modelData.index >= 0) { backend.selectAlso(row.modelData.index); outliner.done(); return }
                         if (row.kind === "camera") backend.selectCamera();
                         else if (row.kind === "world") backend.select(-1);
                         else backend.select(row.modelData.index);

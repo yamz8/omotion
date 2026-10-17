@@ -41,6 +41,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantMap sceneInfo READ sceneInfo NOTIFY sceneChanged)
     Q_PROPERTY(QVariantList layers READ layers NOTIFY sceneChanged)
     Q_PROPERTY(int selected READ selected WRITE select NOTIFY selectedChanged)
+    // Layers selected along with it (Ctrl+click): moved with it.
+    Q_PROPERTY(QVariantList alsoSelected READ alsoSelected NOTIFY selectedChanged)
     Q_PROPERTY(bool cameraSelected READ cameraSelected NOTIFY selectedChanged)
     Q_PROPERTY(QVariantMap values READ values NOTIFY valuesChanged)
     Q_PROPERTY(double time READ time WRITE seek NOTIFY timeChanged)
@@ -78,7 +80,8 @@ class Backend : public QObject {
     // through the shot's camera.
     Q_PROPERTY(bool freeView READ freeView NOTIFY viewChanged)
     // A piece being moved by a handle or grabbed with G: 0 freely, 1 to 3
-    // along x, y or z, 4 turning; -1 when nothing is.
+    // along x, y or z, 4 to 6 turning about y (yaw), x (pitch) or z (roll);
+    // -1 when nothing is.
     Q_PROPERTY(int handle READ handle NOTIFY viewChanged)
     // The outliner: the camera, the world and its pieces (as they were cut
     // from each other), then the layers over it, as a tree of rows.
@@ -115,6 +118,12 @@ public:
     QVariantMap sceneInfo() const;
     QVariantList layers() const;
     int selected() const { return m_selected; }
+    QVariantList alsoSelected() const {
+        QVariantList list;
+        for (const int i : m_also)
+            list << i;
+        return list;
+    }
     bool cameraSelected() const { return m_cameraSelected; }
     QVariantMap values() const;
     double time() const { return m_time; }
@@ -178,7 +187,9 @@ public:
         QList<QPointF> corners;
         QPointF pivot;
         QList<QPointF> arrows;
-        QPolygonF ring;
+        QPolygonF ring, ringPitch, ringRoll;
+        // The others selected with it: their boxes' corners.
+        QList<QList<QPointF>> others;
         // In the free view, the shot's camera: its eye and the corners of
         // its frame; and a grid on the ground, a line a meter.
         QList<QPointF> camera;
@@ -225,6 +236,8 @@ public:
 
     // Layers.
     Q_INVOKABLE void select(int index);
+    // Adds a layer to the selection, or takes it out (Ctrl+click).
+    Q_INVOKABLE void selectAlso(int index);
     // Selects the camera: edits, keyframes and dragging the canvas then move
     // the view rather than a layer.
     Q_INVOKABLE void selectCamera();
@@ -417,14 +430,15 @@ public:
     Q_INVOKABLE void setViewportSize(double width, double height);
     // Picks what's under a view point: layers drawn over a world first (in
     // the shot), then the world's pieces in 3D.
-    Q_INVOKABLE void pickAt(double x, double y);
+    Q_INVOKABLE void pickAt(double x, double y, bool add = false);
     // The handle within reach of a view point (as handle above), or -1.
     Q_INVOKABLE int handleAt(double x, double y, double reach) const;
     // Moving the selected piece of a world (or the camera) by a handle, or
     // grabbed (handle 0): one undo step, or none when cancelled. axis
     // changes what a grab keeps to while it's under way.
     Q_INVOKABLE void beginHandle(int handle, double x, double y);
-    Q_INVOKABLE void handleTo(double x, double y);
+    // With snap, moves go in steps of 10 cm and turns of 15°.
+    Q_INVOKABLE void handleTo(double x, double y, bool snap = false);
     Q_INVOKABLE void setHandleAxis(int axis);
     Q_INVOKABLE void endHandle(bool keep);
 
@@ -596,10 +610,14 @@ private:
     void syncView();
     int m_handle = -1;
     QPointF m_handleStart;
-    QHash<QString, double> m_handleOrigin;
+    QHash<int, QHash<QString, double>> m_handleOrigins;
     QVector3D m_handlePivot;
-    // What a handle moves: the selected world piece, or the camera.
+    // What a handle moves: the selected world piece, or the camera; and with
+    // it, the other world pieces selected.
     int handleTarget() const;
+    QList<int> handleTargets() const;
+    QList<int> m_also;
+    QHash<int, QPointF> m_dragOrigins;
     Exporter m_exporter;
     double m_exportProgress = 0;
     QString m_exportTarget;

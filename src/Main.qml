@@ -454,6 +454,11 @@ ApplicationWindow {
                         // With the camera selected, dragging pans the view.
                         // Otherwise, Shift drags the selected layer even
                         // when another one is on top of it.
+                        // Ctrl+click adds to the selection (or takes out).
+                        if (mouse.modifiers & Qt.ControlModifier) {
+                            backend.pickAt(v.x, v.y, true);
+                            return;
+                        }
                         if (!backend.cameraSelected && !(mouse.modifiers & Qt.ShiftModifier))
                             backend.pickAt(v.x, v.y);
                         // In the free view, a piece of the world moves across
@@ -473,7 +478,8 @@ ApplicationWindow {
                     onPositionChanged: function (mouse) {
                         if (grabbing || handling) {
                             const g = view.toView(mouse.x, mouse.y);
-                            backend.handleTo(g.x, g.y);
+                            // Ctrl snaps: 10 cm steps, 15° turns.
+                            backend.handleTo(g.x, g.y, (mouse.modifiers & Qt.ControlModifier) !== 0);
                             return;
                         }
                         if (orbiting) {
@@ -616,8 +622,8 @@ ApplicationWindow {
                         horizontalAlignment: Text.AlignHCenter
                         lineHeight: 1.3
                         text: backend.handle >= 0
-                              ? (backend.handle === 4 ? "Turning" : backend.handle === 0 ? "Moving" : "Moving along " + ["", "x", "y", "z"][backend.handle])
-                                + "   ·   X, Y, Z keep to an axis (again frees it)   ·   click or Enter to place   ·   right-click or Esc puts it back"
+                              ? (backend.handle >= 4 ? "Turning: " + ["yaw", "pitch", "roll"][backend.handle - 4] : backend.handle === 0 ? "Moving" : "Moving along " + ["", "x", "y", "z"][backend.handle])
+                                + "   ·   X, Y, Z keep to an axis (again frees it)   ·   Ctrl snaps   ·   click or Enter to place   ·   right-click or Esc puts it back"
                               : backend.tool === "pin"
                               ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
                               : backend.tool === "brush"

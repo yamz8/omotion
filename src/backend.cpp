@@ -864,11 +864,35 @@ void Backend::jumpTo(bool end) {
 void Backend::select(int index) {
     if (index < -1 || index >= m_scene.layers.size())
         index = -1;
-    if (index == m_selected && !m_cameraSelected)
+    const bool hadOthers = !m_also.isEmpty();
+    m_also.clear();
+    if (index == m_selected && !m_cameraSelected) {
+        if (hadOthers)
+            emit selectedChanged();
         return;
+    }
     ++m_aiGeneration;
     m_selected = index;
     m_cameraSelected = false;
+    emit selectedChanged();
+    emit valuesChanged();
+}
+
+void Backend::selectAlso(int index) {
+    if (index < 0 || index >= m_scene.layers.size())
+        return;
+    if (m_selected < 0 || m_cameraSelected)
+        return select(index);
+    if (index == m_selected) {
+        // Out of the selection: the next one along leads it.
+        if (m_also.isEmpty())
+            return select(-1);
+        m_selected = m_also.takeFirst();
+    } else if (m_also.contains(index)) {
+        m_also.removeAll(index);
+    } else {
+        m_also.append(index);
+    }
     emit selectedChanged();
     emit valuesChanged();
 }
@@ -880,6 +904,7 @@ void Backend::selectCamera() {
         setTool("move");
     ++m_aiGeneration;
     m_selected = -1;
+    m_also.clear();
     m_cameraSelected = true;
     emit selectedChanged();
     emit valuesChanged();
@@ -1376,6 +1401,11 @@ void Backend::beginDrag(double x, double y, bool along) {
     const Layer &layer = *targetLayer();
     m_dragStart = QPointF(x, y);
     m_dragOrigin = QPointF(m_scene.value(layer, "x", m_time), m_scene.value(layer, "y", m_time));
+    m_dragOrigins.clear();
+    for (const int other : m_also)
+        if (other >= 0 && other < m_scene.layers.size())
+            m_dragOrigins.insert(other, QPointF(m_scene.value(m_scene.layers.at(other), "x", m_time),
+                                               m_scene.value(m_scene.layers.at(other), "y", m_time)));
     m_dragging = true;
     // In a world, the camera and the world's pieces move in 3D.
     m_worldDrag = World::info(m_scene).valid && (m_cameraSelected || World::layers(m_scene).contains(m_selected));
@@ -1439,6 +1469,18 @@ void Backend::dragTo(double x, double y) {
         m_scene.setValue(Scene::CameraIndex, "y", m_time, m_dragOrigin.y() - moved.y());
         changed();
         return;
+    }
+    // The others selected go along, each through its own parent.
+    for (const int other : m_also) {
+        if (other < 0 || other >= m_scene.layers.size() || !m_dragOrigins.contains(other))
+            continue;
+        bool ok = true;
+        const QTransform back = parentTransform(m_scene, m_assets, other, m_time).inverted(&ok);
+        if (!ok)
+            continue;
+        const QPointF delta = back.map(QPointF(x, y)) - back.map(m_dragStart);
+        m_scene.setValue(other, "x", m_time, m_dragOrigins.value(other).x() + delta.x());
+        m_scene.setValue(other, "y", m_time, m_dragOrigins.value(other).y() + delta.y());
     }
     // Positions are in the parent's pixels, so the mouse's movement on the
     // canvas is turned back through the parent before it's applied.
@@ -2543,24 +2585,36 @@ void Backend::frameSelected() {
     emit viewChanged();
 }
 
-void Backend::pickAt(double x, double y) {
-    const bool world = World::info(m_scene).valid;
-    if (!world) {
-        selectAt(x, y);
+void Backend::pickAt(double x, double y, bool add) {
+    int found = -1;
+    if (!World::info(m_scene).valid || !m_freeView) {
+        // What's drawn over the world is in front of it, in the shot.
+        found = emptyNear(x, y, 12);
+        if (found < 0)
+            found = layerAt(m_scene, m_assets, m_time, QPointF(x, y),
+                            World::info(m_scene).valid ? World::layers(m_scene) : QList<int>());
+    }
+    if (found < 0 && World::info(m_scene).valid)
+        found = World::pick(m_scene, m_assets, m_time, view(), viewSize(), QPointF(x, y));
+    if (add) {
+        if (found >= 0)
+            selectAlso(found);
         return;
     }
-    // What's drawn over the world is in front of it, in the shot.
-    if (!m_freeView) {
-        const int empty = emptyNear(x, y, 12);
-        if (empty >= 0)
-            return select(empty);
-        const int over = layerAt(m_scene, m_assets, m_time, QPointF(x, y), World::layers(m_scene));
-        if (over >= 0) {
-            select(over);
-            return;
-        }
-    }
-    select(World::pick(m_scene, m_assets, m_time, view(), viewSize(), QPointF(x, y)));
+    select(found);
+}
+
+QList<int> Backend::handleTargets() const {
+    QList<int> list;
+    const int main = handleTarget();
+    if (main == -1)
+        return list;
+    list << main;
+    if (main != Scene::CameraIndex)
+        for (const int i : m_also)
+            if (World::layers(m_scene).contains(i))
+                list << i;
+    return list;
 }
 
 int Backend::handleTarget() const {
@@ -2655,11 +2709,33 @@ Backend::Gizmo Backend::gizmo() const {
             end = gizmo.pivot;
         gizmo.arrows << end;
     }
+    // Rings about y (yaw), x (pitch) and z (roll), as Blender's turn gizmo.
+    const float r = float(meters * .8);
     for (int i = 0; i <= 48; ++i) {
-        const double angle = 2 * M_PI * i / 48;
+        const float c = float(std::cos(2 * M_PI * i / 48)) * r, s = float(std::sin(2 * M_PI * i / 48)) * r;
         QPointF at;
-        if (World::project(v, size, pivot + QVector3D(float(std::cos(angle) * meters * .8), 0, float(std::sin(angle) * meters * .8)), &at))
+        if (World::project(v, size, pivot + QVector3D(c, 0, s), &at))
             gizmo.ring << at;
+        if (World::project(v, size, pivot + QVector3D(0, c, s), &at))
+            gizmo.ringPitch << at;
+        if (World::project(v, size, pivot + QVector3D(c, s, 0), &at))
+            gizmo.ringRoll << at;
+    }
+    for (const int other : handleTargets().mid(1)) {
+        QList<QVector3D> corners;
+        QVector3D centre;
+        QList<QPointF> points;
+        if (World::box(m_scene, assets, other, m_time, &corners, &centre))
+            for (const QVector3D &corner : corners) {
+                QPointF at;
+                if (!World::project(v, size, corner, &at)) {
+                    points.clear();
+                    break;
+                }
+                points << at;
+            }
+        if (points.size() == 8)
+            gizmo.others << points;
     }
     return gizmo;
 }
@@ -2688,22 +2764,28 @@ int Backend::handleAt(double x, double y, double reach) const {
     }
     if (best > 0)
         return best;
-    for (int i = 1; i < g.ring.size(); ++i)
-        if (distanceToSegment(p, g.ring.at(i - 1), g.ring.at(i)) < reach)
-            return 4;
-    return -1;
+    int ring = -1;
+    nearest = reach;
+    for (const auto &[polygon, id] : {std::pair{&g.ring, 4}, std::pair{&g.ringPitch, 5}, std::pair{&g.ringRoll, 6}})
+        for (int i = 1; i < polygon->size(); ++i) {
+            const double d = distanceToSegment(p, polygon->at(i - 1), polygon->at(i));
+            if (d < nearest)
+                nearest = d, ring = id;
+        }
+    return ring;
 }
 
 void Backend::beginHandle(int handle, double x, double y) {
     const int target = handleTarget();
-    if (target == -1 || handle < 0 || handle > 4)
+    if (target == -1 || handle < 0 || handle > 6)
         return;
     beginGesture();
-    const Layer &layer = *m_scene.at(target);
     m_handle = handle;
     m_handleStart = QPointF(x, y);
-    for (const QString &property : Scene::worldProperties())
-        m_handleOrigin[property] = m_scene.value(layer, property, m_time);
+    m_handleOrigins.clear();
+    for (const int each : handleTargets())
+        for (const QString &property : Scene::worldProperties() + QStringList{"rotation"})
+            m_handleOrigins[each][property] = m_scene.value(*m_scene.at(each), property, m_time);
     QList<QVector3D> corners;
     if (target == Scene::CameraIndex)
         m_handlePivot = World::frame(m_scene, m_assets, m_time).cameraPosition;
@@ -2713,35 +2795,44 @@ void Backend::beginHandle(int handle, double x, double y) {
 }
 
 void Backend::setHandleAxis(int axis) {
-    if (m_handle < 0 || axis < 0 || axis > 4)
+    if (m_handle < 0 || axis < 0 || axis > 6)
         return;
     // Pressing the same axis again frees it, as in Blender.
     m_handle = axis == m_handle ? 0 : axis;
     emit viewChanged();
 }
 
-void Backend::handleTo(double x, double y) {
-    const int target = handleTarget();
-    if (m_handle < 0 || target == -1)
+void Backend::handleTo(double x, double y, bool snap) {
+    const QList<int> targets = handleTargets();
+    if (m_handle < 0 || targets.isEmpty())
         return;
     const World::View v = view();
     const QSizeF size = viewSize();
     const QPointF moved = QPointF(x, y) - m_handleStart;
-    auto set = [&](const QString &property, double value) { m_scene.setValue(target, property, m_time, value); };
-    // Back where it started, so each move is from there.
-    for (const QString &property : Scene::worldProperties())
-        set(property, m_handleOrigin[property]);
+    // Back where they started, so each move is from there.
+    for (const int each : targets)
+        for (auto it = m_handleOrigins[each].begin(); it != m_handleOrigins[each].end(); ++it)
+            m_scene.setValue(each, it.key(), m_time, it.value());
     QPointF pivot;
     if (!World::project(v, size, m_handlePivot, &pivot)) {
         changed();
         return;
     }
-    if (m_handle == 4) {
-        // Turning: by the angle swept about the pivot on screen, clockwise
-        // to the right.
+    if (m_handle >= 4) {
+        // Turning: by the angle swept about the pivot on screen, about the
+        // ring's axis, which turns the other way seen from its far side.
         const QPointF a = m_handleStart - pivot, b = QPointF(x, y) - pivot;
         const double swept = std::atan2(a.x() * b.y() - a.y() * b.x(), a.x() * b.x() + a.y() * b.y()) * 180 / M_PI;
-        set("yaw", m_handleOrigin["yaw"] + swept);
+        const QVector3D axis = m_handle == 4 ? QVector3D(0, 1, 0) : m_handle == 5 ? QVector3D(1, 0, 0) : QVector3D(0, 0, 1);
+        double about = QVector3D::dotProduct(axis, v.position - m_handlePivot) > 0 ? -swept : swept;
+        if (snap)
+            about = std::round(about / 15) * 15;
+        for (const int each : targets) {
+            const bool camera = each == Scene::CameraIndex;
+            // Yaw and roll turn the other way about their axes than pitch.
+            const QString property = m_handle == 4 ? "yaw" : m_handle == 5 ? "pitch" : camera ? "rotation" : "roll";
+            m_scene.setValue(each, property, m_time, m_handleOrigins[each][property] + (m_handle == 5 ? about : -about));
+        }
         changed();
         return;
     }
@@ -2768,9 +2859,17 @@ void Backend::handleTo(double x, double y) {
         }
         shift = axis * float(QPointF::dotProduct(moved, perMeter) / length);
     }
-    set("worldX", m_handleOrigin["worldX"] + shift.x());
-    set("worldY", m_handleOrigin["worldY"] + shift.y());
-    set("worldZ", m_handleOrigin["worldZ"] - shift.z());
+    double dx = shift.x(), dy = shift.y(), dz = shift.z();
+    if (snap) {
+        dx = std::round(dx * 10) / 10;
+        dy = std::round(dy * 10) / 10;
+        dz = std::round(dz * 10) / 10;
+    }
+    for (const int each : targets) {
+        m_scene.setValue(each, "worldX", m_time, m_handleOrigins[each]["worldX"] + dx);
+        m_scene.setValue(each, "worldY", m_time, m_handleOrigins[each]["worldY"] + dy);
+        m_scene.setValue(each, "worldZ", m_time, m_handleOrigins[each]["worldZ"] - dz);
+    }
     changed();
 }
 

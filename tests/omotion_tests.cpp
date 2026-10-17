@@ -1980,6 +1980,59 @@ private slots:
         QVERIFY(backend.scene().value(backend.scene().layers.at(0), "x", .25) > start + (300 - start) * .6);
     }
 
+    void severalPiecesMoveTogetherAndSnap() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        {
+            // A second piece, cut beside the first.
+            Scene scene = Project::load(project, nullptr);
+            AssetCache assets(project);
+            QString error;
+            QVERIFY(Project::cutOut(scene, assets, 0, QPolygonF({QPointF(280, 120), QPointF(340, 120), QPointF(340, 170), QPointF(280, 170)}),
+                                    0, true, &error, "rock", 0, true, false) >= 0);
+            Project::save(project, scene, nullptr);
+        }
+        Backend backend;
+        QVERIFY(backend.open(project));
+        const int piece = backend.scene().indexOf("piece"), rock = backend.scene().indexOf("rock");
+        backend.select(piece);
+        backend.selectAlso(rock);
+        QCOMPARE(backend.alsoSelected(), QVariantList({rock}));
+        QCOMPARE(backend.gizmo().others.size(), 1);
+        // A grab along x, snapped, moves both by the same tenths of a meter.
+        const Backend::Gizmo g = backend.gizmo();
+        backend.beginHandle(1, g.pivot.x(), g.pivot.y());
+        backend.handleTo(g.arrows.at(0).x() + 13, g.arrows.at(0).y(), true);
+        backend.endHandle(true);
+        const double x = backend.scene().layers.at(piece).base.value("worldX");
+        QVERIFY(x > .05);
+        QCOMPARE(std::round(x * 10) / 10, x);
+        QCOMPARE(backend.scene().layers.at(rock).base.value("worldX"), x);
+        // Rings: pitch and roll turn them, snapped to 15°.
+        QCOMPARE(backend.gizmo().ringPitch.size(), 49);
+        for (const int ring : {5, 6}) {
+            const Backend::Gizmo now = backend.gizmo();
+            const QPolygonF &polygon = ring == 5 ? now.ringPitch : now.ringRoll;
+            const QPointF from = polygon.at(6);
+            backend.beginHandle(ring, from.x(), from.y());
+            const QPointF swung = now.pivot + QTransform().rotate(40).map(from - now.pivot);
+            backend.handleTo(swung.x(), swung.y(), true);
+            backend.endHandle(true);
+            const QString property = ring == 5 ? "pitch" : "roll";
+            const double turned = backend.scene().layers.at(rock).base.value(property);
+            QVERIFY2(std::abs(turned) >= 15, qPrintable(QString::number(turned)));
+            QCOMPARE(std::fmod(std::abs(turned), 15.0), 0.0);
+            QCOMPARE(backend.scene().layers.at(piece).base.value(property), turned);
+        }
+        // Ctrl+clicking the leader again hands the lead on; a plain click
+        // starts over.
+        backend.selectAlso(piece);
+        QCOMPARE(backend.selected(), rock);
+        QVERIFY(backend.alsoSelected().isEmpty());
+        backend.select(piece);
+        QVERIFY(backend.alsoSelected().isEmpty());
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

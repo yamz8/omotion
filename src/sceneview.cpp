@@ -8,6 +8,7 @@
 
 #include "world.h"
 #include <algorithm>
+#include <tuple>
 
 namespace {
 constexpr double Margin = 24;
@@ -153,6 +154,16 @@ void SceneView::paintGizmo(QPainter *painter) {
         const QPointF top = (to.map(gizmo.camera.at(1)) + to.map(gizmo.camera.at(2))) / 2;
         painter->drawLine(top, top + (top - to.map(gizmo.camera.at(0))) * .15);
     }
+    // The others selected with it, fainter.
+    for (const QList<QPointF> &box : gizmo.others) {
+        QColor faint = m_accent;
+        faint.setAlpha(120);
+        painter->setPen(QPen(faint, 1.2, Qt::DashLine));
+        for (int a = 0; a < 8; ++a)
+            for (int bit : {1, 2, 4})
+                if (!(a & bit))
+                    painter->drawLine(to.map(box.at(a)), to.map(box.at(a | bit)));
+    }
     if (gizmo.corners.size() == 8) {
         painter->setPen(QPen(m_accent, 1.5, Qt::DashLine));
         for (int a = 0; a < 8; ++a)
@@ -165,11 +176,14 @@ void SceneView::paintGizmo(QPainter *painter) {
         // Blender's colours for x, y and z; the one in use is brighter.
         const QColor colours[3] = {QColor(232, 72, 85), QColor(122, 196, 74), QColor(66, 135, 245)};
         const QPointF pivot = to.map(gizmo.pivot);
-        QPolygonF ring;
-        for (const QPointF &point : gizmo.ring)
-            ring << to.map(point);
-        painter->setPen(QPen(active == 4 ? m_accent : QColor(255, 255, 255, 150), active == 4 ? 2.5 : 1.5));
-        painter->drawPolyline(ring);
+        // The rings, coloured by their axes: yaw about y, pitch x, roll z.
+        for (const auto &[polygon, id, colour] : {std::tuple{&gizmo.ring, 4, colours[1]}, std::tuple{&gizmo.ringPitch, 5, colours[0]},
+                                                 std::tuple{&gizmo.ringRoll, 6, colours[2]}}) {
+            QColor faint = colour;
+            faint.setAlpha(active == id ? 255 : 130);
+            painter->setPen(QPen(active == id ? m_accent : faint, active == id ? 2.5 : 1.3));
+            painter->drawPolyline(to.map(*polygon));
+        }
         for (int i = 0; i < 3; ++i) {
             const QPointF end = to.map(gizmo.arrows.at(i));
             if (QLineF(pivot, end).length() < 4)
@@ -319,6 +333,18 @@ void SceneView::paint(QPainter *painter) {
         painter->drawLine(pivot - QPointF(0, 9), pivot + QPointF(0, 9));
     }
 
+    // Flat layers selected along with it, outlined fainter.
+    for (const QVariant &value : m_backend->alsoSelected()) {
+        const int other = value.toInt();
+        if (other < 0 || other >= scene.layers.size() || (m_backend->world()->active() && World::layers(scene).contains(other)))
+            continue;
+        const QSizeF size = m_backend->assets().size(scene.layers.at(other).source);
+        QColor faint = m_accent;
+        faint.setAlpha(140);
+        painter->setPen(QPen(faint, 1.2, Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPolygon((layerTransform(scene, m_backend->assets(), other, now) * view).map(QRectF(QPointF(), size)));
+    }
     // Empties: crosses, as Blender draws them; the selected one brighter.
     for (int i = 0; i < scene.layers.size(); ++i) {
         const Layer &layer = scene.layers.at(i);
