@@ -6,6 +6,7 @@
 #include <QtConcurrent>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QLineF>
 #include <QPainter>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <limits>
 
+#include "film.h"
 #include "gltf.h"
 #include "physics.h"
 #include "project.h"
@@ -39,6 +41,8 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     // The 3D view follows the scene and the playhead.
     connect(this, &Backend::sceneChanged, this, [this] { m_world.setScene(m_scene, m_directory); });
     connect(this, &Backend::timeChanged, this, [this] { m_world.setTime(m_time); });
+    // Another project, maybe another film beside it.
+    connect(this, &Backend::projectChanged, this, &Backend::filmChanged);
     // The free view follows the world: off when there's none.
     connect(this, &Backend::sceneChanged, this, [this] {
         if (m_freeView && !World::info(m_scene).valid) {
@@ -86,6 +90,13 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     });
 
     connect(&m_exporter, &Exporter::finished, this, [this](bool ok, const QString &message) {
+        // A film's sound goes in once its picture is written.
+        if (m_film) {
+            const std::shared_ptr<Film> film = std::move(m_film);
+            QString error;
+            if (ok && !film->addSound(m_filmOutput, &error))
+                setError(error);
+        }
         m_exportProgress = 0;
         emit exportChanged();
         if (ok)
@@ -134,6 +145,7 @@ QVariantMap Backend::sceneInfo() const {
             {"vanishY", m_scene.vanishPoint().y()},
             {"distance", m_scene.focalDistance()},
             {"look", m_scene.raw.value("look").toObject().toVariantMap()},
+            {"looked", !m_scene.raw.value("look").toObject().isEmpty()},
             {"cameraKeys", [this] {
                  QVariantList times;
                  for (double t : m_scene.keyTimes(Scene::CameraIndex))
@@ -409,6 +421,125 @@ void Backend::moveKey(const QString &property, int index, double t, double v) {
     keys[index].t = std::clamp(t, earliest, std::max(earliest, latest));
     keys[index].v = v;
     changed();
+}
+
+QString Backend::filmPath() const {
+    return hasProject() ? QFileInfo(m_directory).absoluteDir().filePath("film.json") : QString();
+}
+
+QJsonObject Backend::readFilm() const {
+    QFile file(filmPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+bool Backend::writeFilm(const QJsonObject &film) {
+    QSaveFile file(filmPath());
+    if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(film).toJson()) < 0 || !file.commit()) {
+        setError(QString("Couldn't write %1.").arg(filmPath()));
+        return false;
+    }
+    emit filmChanged();
+    return true;
+}
+
+QVariantList Backend::filmShots() const {
+    QVariantList rows;
+    const QString here = QFileInfo(m_directory).fileName();
+    for (const QJsonValue &value : readFilm().value("shots").toArray()) {
+        QVariantMap row = value.toObject().toVariantMap();
+        row["this"] = row.value("project").toString() == here;
+        rows << row;
+    }
+    return rows;
+}
+
+void Backend::addToFilm() {
+    if (!hasProject())
+        return;
+    QJsonObject film = readFilm();
+    QJsonArray shots = film.value("shots").toArray();
+    QJsonObject shot{{"project", QFileInfo(m_directory).fileName()}};
+    if (!shots.isEmpty())
+        shot["transition"] = "cut";
+    shots.append(shot);
+    film["shots"] = shots;
+    if (!film.contains("fps"))
+        film["fps"] = m_scene.fps;
+    if (writeFilm(film))
+        setNotice(QString("A shot of the film in %1, %2 of %3.").arg(filmPath()).arg(shots.size()).arg(shots.size()));
+}
+
+void Backend::setShot(int index, const QString &name, const QVariant &value) {
+    QJsonObject film = readFilm();
+    QJsonArray shots = film.value("shots").toArray();
+    if (index < 0 || index >= shots.size())
+        return;
+    QJsonObject shot = shots.at(index).toObject();
+    if (name == "transition") {
+        if (!QStringList{"cut", "dissolve", "fade", "wipe"}.contains(value.toString()))
+            return;
+        shot["transition"] = value.toString();
+        if (value.toString() != "cut" && !shot.contains("length"))
+            shot["length"] = .5;
+    } else if (name == "length" || name == "from" || name == "to") {
+        bool ok = false;
+        const double number = value.toDouble(&ok);
+        if (!ok || number < 0)
+            return;
+        shot[name] = number;
+    } else {
+        return;
+    }
+    shots[index] = shot;
+    film["shots"] = shots;
+    writeFilm(film);
+}
+
+void Backend::moveShot(int index, int direction) {
+    QJsonObject film = readFilm();
+    QJsonArray shots = film.value("shots").toArray();
+    const int to = index + direction;
+    if (index < 0 || index >= shots.size() || to < 0 || to >= shots.size())
+        return;
+    const QJsonValue moving = shots.at(index);
+    shots.removeAt(index);
+    shots.insert(to, moving);
+    film["shots"] = shots;
+    writeFilm(film);
+}
+
+void Backend::removeShot(int index) {
+    QJsonObject film = readFilm();
+    QJsonArray shots = film.value("shots").toArray();
+    if (index < 0 || index >= shots.size())
+        return;
+    shots.removeAt(index);
+    film["shots"] = shots;
+    writeFilm(film);
+}
+
+void Backend::exportFilm() {
+    if (!hasProject() || m_exporter.busy())
+        return;
+    // Every shot as saved: this one too.
+    flush();
+    auto film = std::make_shared<Film>();
+    QString error;
+    if (!film->load(filmPath(), &error))
+        return setError(error);
+    m_film = film;
+    const QDir renders(QDir(m_directory).filePath("renders"));
+    QDir().mkpath(renders.path());
+    m_filmOutput = renders.filePath("film.mp4");
+    QSize size = film->size();
+    size = QSize(std::max(2, size.width() - size.width() % 2), std::max(2, size.height() - size.height() % 2));
+    const Exporter::Source source = [film](int frame, const QSize &at) { return film->frame(frame / film->fps(), at); };
+    if (!m_exporter.startFrames(source, film->frameCount(), film->fps(), size, m_filmOutput))
+        return setError(m_exporter.error());
+    m_exportProgress = 0;
+    emit exportChanged();
 }
 
 QString Backend::agentProgram() {

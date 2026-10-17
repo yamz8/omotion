@@ -2494,6 +2494,29 @@ private slots:
         QVERIFY(!Project::isModel(dir.filePath("box.png")));
     }
 
+    void theWindowEditsTheFilmBesideIt() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(writePicture(dir.filePath("a.png"))));
+        QVERIFY(backend.filmShots().isEmpty());
+        backend.addToFilm();
+        backend.addToFilm();
+        QCOMPARE(backend.filmShots().size(), 2);
+        QVERIFY(backend.filmShots().first().toMap()["this"].toBool());
+        backend.setShot(1, "transition", "dissolve");
+        backend.setShot(1, "length", .25);
+        backend.setShot(1, "transition", "spin");
+        QCOMPARE(backend.filmShots().at(1).toMap()["transition"].toString(), QString("dissolve"));
+        QCOMPARE(backend.filmShots().at(1).toMap()["length"].toDouble(), .25);
+        backend.moveShot(1, -1);
+        QCOMPARE(backend.filmShots().first().toMap()["transition"].toString(), QString("dissolve"));
+        backend.removeShot(0);
+        QCOMPARE(backend.filmShots().size(), 1);
+        Film film;
+        QString error;
+        QVERIFY2(film.load(backend.filmPath(), &error), qPrintable(error));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

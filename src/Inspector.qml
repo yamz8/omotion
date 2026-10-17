@@ -347,7 +347,7 @@ Rectangle {
 
             // A video layer: when it starts, how fast, looping or not.
             ColumnLayout {
-                visible: backend.selected >= 0 && Object.keys(inspector.v.video || {}).length > 0
+                visible: backend.selected >= 0 && !!(inspector.v.video || {}).frames
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 spacing: 4
@@ -374,7 +374,7 @@ Rectangle {
 
             // An imported model's size.
             RowLayout {
-                visible: backend.selected >= 0 && Object.keys(inspector.v.model || {}).length > 0
+                visible: backend.selected >= 0 && !!(inspector.v.model || {}).file
                 Layout.fillWidth: true
                 spacing: 8
                 Label { text: "Size m"; color: win.text; Layout.preferredWidth: 90 }
@@ -383,7 +383,7 @@ Rectangle {
 
             // A light: its colour, power and reach.
             ColumnLayout {
-                visible: backend.selected >= 0 && Object.keys(inspector.v.light || {}).length > 0
+                visible: backend.selected >= 0 && !!(inspector.v.light || {}).color
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 spacing: 4
@@ -425,7 +425,7 @@ Rectangle {
             }
             // A piece's material, under lights.
             ColumnLayout {
-                visible: backend.selected >= 0 && !!inspector.v.inWorld && Object.keys(inspector.v.light || {}).length === 0
+                visible: backend.selected >= 0 && !!inspector.v.inWorld && !(inspector.v.light || {}).color
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 spacing: 4
@@ -503,7 +503,7 @@ Rectangle {
                 Layout.topMargin: 6
                 spacing: 2
                 readonly property var body: inspector.v.body || {}
-                readonly property bool isBody: Object.keys(body).length > 0
+                readonly property bool isBody: body.mass !== undefined
                 Label { text: "Physics"; color: win.text; font.bold: true }
                 RowLayout {
                     Layout.fillWidth: true

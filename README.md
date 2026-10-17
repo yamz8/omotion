@@ -175,7 +175,10 @@ again over `length`). The film is the first shot's size unless it says
 `omotion film film.json film.mp4` (or a folder for frames, `--scale 0.5`
 for half size), or look at a moment with `--frame <seconds> frame.png`.
 Each shot's sound (its stretch of its track, at its volume) plays where
-the shot is, mixed into MP4 and WebM.
+the shot is, mixed into MP4 and WebM. In the window, `Ctrl+Shift+F` shows
+the film beside the open project (`film.json` in the folder of projects):
+add this project as a shot, pick each shot's transition and its length,
+reorder them, and export the film into `renders/film.mp4`.
 
 ## Saying what you want
 

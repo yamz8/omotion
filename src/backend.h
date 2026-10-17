@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QProcess>
 #include <functional>
+#include <memory>
 #include <QPointF>
 #include <QPolygonF>
 #include <QSizeF>
@@ -104,6 +105,10 @@ class Backend : public QObject {
     Q_PROPERTY(bool agentReview READ agentReview NOTIFY agentChanged)
     Q_PROPERTY(QString agentReply READ agentReply NOTIFY agentChanged)
     Q_PROPERTY(QStringList agentChanges READ agentChanges NOTIFY agentChanged)
+    // The film this project is a shot in (film.json beside it), as rows:
+    // project, from, to, transition, length, and whether it's this one.
+    Q_PROPERTY(QString filmPath READ filmPath NOTIFY filmChanged)
+    Q_PROPERTY(QVariantList filmShots READ filmShots NOTIFY filmChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -209,6 +214,8 @@ public:
     };
     QList<Curve> curves(int samples = 240) const;
     QStringList curveNames() const;
+    QString filmPath() const;
+    QVariantList filmShots() const;
     bool agentAvailable() const { return !agentProgram().isEmpty(); }
     bool agentBusy() const { return m_agent != nullptr; }
     bool agentReview() const { return m_agentReview; }
@@ -336,6 +343,14 @@ public:
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.
     Q_INVOKABLE void moveKey(const QString &property, int index, double t, double v);
+    // Films: this project added as a shot (the film made if there's none),
+    // a shot's transition, length, from or to changed, moved, taken out;
+    // and the film exported to the renders folder, with its sound.
+    Q_INVOKABLE void addToFilm();
+    Q_INVOKABLE void setShot(int shot, const QString &name, const QVariant &value);
+    Q_INVOKABLE void moveShot(int shot, int direction);
+    Q_INVOKABLE void removeShot(int shot);
+    Q_INVOKABLE void exportFilm();
     // Hands words to the agent, with what's selected and the playhead;
     // stopping it puts everything back. Its changes are one undo step, kept
     // or taken back when it's done.
@@ -505,6 +520,7 @@ signals:
     void downloadChanged();
     void viewChanged();
     void agentChanged();
+    void filmChanged();
 
 private:
     void setError(const QString &error);
@@ -626,6 +642,10 @@ private:
     Scene m_keyDragBase;
     bool m_keyDragging = false;
     QList<KeyClip> m_clipboard;
+    QJsonObject readFilm() const;
+    bool writeFilm(const QJsonObject &film);
+    std::shared_ptr<class Film> m_film;
+    QString m_filmOutput;
     QProcess *m_agent = nullptr;
     Scene m_agentBefore;
     int m_agentUndoMark = 0;

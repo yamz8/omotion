@@ -29,10 +29,11 @@ ApplicationWindow {
     property bool particleMenuVisible: false
     property bool saveMotionVisible: false
     property bool quitConfirmVisible: false
+    property bool filmVisible: false
     readonly property bool commandBoxVisible: commandBox.visible
     // Editing shortcuts go quiet while an overlay is up.
     // Ready but for the search box: what its operators can do once it closes.
-    readonly property bool idle: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible && !saveMotionVisible
+    readonly property bool idle: backend.hasProject && !helpVisible && !exportMenuVisible && !quitConfirmVisible && !presetMenuVisible && !particleMenuVisible && !saveMotionVisible && !filmVisible
                                  && backend.aiPrompt === "" && backend.busy === ""
     readonly property bool ready: idle && !commandBoxVisible
     readonly property bool hasLayer: ready && backend.selected >= 0
@@ -69,6 +70,7 @@ ApplicationWindow {
         onActivated: {
             if (win.quitConfirmVisible) win.quitConfirmVisible = false;
             else if (commandBox.visible) commandBox.close();
+            else if (win.filmVisible) win.filmVisible = false;
             else if (backend.agentBusy) backend.cancelAgent();
             else if (backend.agentReview) backend.takeBackAgent();
             else if (backend.handle >= 0) backend.endHandle(false);
@@ -181,6 +183,7 @@ ApplicationWindow {
     // Say or search: every operator by name, or words for the agent.
     Shortcut { sequences: ["F3", "Ctrl+K"]; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !backend.agentBusy && !commandBox.visible; onActivated: commandBox.open() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.agentReview && backend.tool === "move" && !commandBox.visible; onActivated: backend.keepAgent() }
+    Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !commandBox.visible; onActivated: win.filmVisible = !win.filmVisible }
     Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: timeline.curves = !timeline.curves }
     Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
@@ -345,7 +348,7 @@ ApplicationWindow {
                 // draws everything else over it.
                 Rectangle {
                     // With a look, the canvas draws the world itself, as exported.
-                    visible: backend.hasProject && backend.world.active && (backend.freeView || Object.keys(backend.sceneInfo.look || {}).length === 0)
+                    visible: backend.hasProject && backend.world.active && (backend.freeView || !backend.sceneInfo.looked)
                     // The free view fills the whole area.
                     x: backend.freeView ? 0 : view.canvasRect.x
                     y: backend.freeView ? 0 : view.canvasRect.y
@@ -1138,6 +1141,89 @@ ApplicationWindow {
                             + "It installs in a terminal, where you can enter your password."
                 }
                 Label { text: "Enter " + (backend.aiPrompt === "download" ? "downloads" : "installs") + "   ·   Esc not now"; color: theme.accent }
+            }
+        }
+    }
+
+    // The film this project is a shot in: its shots, how they join, export.
+    Rectangle {
+        anchors.fill: parent
+        visible: win.filmVisible
+        color: "#b0000000"
+        MouseArea { anchors.fill: parent; onClicked: win.filmVisible = false }
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(640, parent.width - 40)
+            height: filmColumn.implicitHeight + 40
+            radius: 10
+            color: win.panel
+            border.color: win.line
+            MouseArea { anchors.fill: parent }
+            ColumnLayout {
+                id: filmColumn
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 6
+                Label { text: "Film"; font.pixelSize: 20; font.bold: true; color: win.text }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    text: backend.filmShots.length
+                          ? "Shots in a row, from " + backend.filmPath + ". Each joins the one before by a cut, a dissolve, a fade through black or a wipe."
+                          : "No film here yet: add this project as its first shot, then open the others and add them."
+                }
+                Repeater {
+                    model: backend.filmShots
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Label { text: (index + 1) + "."; color: win.muted; Layout.preferredWidth: 22 }
+                        Label {
+                            text: String(modelData.project).replace(/\.omotion$/, "")
+                            color: modelData.this ? theme.accent : win.text
+                            font.bold: modelData.this
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        ComboBox {
+                            visible: index > 0
+                            font.pixelSize: 12
+                            implicitHeight: 34
+                            Layout.preferredWidth: 110
+                            model: ["cut", "dissolve", "fade", "wipe"]
+                            currentIndex: Math.max(0, model.indexOf(modelData.transition || "cut"))
+                            onActivated: function (i) { backend.setShot(index, "transition", model[i]) }
+                        }
+                        TextField {
+                            visible: index > 0 && (modelData.transition || "cut") !== "cut"
+                            implicitHeight: 30
+                            Layout.preferredWidth: 56
+                            font.pixelSize: 12
+                            text: String(modelData.length === undefined ? 0.5 : modelData.length)
+                            onAccepted: backend.setShot(index, "length", Number(text))
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Seconds the transition takes"
+                        }
+                        ToolButton { text: "↑"; enabled: index > 0; onClicked: backend.moveShot(index, -1) }
+                        ToolButton { text: "↓"; enabled: index + 1 < backend.filmShots.length; onClicked: backend.moveShot(index, 1) }
+                        ToolButton { text: "✕"; onClicked: backend.removeShot(index) }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    ToolButton { text: "Add this shot"; onClicked: backend.addToFilm() }
+                    Item { Layout.fillWidth: true }
+                    ToolButton {
+                        text: "Export the film"
+                        enabled: backend.filmShots.length > 0 && !backend.exporting
+                        onClicked: { win.filmVisible = false; backend.exportFilm() }
+                    }
+                }
+                Label { text: "Ctrl+Shift+F or Esc closes   ·   omotion film renders it from the command line"; color: win.muted }
             }
         }
     }
