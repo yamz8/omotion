@@ -27,6 +27,11 @@ public:
 
     // Item coordinates to canvas pixels.
     Q_INVOKABLE QPointF toScene(double x, double y) const;
+    // Item coordinates to points in the world's view (Backend::view): the
+    // canvas through the shot's camera, the item itself in the free view.
+    Q_INVOKABLE QPointF toView(double x, double y) const;
+    // How many item pixels one view pixel takes up.
+    Q_INVOKABLE double viewZoom() const;
     // How many item pixels one canvas pixel takes up.
     Q_INVOKABLE double zoom() const { return viewTransform().m11(); }
     QRectF canvasRect() const;
@@ -48,6 +53,9 @@ private:
     QPointF m_focus;
     bool m_focusSet = false;
     QTransform viewTransform() const;
+    // View points to item coordinates.
+    QTransform fromView() const;
+    void paintGizmo(QPainter *painter);
 
     QPointer<Backend> m_backend;
     QColor m_accent = QColor("#FFD60A");

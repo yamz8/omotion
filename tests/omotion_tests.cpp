@@ -55,6 +55,29 @@ int differences(const QImage &a, const QImage &b) {
     return count;
 }
 
+// A project with a made-up world: a 400×200 picture, a piece cut from its
+// middle, sky over the top quarter and ground sloping away below; saved, so
+// a Backend can open it.
+QString madeUpWorld(QTemporaryDir &dir) {
+    const QString project = Project::open(writePicture(dir.filePath("p.png"), {400, 200}), nullptr);
+    Scene scene = Project::load(project, nullptr);
+    AssetCache assets(project);
+    QString error;
+    Project::cutOut(scene, assets, 0, QPolygonF({QPointF(150, 50), QPointF(260, 50), QPointF(260, 140), QPointF(150, 140)}),
+                    0, true, &error, "piece", 0, true, false);
+    QImage depth(40, 20, QImage::Format_Grayscale16);
+    for (int y = 0; y < 20; ++y)
+        for (int x = 0; x < 40; ++x)
+            reinterpret_cast<quint16 *>(depth.scanLine(y))[x] = y < 5 ? World::Sky : World::encodeDepth(3 + y * .4 + x * .05);
+    QDir(project).mkpath("assets/world");
+    depth.save(QDir(project).filePath("assets/world/d.png"));
+    scene.raw["world"] = QJsonObject{{"picture", scene.layers[0].name}, {"depth", "assets/world/d.png"},
+                                     {"behind", "assets/world/d.png"}, {"focal", 350},
+                                     {"ground", QJsonObject{{"up", QJsonArray{.05, -.98, .15}}, {"height", 1.2}}}};
+    Project::save(project, scene, nullptr);
+    return project;
+}
+
 void writeText(const QString &path, const QByteArray &text) {
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
@@ -1481,6 +1504,118 @@ private slots:
         const double brief = World::motion(scene, assets, .5, .51, QSize(400, 200));
         QVERIFY(brief > .5);
         QVERIFY(World::motion(scene, assets, .5, .53, QSize(400, 200)) > 2 * brief);
+    }
+
+    void piecesArePickedWhereTheyAreInTheWorld() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const int piece = scene.indexOf("piece");
+        QVERIFY(piece > 0);
+        const QSizeF size(400, 200);
+        const World::View shot = World::cameraView(World::frame(scene, assets, 0));
+        // A ray through a point of the view comes back to it.
+        QVector3D origin, direction;
+        World::ray(shot, size, QPointF(123, 45), &origin, &direction);
+        QPointF back;
+        QVERIFY(World::project(shot, size, origin + direction * 7, &back));
+        QVERIFY(QLineF(back, QPointF(123, 45)).length() < 1e-3);
+        QVERIFY(!World::project(shot, size, origin - direction * 7, &back));
+        // At rest the world is the picture: the piece where it was cut, the
+        // picture around it.
+        QCOMPARE(World::pick(scene, assets, 0, shot, size, QPointF(200, 100)), piece);
+        QCOMPARE(World::pick(scene, assets, 0, shot, size, QPointF(60, 150)), 0);
+        // Moved a meter and a half to the right, it's picked there, and the
+        // filled-in picture where it was.
+        scene.layers[piece].base["worldX"] = 1.5;
+        QList<QVector3D> corners;
+        QVector3D pivot;
+        QVERIFY(World::box(scene, assets, piece, 0, &corners, &pivot));
+        QCOMPARE(corners.size(), 8);
+        QPointF at;
+        QVERIFY(World::project(shot, size, pivot, &at));
+        QVERIFY(at.x() > 260);
+        QCOMPARE(World::pick(scene, assets, 0, shot, size, at), piece);
+        QCOMPARE(World::pick(scene, assets, 0, shot, size, QPointF(170, 100)), 0);
+    }
+
+    void handlesMovePiecesAlongAnAxisAndTurnThem() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(madeUpWorld(dir)));
+        const int piece = backend.scene().indexOf("piece");
+        // Clicking it in the view picks it, in 3D.
+        backend.pickAt(200, 100);
+        QCOMPARE(backend.selected(), piece);
+        const Backend::Gizmo gizmo = backend.gizmo();
+        QCOMPARE(gizmo.corners.size(), 8);
+        QCOMPARE(gizmo.arrows.size(), 3);
+        // The x arrow's tip is its handle; dragging along it moves only x.
+        const QPointF tip = gizmo.arrows.at(0);
+        QCOMPARE(backend.handleAt(tip.x(), tip.y(), 6), 1);
+        backend.beginHandle(1, tip.x(), tip.y());
+        const QPointF along = tip - gizmo.pivot;
+        backend.handleTo(tip.x() + along.x(), tip.y() + along.y() + 30);
+        backend.endHandle(true);
+        const Layer &layer = backend.scene().layers.at(piece);
+        QVERIFY(layer.base.value("worldX") > .05);
+        QCOMPARE(layer.base.value("worldY"), 0.0);
+        QCOMPARE(layer.base.value("worldZ"), 0.0);
+        QVERIFY(backend.canUndo());
+        // A grab kept to y moves only y; cancelled, it puts it back with
+        // nothing to undo.
+        const double x = layer.base.value("worldX");
+        backend.undo();
+        QVERIFY(backend.scene().layers.at(piece).base.value("worldX") < 1e-9);
+        backend.redo();
+        backend.beginHandle(0, 200, 100);
+        backend.setHandleAxis(2);
+        QCOMPARE(backend.handle(), 2);
+        backend.handleTo(240, 60);
+        QVERIFY(backend.scene().layers.at(piece).base.value("worldY") > .05);
+        QCOMPARE(backend.scene().layers.at(piece).base.value("worldX"), x);
+        backend.endHandle(false);
+        QCOMPARE(backend.scene().layers.at(piece).base.value("worldY"), 0.0);
+        QCOMPARE(backend.handle(), -1);
+        // The ring turns it.
+        const Backend::Gizmo again = backend.gizmo();
+        const QPointF ring = again.ring.at(again.ring.size() / 4);
+        backend.beginHandle(4, ring.x(), ring.y());
+        backend.handleTo(again.pivot.x() + (ring - again.pivot).y(), again.pivot.y() - (ring - again.pivot).x());
+        backend.endHandle(true);
+        QVERIFY(std::abs(backend.scene().layers.at(piece).base.value("yaw")) > 10);
+    }
+
+    void theFreeViewLooksAroundWithoutMovingTheShot() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(madeUpWorld(dir)));
+        const QJsonObject before = backend.scene().toJson();
+        const World::View shot = backend.view();
+        backend.setViewportSize(800, 400);
+        backend.toggleFreeView();
+        QVERIFY(backend.freeView());
+        QCOMPARE(backend.viewSize(), QSizeF(800, 400));
+        // It starts looking the way the camera does, from where it is.
+        const World::View free = backend.view();
+        QVERIFY((free.position - shot.position).length() < 1e-3);
+        const QVector3D ahead = shot.rotation.rotatedVector(QVector3D(0, 0, -1));
+        QVERIFY(QVector3D::dotProduct(free.rotation.rotatedVector(QVector3D(0, 0, -1)), ahead) > .999);
+        // Orbiting, panning and coming closer move only the view.
+        backend.orbitView(120, -40);
+        backend.panView(30, 10);
+        backend.zoomView(.5);
+        QVERIFY((backend.view().position - shot.position).length() > .5);
+        QCOMPARE(backend.scene().toJson(), before);
+        QVERIFY(!backend.canUndo());
+        // The shot's camera shows in it, and can be selected and moved.
+        QCOMPARE(backend.gizmo().camera.size(), 5);
+        backend.selectCamera();
+        QCOMPARE(backend.gizmo().arrows.size(), 3);
+        backend.toggleFreeView();
+        QVERIFY(!backend.freeView());
+        QVERIFY((backend.view().position - shot.position).length() < 1e-3);
     }
 
     void surfacesWrapSolidsFacingOut() {

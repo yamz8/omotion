@@ -967,20 +967,125 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     return frame;
 }
 
+View cameraView(const Frame &frame) { return View{frame.cameraPosition, frame.cameraRotation, frame.fov}; }
+
+bool project(const View &view, const QSizeF &size, const QVector3D &point, QPointF *onScreen) {
+    const QVector3D v = view.rotation.inverted().rotatedVector(point - view.position);
+    if (v.z() > -Near)
+        return false;
+    const double k = size.height() / 2.0 / std::tan(view.fov * M_PI / 360);
+    *onScreen = QPointF(size.width() / 2.0 + k * v.x() / -v.z(), size.height() / 2.0 - k * v.y() / -v.z());
+    return true;
+}
+
+void ray(const View &view, const QSizeF &size, const QPointF &onScreen, QVector3D *origin, QVector3D *direction) {
+    const double k = size.height() / 2.0 / std::tan(view.fov * M_PI / 360);
+    const QVector3D local(float((onScreen.x() - size.width() / 2.0) / k), float(-(onScreen.y() - size.height() / 2.0) / k), -1);
+    *origin = view.position;
+    *direction = view.rotation.rotatedVector(local).normalized();
+}
+
+namespace {
+// Möller–Trumbore: how far along the ray it meets the triangle, and where
+// in it (u, v toward b and c); false if it misses.
+bool hitTriangle(const QVector3D &origin, const QVector3D &direction, const QVector3D &a, const QVector3D &b,
+                 const QVector3D &c, float *distance, float *u, float *v) {
+    const QVector3D ab = b - a, ac = c - a, p = QVector3D::crossProduct(direction, ac);
+    const float det = QVector3D::dotProduct(ab, p);
+    if (std::abs(det) < 1e-12f)
+        return false;
+    const QVector3D s = origin - a;
+    *u = QVector3D::dotProduct(s, p) / det;
+    if (*u < 0 || *u > 1)
+        return false;
+    const QVector3D q = QVector3D::crossProduct(s, ab);
+    *v = QVector3D::dotProduct(direction, q) / det;
+    if (*v < 0 || *u + *v > 1)
+        return false;
+    *distance = QVector3D::dotProduct(ac, q) / det;
+    return *distance > Near;
+}
+}
+
+int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen) {
+    QVector3D origin, direction;
+    ray(view, size, onScreen, &origin, &direction);
+    const Frame now = frame(scene, assets, t);
+    int found = -1;
+    float nearest = std::numeric_limits<float>::max();
+    for (const Placement &place : now.layers) {
+        if (!place.visible || place.opacity <= 0)
+            continue;
+        const Mesh shape = mesh(scene, assets, place.layer);
+        if (shape.isNull())
+            continue;
+        // The ray brought into the mesh's own space, where it rests.
+        const QQuaternion back = place.rotation.inverted();
+        const QVector3D o = back.rotatedVector(origin - place.position) / place.scale,
+                        d = back.rotatedVector(direction).normalized();
+        const float *vertex = reinterpret_cast<const float *>(shape.vertices.constData());
+        const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
+        const qsizetype triangles = shape.indices.size() / qsizetype(3 * sizeof(quint32));
+        // A flat piece is a grid over its whole rectangle: what's see-through
+        // in its picture doesn't count. A shape is solid.
+        const bool solid = shape.columns == 0;
+        double factor = 1;
+        const QImage picture = solid ? QImage() : assets.mip(scene.layers.at(place.layer).source, .25, &factor);
+        auto at = [&](quint32 k) { return QVector3D(vertex[k * shape.stride], vertex[k * shape.stride + 1], vertex[k * shape.stride + 2]); };
+        for (qsizetype i = 0; i < triangles; ++i) {
+            const quint32 a = index[3 * i], b = index[3 * i + 1], c = index[3 * i + 2];
+            float distance, u, v;
+            if (!hitTriangle(o, d, at(a), at(b), at(c), &distance, &u, &v))
+                continue;
+            distance *= place.scale;
+            if (distance >= nearest)
+                continue;
+            if (!solid && !picture.isNull()) {
+                auto uv = [&](quint32 k) { return QPointF(vertex[k * shape.stride + 3], vertex[k * shape.stride + 4]); };
+                const QPointF texel = uv(a) * (1 - u - v) + uv(b) * u + uv(c) * v;
+                const QPoint pixel(std::clamp(int(texel.x() * picture.width()), 0, picture.width() - 1),
+                                   std::clamp(int((1 - texel.y()) * picture.height()), 0, picture.height() - 1));
+                if (qAlpha(picture.pixel(pixel)) <= 16)
+                    continue;
+            }
+            nearest = distance;
+            found = place.layer;
+        }
+    }
+    return found;
+}
+
+bool box(const Scene &scene, AssetCache &assets, int index, double t, QList<QVector3D> *corners, QVector3D *pivot) {
+    const Frame now = frame(scene, assets, t);
+    for (const Placement &place : now.layers) {
+        if (place.layer != index)
+            continue;
+        const Mesh shape = mesh(scene, assets, index);
+        if (shape.isNull())
+            return false;
+        // The background reaches out to the sky; its box is kept to a
+        // hundred meters so it stays something to look at.
+        QVector3D low = shape.minimum, high = shape.maximum;
+        const QVector3D reach(100, 100, 100);
+        low = QVector3D(std::max(low.x(), shape.pivot.x() - reach.x()), std::max(low.y(), shape.pivot.y() - reach.y()),
+                        std::max(low.z(), shape.pivot.z() - reach.z()));
+        high = QVector3D(std::min(high.x(), shape.pivot.x() + reach.x()), std::min(high.y(), shape.pivot.y() + reach.y()),
+                         std::min(high.z(), shape.pivot.z() + reach.z()));
+        corners->clear();
+        for (int k = 0; k < 8; ++k) {
+            const QVector3D rest(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
+            corners->append(place.position + place.rotation.rotatedVector(rest * place.scale));
+        }
+        *pivot = place.position + place.rotation.rotatedVector(shape.pivot * place.scale);
+        return true;
+    }
+    return false;
+}
+
 double motion(const Scene &scene, AssetCache &assets, double from, double to, const QSize &size) {
     const Frame a = frame(scene, assets, from), b = frame(scene, assets, to);
     if (a.layers.size() != b.layers.size() || size.isEmpty())
         return 0;
-    // Onto the screen as Qt Quick 3D's camera sees it: looking down -z, the
-    // field of view vertical.
-    auto project = [&size](const Frame &f, const QVector3D &point, QPointF *onScreen) {
-        const QVector3D v = f.cameraRotation.inverted().rotatedVector(point - f.cameraPosition);
-        if (v.z() > -Near)
-            return false;
-        const double k = size.height() / 2.0 / std::tan(f.fov * M_PI / 360);
-        *onScreen = QPointF(size.width() / 2.0 + k * v.x() / -v.z(), size.height() / 2.0 - k * v.y() / -v.z());
-        return true;
-    };
     // Points well off screen at both ends don't show, however far they go.
     const QRectF screen = QRectF(QPointF(), QSizeF(size)).adjusted(-size.width() * .1, -size.height() * .1,
                                                                   size.width() * .1, size.height() * .1);
@@ -999,8 +1104,8 @@ double motion(const Scene &scene, AssetCache &assets, double from, double to, co
         for (qsizetype k = 0; k < count; k += step) {
             const QVector3D rest(vertex[k * shape.stride], vertex[k * shape.stride + 1], vertex[k * shape.stride + 2]);
             QPointF start, end;
-            if (!project(a, p.position + p.rotation.rotatedVector(rest * p.scale), &start) ||
-                !project(b, q.position + q.rotation.rotatedVector(rest * q.scale), &end))
+            if (!project(cameraView(a), size, p.position + p.rotation.rotatedVector(rest * p.scale), &start) ||
+                !project(cameraView(b), size, q.position + q.rotation.rotatedVector(rest * q.scale), &end))
                 continue;
             if (screen.contains(start) || screen.contains(end))
                 most = std::max(most, QLineF(start, end).length());

@@ -2091,10 +2091,10 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
     return frame;
 }
 
-int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &point) {
+int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &point, const QList<int> &skip) {
     for (int i = scene.layers.size() - 1; i >= 0; --i) {
         const Layer &layer = scene.layers.at(i);
-        if (!layer.visible || scene.value(layer, "opacity", t) <= 0)
+        if (skip.contains(i) || !layer.visible || scene.value(layer, "opacity", t) <= 0)
             continue;
         // A quarter-size copy is plenty to tell what's under the mouse.
         double factor = 1;

@@ -7,6 +7,8 @@
 #include <QObject>
 #include <functional>
 #include <QPointF>
+#include <QPolygonF>
+#include <QSizeF>
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
@@ -71,6 +73,12 @@ class Backend : public QObject {
     Q_PROPERTY(int aiChoices READ aiChoices NOTIFY toolChanged)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportChanged)
     Q_PROPERTY(double exportProgress READ exportProgress NOTIFY exportChanged)
+    // Looking at the world from the window's own free view rather than
+    // through the shot's camera.
+    Q_PROPERTY(bool freeView READ freeView NOTIFY viewChanged)
+    // A piece being moved by a handle or grabbed with G: 0 freely, 1 to 3
+    // along x, y or z, 4 turning; -1 when nothing is.
+    Q_PROPERTY(int handle READ handle NOTIFY viewChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -127,6 +135,30 @@ public:
     int aiChoices() const { return m_aiChoices; }
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
+    bool freeView() const { return m_freeView; }
+    int handle() const { return m_handle; }
+
+    // What the world's view shows: the shot's camera at the playhead, or the
+    // free view; and the size of the image it makes (the canvas, or the
+    // window's area for the free view). Points "in the view" below are on
+    // that image.
+    World::View view() const;
+    QSizeF viewSize() const;
+    // The handles drawn on the selected piece of a world (or the camera, in
+    // the free view), in view points: its box's corners (8, as World::box
+    // has them), its pivot, the ends of its x, y and z arrows, and its
+    // turning ring. Empty when there's nothing to draw.
+    struct Gizmo {
+        QList<QPointF> corners;
+        QPointF pivot;
+        QList<QPointF> arrows;
+        QPolygonF ring;
+        // In the free view, the shot's camera: its eye and the corners of
+        // its frame; and a grid on the ground, a line a meter.
+        QList<QPointF> camera;
+        QList<QPolygonF> grid;
+    };
+    Gizmo gizmo() const;
 
     const Scene &scene() const { return m_scene; }
     AssetCache &assets() { return m_assets; }
@@ -291,6 +323,28 @@ public:
     Q_INVOKABLE void finishCut(bool punch);
     Q_INVOKABLE void setPivotAt(double x, double y);
 
+    // The free view: in and out of it, orbiting about what it looks at,
+    // panning, coming closer, and looking at the selected piece. The window
+    // tells the size of its area.
+    Q_INVOKABLE void toggleFreeView();
+    Q_INVOKABLE void orbitView(double dx, double dy);
+    Q_INVOKABLE void panView(double dx, double dy);
+    Q_INVOKABLE void zoomView(double factor);
+    Q_INVOKABLE void frameSelected();
+    Q_INVOKABLE void setViewportSize(double width, double height);
+    // Picks what's under a view point: layers drawn over a world first (in
+    // the shot), then the world's pieces in 3D.
+    Q_INVOKABLE void pickAt(double x, double y);
+    // The handle within reach of a view point (as handle above), or -1.
+    Q_INVOKABLE int handleAt(double x, double y, double reach) const;
+    // Moving the selected piece of a world (or the camera) by a handle, or
+    // grabbed (handle 0): one undo step, or none when cancelled. axis
+    // changes what a grab keeps to while it's under way.
+    Q_INVOKABLE void beginHandle(int handle, double x, double y);
+    Q_INVOKABLE void handleTo(double x, double y);
+    Q_INVOKABLE void setHandleAxis(int axis);
+    Q_INVOKABLE void endHandle(bool keep);
+
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
 
@@ -319,6 +373,7 @@ signals:
     void showMotionChanged();
     void aiPromptChanged();
     void downloadChanged();
+    void viewChanged();
 
 private:
     void setError(const QString &error);
@@ -440,6 +495,19 @@ private:
     Scene m_keyDragBase;
     bool m_keyDragging = false;
     QList<KeyClip> m_clipboard;
+    bool m_freeView = false;
+    // The free view orbits a point: from yaw and pitch (degrees) at a
+    // distance (meters).
+    QVector3D m_orbitTarget;
+    double m_orbitYaw = 0, m_orbitPitch = 0, m_orbitDistance = 10;
+    QSizeF m_viewportSize{1280, 720};
+    void syncView();
+    int m_handle = -1;
+    QPointF m_handleStart;
+    QHash<QString, double> m_handleOrigin;
+    QVector3D m_handlePivot;
+    // What a handle moves: the selected world piece, or the camera.
+    int handleTarget() const;
     Exporter m_exporter;
     double m_exportProgress = 0;
     QString m_exportTarget;

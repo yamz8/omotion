@@ -21,9 +21,10 @@ Item {
 
         PerspectiveCamera {
             id: camera
-            position: view.frame.cameraPosition || Qt.vector3d(0, 0, 0)
-            rotation: view.frame.cameraRotation || Qt.quaternion(1, 0, 0, 0)
-            fieldOfView: view.frame.fov || 40
+            // The window's free view when it's on, else the shot's camera.
+            position: view.frame.viewPosition || view.frame.cameraPosition || Qt.vector3d(0, 0, 0)
+            rotation: view.frame.viewRotation || view.frame.cameraRotation || Qt.quaternion(1, 0, 0, 0)
+            fieldOfView: view.frame.viewFov || view.frame.fov || 40
             fieldOfViewOrientation: PerspectiveCamera.Vertical
             clipNear: 0.05
             clipFar: 5000

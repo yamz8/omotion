@@ -36,6 +36,14 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     // The 3D view follows the scene and the playhead.
     connect(this, &Backend::sceneChanged, this, [this] { m_world.setScene(m_scene, m_directory); });
     connect(this, &Backend::timeChanged, this, [this] { m_world.setTime(m_time); });
+    // The free view follows the world: off when there's none.
+    connect(this, &Backend::sceneChanged, this, [this] {
+        if (m_freeView && !World::info(m_scene).valid) {
+            m_freeView = false;
+            emit viewChanged();
+        }
+        syncView();
+    });
 
     // Saves are batched, so a drag writes the file a few times, not per pixel.
     m_saveTimer.setSingleShot(true);
@@ -1954,6 +1962,350 @@ void Backend::setPivotAt(double x, double y) {
     m_tool = "move";
     emit toolChanged();
     changed();
+}
+
+// ---- The 3D view ------------------------------------------------------------
+
+World::View Backend::view() const {
+    if (m_freeView) {
+        const QQuaternion turn = QQuaternion::fromAxisAndAngle(0, 1, 0, float(-m_orbitYaw)) *
+                                 QQuaternion::fromAxisAndAngle(1, 0, 0, float(m_orbitPitch));
+        return World::View{m_orbitTarget + turn.rotatedVector(QVector3D(0, 0, float(m_orbitDistance))), turn, 50};
+    }
+    // The shot's camera; the assets are only read through their caches.
+    return World::cameraView(World::frame(m_scene, const_cast<AssetCache &>(m_assets), m_time));
+}
+
+QSizeF Backend::viewSize() const { return m_freeView ? m_viewportSize : QSizeF(m_scene.width, m_scene.height); }
+
+void Backend::syncView() {
+    m_world.setView(m_freeView, m_freeView ? view() : World::View{});
+}
+
+void Backend::setViewportSize(double width, double height) {
+    if (width < 1 || height < 1 || QSizeF(width, height) == m_viewportSize)
+        return;
+    m_viewportSize = QSizeF(width, height);
+    if (m_freeView)
+        emit viewChanged();
+}
+
+void Backend::toggleFreeView() {
+    if (!m_freeView && !World::info(m_scene).valid) {
+        setNotice("The free view looks around a world: make one first (Shift+D).");
+        return;
+    }
+    m_freeView = !m_freeView;
+    if (m_freeView) {
+        // It starts where the shot's camera is, looking where it looks, at
+        // what's selected or ten meters ahead.
+        const World::View shot = World::cameraView(World::frame(m_scene, m_assets, m_time));
+        const QVector3D ahead = shot.rotation.rotatedVector(QVector3D(0, 0, -1));
+        QList<QVector3D> corners;
+        QVector3D pivot;
+        m_orbitDistance = 10;
+        if (m_selected >= 0 && World::box(m_scene, m_assets, m_selected, m_time, &corners, &pivot))
+            m_orbitDistance = std::clamp(double((pivot - shot.position).length()), 1.0, 200.0);
+        m_orbitTarget = shot.position + ahead * float(m_orbitDistance);
+        m_orbitYaw = std::atan2(ahead.x(), -ahead.z()) * 180 / M_PI;
+        m_orbitPitch = std::asin(std::clamp(double(ahead.y()), -1.0, 1.0)) * 180 / M_PI;
+        setNotice("Free view: middle-drag or Alt+drag orbits, Shift pans, the wheel comes closer, F looks at the selected, ` goes back to the camera.");
+    }
+    syncView();
+    emit viewChanged();
+}
+
+void Backend::orbitView(double dx, double dy) {
+    if (!m_freeView)
+        return;
+    m_orbitYaw += dx * .3;
+    m_orbitPitch = std::clamp(m_orbitPitch - dy * .3, -89.0, 89.0);
+    syncView();
+    emit viewChanged();
+}
+
+void Backend::panView(double dx, double dy) {
+    if (!m_freeView)
+        return;
+    // The point looked at follows the hand, a view pixel's worth of meters
+    // at its distance for each pixel.
+    const World::View v = view();
+    const double meters = 2 * m_orbitDistance * std::tan(v.fov * M_PI / 360) / std::max(1.0, m_viewportSize.height());
+    m_orbitTarget += v.rotation.rotatedVector(QVector3D(float(-dx * meters), float(dy * meters), 0));
+    syncView();
+    emit viewChanged();
+}
+
+void Backend::zoomView(double factor) {
+    if (!m_freeView || !(factor > 0))
+        return;
+    m_orbitDistance = std::clamp(m_orbitDistance / factor, .2, 5000.0);
+    syncView();
+    emit viewChanged();
+}
+
+void Backend::frameSelected() {
+    if (!m_freeView)
+        return;
+    QList<QVector3D> corners;
+    QVector3D pivot;
+    if (m_cameraSelected) {
+        pivot = World::frame(m_scene, m_assets, m_time).cameraPosition;
+        m_orbitDistance = 4;
+    } else if (m_selected >= 0 && World::box(m_scene, m_assets, m_selected, m_time, &corners, &pivot)) {
+        float size = 0;
+        for (const QVector3D &corner : corners)
+            size = std::max(size, (corner - pivot).length());
+        m_orbitDistance = std::clamp(double(size) * 2.5, .5, 300.0);
+    } else {
+        return;
+    }
+    m_orbitTarget = pivot;
+    syncView();
+    emit viewChanged();
+}
+
+void Backend::pickAt(double x, double y) {
+    const bool world = World::info(m_scene).valid;
+    if (!world) {
+        selectAt(x, y);
+        return;
+    }
+    // What's drawn over the world is in front of it, in the shot.
+    if (!m_freeView) {
+        const int over = layerAt(m_scene, m_assets, m_time, QPointF(x, y), World::layers(m_scene));
+        if (over >= 0) {
+            select(over);
+            return;
+        }
+    }
+    select(World::pick(m_scene, m_assets, m_time, view(), viewSize(), QPointF(x, y)));
+}
+
+int Backend::handleTarget() const {
+    if (!World::info(m_scene).valid)
+        return -1;
+    if (m_cameraSelected)
+        return m_freeView ? Scene::CameraIndex : -1;
+    return World::layers(m_scene).contains(m_selected) ? m_selected : -1;
+}
+
+Backend::Gizmo Backend::gizmo() const {
+    Gizmo gizmo;
+    if (!World::info(m_scene).valid || m_playing)
+        return gizmo;
+    AssetCache &assets = const_cast<AssetCache &>(m_assets);
+    const World::View v = view();
+    const QSizeF size = viewSize();
+    const World::Frame now = World::frame(m_scene, assets, m_time);
+    if (m_freeView) {
+        // The shot's camera, as a little pyramid toward what it frames.
+        const World::View shot = World::cameraView(now);
+        const double tall = std::tan(shot.fov * M_PI / 360), wide = tall * m_scene.width / std::max(1, m_scene.height);
+        const double reach = .6;
+        QPointF eye;
+        if (World::project(v, size, shot.position, &eye)) {
+            gizmo.camera << eye;
+            for (const QPointF &corner : {QPointF(-1, 1), QPointF(1, 1), QPointF(1, -1), QPointF(-1, -1)}) {
+                QPointF at;
+                const QVector3D local(float(corner.x() * wide * reach), float(corner.y() * tall * reach), float(-reach));
+                if (!World::project(v, size, shot.position + shot.rotation.rotatedVector(local), &at)) {
+                    gizmo.camera.clear();
+                    break;
+                }
+                gizmo.camera << at;
+            }
+        }
+    }
+    if (m_freeView) {
+        // Twenty meters of ground either way about what the view looks at,
+        // each line in short steps so the part behind the view drops out.
+        const int cx = int(std::round(m_orbitTarget.x())), cz = int(std::round(m_orbitTarget.z()));
+        constexpr int reach = 20;
+        for (int across = 0; across < 2; ++across)
+            for (int i = -reach; i <= reach; ++i) {
+                QPolygonF line;
+                for (int k = -reach * 2; k <= reach * 2; ++k) {
+                    const float along = k / 2.0f;
+                    const QVector3D point = across ? QVector3D(float(cx + i), 0, float(cz) + along)
+                                                   : QVector3D(float(cx) + along, 0, float(cz + i));
+                    QPointF at;
+                    if (World::project(v, size, point, &at)) {
+                        line << at;
+                    } else if (line.size() > 1) {
+                        gizmo.grid << line;
+                        line.clear();
+                    } else {
+                        line.clear();
+                    }
+                }
+                if (line.size() > 1)
+                    gizmo.grid << line;
+            }
+    }
+    const int target = handleTarget();
+    if (target == -1)
+        return gizmo;
+    QVector3D pivot;
+    if (target == Scene::CameraIndex) {
+        pivot = now.cameraPosition;
+    } else {
+        QList<QVector3D> corners;
+        if (!World::box(m_scene, assets, target, m_time, &corners, &pivot))
+            return gizmo;
+        for (const QVector3D &corner : corners) {
+            QPointF at;
+            if (!World::project(v, size, corner, &at)) {
+                gizmo.corners.clear();
+                break;
+            }
+            gizmo.corners << at;
+        }
+    }
+    if (!World::project(v, size, pivot, &gizmo.pivot))
+        return {};
+    // Arrows a tenth of the view tall, however far the pivot is.
+    const double distance = std::max(.1f, (pivot - v.position).length());
+    const double focal = size.height() / 2 / std::tan(v.fov * M_PI / 360);
+    const double meters = size.height() * .1 * distance / focal;
+    for (const QVector3D &axis : {QVector3D(1, 0, 0), QVector3D(0, 1, 0), QVector3D(0, 0, -1)}) {
+        QPointF end;
+        if (!World::project(v, size, pivot + axis * float(meters), &end))
+            end = gizmo.pivot;
+        gizmo.arrows << end;
+    }
+    for (int i = 0; i <= 48; ++i) {
+        const double angle = 2 * M_PI * i / 48;
+        QPointF at;
+        if (World::project(v, size, pivot + QVector3D(float(std::cos(angle) * meters * .8), 0, float(std::sin(angle) * meters * .8)), &at))
+            gizmo.ring << at;
+    }
+    return gizmo;
+}
+
+namespace {
+double distanceToSegment(const QPointF &p, const QPointF &a, const QPointF &b) {
+    const QPointF ab = b - a;
+    const double length = QPointF::dotProduct(ab, ab);
+    const double k = length > 0 ? std::clamp(QPointF::dotProduct(p - a, ab) / length, 0.0, 1.0) : 0;
+    return QLineF(p, a + ab * k).length();
+}
+}
+
+int Backend::handleAt(double x, double y, double reach) const {
+    const Gizmo g = gizmo();
+    if (g.arrows.size() != 3)
+        return -1;
+    const QPointF p(x, y);
+    // The arrows' tips first: they're what's aimed at.
+    int best = -1;
+    double nearest = reach;
+    for (int i = 0; i < 3; ++i) {
+        const double d = distanceToSegment(p, g.pivot + (g.arrows.at(i) - g.pivot) * .25, g.arrows.at(i));
+        if (d < nearest)
+            nearest = d, best = i + 1;
+    }
+    if (best > 0)
+        return best;
+    for (int i = 1; i < g.ring.size(); ++i)
+        if (distanceToSegment(p, g.ring.at(i - 1), g.ring.at(i)) < reach)
+            return 4;
+    return -1;
+}
+
+void Backend::beginHandle(int handle, double x, double y) {
+    const int target = handleTarget();
+    if (target == -1 || handle < 0 || handle > 4)
+        return;
+    beginGesture();
+    const Layer &layer = *m_scene.at(target);
+    m_handle = handle;
+    m_handleStart = QPointF(x, y);
+    for (const QString &property : Scene::worldProperties())
+        m_handleOrigin[property] = m_scene.value(layer, property, m_time);
+    QList<QVector3D> corners;
+    if (target == Scene::CameraIndex)
+        m_handlePivot = World::frame(m_scene, m_assets, m_time).cameraPosition;
+    else
+        World::box(m_scene, m_assets, target, m_time, &corners, &m_handlePivot);
+    emit viewChanged();
+}
+
+void Backend::setHandleAxis(int axis) {
+    if (m_handle < 0 || axis < 0 || axis > 4)
+        return;
+    // Pressing the same axis again frees it, as in Blender.
+    m_handle = axis == m_handle ? 0 : axis;
+    emit viewChanged();
+}
+
+void Backend::handleTo(double x, double y) {
+    const int target = handleTarget();
+    if (m_handle < 0 || target == -1)
+        return;
+    const World::View v = view();
+    const QSizeF size = viewSize();
+    const QPointF moved = QPointF(x, y) - m_handleStart;
+    auto set = [&](const QString &property, double value) { m_scene.setValue(target, property, m_time, value); };
+    // Back where it started, so each move is from there.
+    for (const QString &property : Scene::worldProperties())
+        set(property, m_handleOrigin[property]);
+    QPointF pivot;
+    if (!World::project(v, size, m_handlePivot, &pivot)) {
+        changed();
+        return;
+    }
+    if (m_handle == 4) {
+        // Turning: by the angle swept about the pivot on screen, clockwise
+        // to the right.
+        const QPointF a = m_handleStart - pivot, b = QPointF(x, y) - pivot;
+        const double swept = std::atan2(a.x() * b.y() - a.y() * b.x(), a.x() * b.x() + a.y() * b.y()) * 180 / M_PI;
+        set("yaw", m_handleOrigin["yaw"] + swept);
+        changed();
+        return;
+    }
+    QVector3D shift;
+    if (m_handle == 0) {
+        // Freely: across the view at the pivot's distance.
+        const double distance = std::max(.1f, (m_handlePivot - v.position).length());
+        const double meters = distance * 2 * std::tan(v.fov * M_PI / 360) / size.height();
+        shift = v.rotation.rotatedVector(QVector3D(float(moved.x() * meters), float(-moved.y() * meters), 0));
+    } else {
+        // Along an axis: as far as the hand goes along it on screen.
+        const QVector3D axis = m_handle == 1 ? QVector3D(1, 0, 0) : m_handle == 2 ? QVector3D(0, 1, 0) : QVector3D(0, 0, -1);
+        QPointF end;
+        if (!World::project(v, size, m_handlePivot + axis, &end)) {
+            changed();
+            return;
+        }
+        const QPointF perMeter = end - pivot;
+        const double length = QPointF::dotProduct(perMeter, perMeter);
+        // Pointing nearly at the view, an axis can't be followed well.
+        if (length < 4) {
+            changed();
+            return;
+        }
+        shift = axis * float(QPointF::dotProduct(moved, perMeter) / length);
+    }
+    set("worldX", m_handleOrigin["worldX"] + shift.x());
+    set("worldY", m_handleOrigin["worldY"] + shift.y());
+    set("worldZ", m_handleOrigin["worldZ"] - shift.z());
+    changed();
+}
+
+void Backend::endHandle(bool keep) {
+    if (m_handle < 0)
+        return;
+    m_handle = -1;
+    if (!keep && m_inGesture) {
+        // Put back as it was, with nothing to undo.
+        m_scene = Scene::fromJson(m_gestureStart);
+        m_inGesture = false;
+        changed();
+    } else {
+        endGesture();
+    }
+    emit viewChanged();
 }
 
 void Backend::undo() {

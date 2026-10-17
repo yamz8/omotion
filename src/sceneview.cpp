@@ -2,6 +2,9 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <QLineF>
+
+#include "world.h"
 #include <algorithm>
 
 namespace {
@@ -10,8 +13,14 @@ constexpr double Margin = 24;
 
 SceneView::SceneView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     setAntialiasing(true);
-    connect(this, &QQuickItem::widthChanged, this, [this] { update(); emit zoomChanged(); });
-    connect(this, &QQuickItem::heightChanged, this, [this] { update(); emit zoomChanged(); });
+    auto resized = [this] {
+        if (m_backend)
+            m_backend->setViewportSize(width(), height());
+        update();
+        emit zoomChanged();
+    };
+    connect(this, &QQuickItem::widthChanged, this, resized);
+    connect(this, &QQuickItem::heightChanged, this, resized);
 }
 
 void SceneView::setBackend(Backend *backend) {
@@ -30,6 +39,8 @@ void SceneView::setBackend(Backend *backend) {
         connect(m_backend, &Backend::playingChanged, this, repaint);
         connect(m_backend, &Backend::showMotionChanged, this, repaint);
         connect(m_backend, &Backend::valuesChanged, this, repaint);
+        connect(m_backend, &Backend::viewChanged, this, repaint);
+        m_backend->setViewportSize(width(), height());
         // A new project starts fitted in the window.
         connect(m_backend, &Backend::projectChanged, this, &SceneView::fit);
     }
@@ -108,6 +119,80 @@ QRectF SceneView::canvasRect() const {
 
 QPointF SceneView::toScene(double x, double y) const { return viewTransform().inverted().map(QPointF(x, y)); }
 
+QTransform SceneView::fromView() const {
+    return m_backend && m_backend->freeView() ? QTransform() : viewTransform();
+}
+
+QPointF SceneView::toView(double x, double y) const { return fromView().inverted().map(QPointF(x, y)); }
+
+double SceneView::viewZoom() const { return fromView().m11(); }
+
+void SceneView::paintGizmo(QPainter *painter) {
+    const Backend::Gizmo gizmo = m_backend->gizmo();
+    const QTransform to = fromView();
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setBrush(Qt::NoBrush);
+    painter->setPen(QPen(QColor(255, 255, 255, 28), 1));
+    for (const QPolygonF &line : gizmo.grid)
+        painter->drawPolyline(to.map(line));
+    // The shot's camera, seen from the free view.
+    if (gizmo.camera.size() == 5) {
+        const bool picked = m_backend->cameraSelected();
+        painter->setPen(QPen(picked ? m_accent : QColor(255, 255, 255, 170), 1.5));
+        for (int i = 1; i < 5; ++i) {
+            painter->drawLine(to.map(gizmo.camera.at(0)), to.map(gizmo.camera.at(i)));
+            painter->drawLine(to.map(gizmo.camera.at(i)), to.map(gizmo.camera.at(i % 4 + 1)));
+        }
+        // Its top edge marked, so which way is up shows.
+        const QPointF top = (to.map(gizmo.camera.at(1)) + to.map(gizmo.camera.at(2))) / 2;
+        painter->drawLine(top, top + (top - to.map(gizmo.camera.at(0))) * .15);
+    }
+    if (gizmo.corners.size() == 8) {
+        painter->setPen(QPen(m_accent, 1.5, Qt::DashLine));
+        for (int a = 0; a < 8; ++a)
+            for (int bit : {1, 2, 4})
+                if (!(a & bit))
+                    painter->drawLine(to.map(gizmo.corners.at(a)), to.map(gizmo.corners.at(a | bit)));
+    }
+    if (gizmo.arrows.size() == 3) {
+        const int active = m_backend->handle();
+        // Blender's colours for x, y and z; the one in use is brighter.
+        const QColor colours[3] = {QColor(232, 72, 85), QColor(122, 196, 74), QColor(66, 135, 245)};
+        const QPointF pivot = to.map(gizmo.pivot);
+        QPolygonF ring;
+        for (const QPointF &point : gizmo.ring)
+            ring << to.map(point);
+        painter->setPen(QPen(active == 4 ? m_accent : QColor(255, 255, 255, 150), active == 4 ? 2.5 : 1.5));
+        painter->drawPolyline(ring);
+        for (int i = 0; i < 3; ++i) {
+            const QPointF end = to.map(gizmo.arrows.at(i));
+            if (QLineF(pivot, end).length() < 4)
+                continue;
+            painter->setPen(QPen(colours[i], active == i + 1 ? 3.5 : 2.2, Qt::SolidLine, Qt::RoundCap));
+            painter->drawLine(pivot, end);
+            painter->setBrush(colours[i]);
+            painter->drawEllipse(end, 4.5, 4.5);
+            painter->setBrush(Qt::NoBrush);
+        }
+        painter->setPen(QPen(m_accent, 2));
+        painter->setBrush(QColor(0, 0, 0, 160));
+        painter->drawEllipse(pivot, 5, 5);
+        // While grabbed and kept to an axis, the axis runs right across.
+        if (active >= 1 && active <= 3) {
+            const QPointF along = to.map(gizmo.arrows.at(active - 1)) - pivot;
+            const double length = std::hypot(along.x(), along.y());
+            if (length > 1) {
+                QColor line = colours[active - 1];
+                line.setAlpha(150);
+                painter->setPen(QPen(line, 1));
+                painter->drawLine(pivot - along * (4000 / length), pivot + along * (4000 / length));
+            }
+        }
+    }
+    painter->restore();
+}
+
 void SceneView::paint(QPainter *painter) {
     if (!m_backend || !m_backend->hasProject())
         return;
@@ -129,6 +214,13 @@ void SceneView::paint(QPainter *painter) {
                 painter->fillRect(QRectF(canvas.left() + x * cell, canvas.top() + y * cell, cell, cell),
                                   (x + y) % 2 ? QColor("#2a2a2e") : QColor("#1c1c1f"));
         painter->restore();
+    }
+
+    // The free view: just the world (drawn underneath), the shot's camera
+    // and what's selected in it.
+    if (m_backend->freeView()) {
+        paintGizmo(painter);
+        return;
     }
 
     const int selected = m_backend->selected();
@@ -202,7 +294,11 @@ void SceneView::paint(QPainter *painter) {
     painter->setBrush(Qt::NoBrush);
     painter->drawRect(canvas);
 
-    if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
+    // A world's pieces are outlined where they are in 3D, with handles.
+    const bool inWorld = m_backend->world()->active() && World::layers(scene).contains(selected);
+    if (inWorld)
+        paintGizmo(painter);
+    else if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
         scene.layers.at(selected).particles.isEmpty()) {
         const Layer &layer = scene.layers.at(selected);
         const QSizeF size = m_backend->assets().size(layer.source);

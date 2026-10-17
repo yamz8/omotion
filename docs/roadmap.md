@@ -49,6 +49,32 @@ collisions between pieces; light wrap on flat pieces' edges.
 
 The 2D engine stays: scenes without a world work as they do.
 
+## A small Blender, AI first (now)
+
+Work the way Blender does: in a 3D view, on objects you pick, with
+operators you can find and undo, and curves you can shape. Keep what
+Blender doesn't have: a picture is where you start, the AI's steps stay
+editable, and you can say what you want in words. Not modelling,
+sculpting or node editors.
+
+1. **The 3D view is the editor.** A free view to look at the world from
+   outside (orbit, pan, zoom), apart from the shot's camera; clicking a
+   piece picks it in 3D; handles move it along an axis and turn it; G
+   grabs it, X, Y or Z keeps it to an axis.
+2. **Outliner and properties.** The world, its pieces (with what they
+   were cut from), the camera, particles and the rest, to pick and hide;
+   the selected one's properties beside them, world ones included.
+3. **AI steps that stay editable.** Each piece shows its steps (the cut,
+   the fill behind it, its shape, the world it's in) with what they were
+   made from; any can be done again, and what came after an edited step is
+   marked out of date and redone with it.
+4. **The graph editor.** The selected layer's animated properties as
+   curves over time: drag keys in time and value, see the easing between.
+5. **Say what you want.** A search box for every operator (Blender's
+   F3), and for anything else, words handed to an agent (Claude Code,
+   where it's installed) that works through scene.json and the CLI;
+   what it changed is shown, one undo takes it all back.
+
 ## Realism (folded into the world)
 
 The Quattro demo (a car flying into the wallpaper) looked like a sticker

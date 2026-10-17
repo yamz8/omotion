@@ -300,5 +300,6 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
 // Softens an Alpha8 or 32-bit image in place, spreading edges about width
 // pixels: three box blurs, which come close to a Gaussian.
 void soften(QImage &image, double width);
-// The top-most visible layer with an opaque pixel at a canvas point, or -1.
-int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &point);
+// The top-most visible layer with an opaque pixel at a canvas point, or -1;
+// layers in skip don't count.
+int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &point, const QList<int> &skip = {});

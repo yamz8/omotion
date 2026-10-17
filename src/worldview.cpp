@@ -65,6 +65,14 @@ void WorldSource::setTime(double t) {
     update();
 }
 
+void WorldSource::setView(bool free, const World::View &view) {
+    if (free == m_free && (!free || (view.position == m_view.position && view.rotation == m_view.rotation && view.fov == m_view.fov)))
+        return;
+    m_free = free;
+    m_view = view;
+    update();
+}
+
 const World::Mesh &WorldSource::mesh(int layer) {
     auto found = m_meshes.find(layer);
     if (found == m_meshes.end())
@@ -79,6 +87,11 @@ void WorldSource::update() {
         frame["cameraPosition"] = QVariant::fromValue(f.cameraPosition);
         frame["cameraRotation"] = QVariant::fromValue(f.cameraRotation);
         frame["fov"] = f.fov;
+        if (m_free) {
+            frame["viewPosition"] = QVariant::fromValue(m_view.position);
+            frame["viewRotation"] = QVariant::fromValue(m_view.rotation);
+            frame["viewFov"] = m_view.fov;
+        }
         QVariantMap places;
         for (const World::Placement &place : f.layers)
             places.insert(QString::number(place.layer), QVariantMap{{"haze", place.haze},

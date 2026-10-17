@@ -65,6 +65,7 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: {
             if (win.quitConfirmVisible) win.quitConfirmVisible = false;
+            else if (backend.handle >= 0) backend.endHandle(false);
             else if (backend.aiPrompt !== "") backend.dismissAiPrompt();
             else if (backend.downloading) backend.cancelDownload();
             else if (win.helpVisible) win.helpVisible = false;
@@ -120,25 +121,25 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+D"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.busy === ""; onActivated: backend.makeWorld() }
     Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.busy === ""; onActivated: backend.shapeSelected() }
 
-    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", -1) }
-    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", 1) }
-    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", -1) }
-    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", 1) }
-    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", -10) }
-    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("x", 10) }
-    Shortcut { sequence: "Shift+Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", -10) }
-    Shortcut { sequence: "Shift+Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("y", 10) }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("x", -1) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("x", 1) }
+    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("y", -1) }
+    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("y", 1) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("x", -10) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("x", 10) }
+    Shortcut { sequence: "Shift+Up"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("y", -10) }
+    Shortcut { sequence: "Shift+Down"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.adjust("y", 10) }
     Shortcut { sequence: "["; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", -1) }
     Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", 1) }
     Shortcut { sequence: "{"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", -15) }
     Shortcut { sequence: "}"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.adjust("rotation", 15) }
-    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.multiply("scale", 1 / 1.05) }
-    Shortcut { sequences: ["=", "+"]; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.multiply("scale", 1.05) }
+    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.multiply("scale", 1 / 1.05) }
+    Shortcut { sequences: ["=", "+"]; context: Qt.ApplicationShortcut; enabled: win.hasTarget && !backend.freeView; onActivated: backend.multiply("scale", 1.05) }
     Shortcut { sequence: "9"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setProperty("opacity", Math.max(0, backend.values.opacity - 0.1)) }
     Shortcut { sequence: "0"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setProperty("opacity", Math.min(1, backend.values.opacity + 0.1)) }
 
     Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.keyAll() }
-    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.removeKeys() }
+    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && backend.handle < 0; onActivated: backend.removeKeys() }
     Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.cycleEase() }
     Shortcut { sequence: "Ctrl+C"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.copyKeys() }
     Shortcut { sequence: "Ctrl+V"; context: Qt.ApplicationShortcut; enabled: win.hasTarget; onActivated: backend.pasteKeys() }
@@ -159,6 +160,37 @@ ApplicationWindow {
     Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "move"; onActivated: backend.animateParallax() }
     Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: win.hasTarget && backend.tool === "move"; onActivated: win.presetMenuVisible = true }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.aiPrompt !== ""; onActivated: backend.acceptAiPrompt() }
+
+    // The 3D view: the free view, looking at what's selected, and grabbing
+    // a piece of the world (G), kept to an axis with X, Y or Z.
+    Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
+    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
+    Shortcut {
+        sequence: "G"
+        context: Qt.ApplicationShortcut
+        enabled: win.ready && backend.tool === "move" && backend.handle < 0
+        onActivated: {
+            const p = view.toView(canvasMouse.mouseX, canvasMouse.mouseY);
+            backend.beginHandle(0, p.x, p.y);
+            canvasMouse.grabbing = backend.handle >= 0;
+        }
+    }
+    // In the free view the arrows orbit (Shift pans) and - and = come
+    // closer, as Blender's number pad does.
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.orbitView(-50, 0) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.orbitView(50, 0) }
+    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.orbitView(0, -50) }
+    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.orbitView(0, 50) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.panView(-60, 0) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.panView(60, 0) }
+    Shortcut { sequence: "Shift+Up"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.panView(0, -60) }
+    Shortcut { sequence: "Shift+Down"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.panView(0, 60) }
+    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.zoomView(1 / 1.25) }
+    Shortcut { sequences: ["=", "+"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView; onActivated: backend.zoomView(1.25) }
+    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(1) }
+    Shortcut { sequence: "Y"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(2) }
+    Shortcut { sequence: "Z"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(3) }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: { backend.endHandle(true); canvasMouse.grabbing = false } }
     Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "cut"; onActivated: backend.removeCutPoint() }
 
     // ---- Layout ----------------------------------------------------------
@@ -218,6 +250,13 @@ ApplicationWindow {
                     color: win.muted
                 }
                 ToolButton {
+                    text: backend.freeView ? "Free view" : "Camera view"
+                    visible: backend.hasProject && backend.world.active
+                    onClicked: { backend.toggleFreeView(); win.focusCanvas() }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "` switches between the shot's camera and a free view of the world"
+                }
+                ToolButton {
                     text: "Export"
                     visible: backend.hasProject && !backend.exporting
                     onClicked: win.exportMenuVisible = true
@@ -273,11 +312,13 @@ ApplicationWindow {
                 // draws everything else over it.
                 Rectangle {
                     visible: backend.hasProject && backend.world.active
-                    x: view.canvasRect.x
-                    y: view.canvasRect.y
-                    width: view.canvasRect.width
-                    height: view.canvasRect.height
-                    color: backend.sceneInfo.background || "black"
+                    // The free view fills the whole area.
+                    x: backend.freeView ? 0 : view.canvasRect.x
+                    y: backend.freeView ? 0 : view.canvasRect.y
+                    width: backend.freeView ? canvasArea.width : view.canvasRect.width
+                    height: backend.freeView ? canvasArea.height : view.canvasRect.height
+                    // The free view stands on grey, as a 3D editor does.
+                    color: backend.freeView ? "#26262b" : backend.sceneInfo.background || "black"
                     clip: true
                     WorldView {
                         anchors.fill: parent
@@ -305,15 +346,28 @@ ApplicationWindow {
                     // being drawn, and where it last dropped a point.
                     property int cutPoint: -1
                     property int pinDrag: -1
-                    hoverEnabled: backend.tool === "brush"
+                    // The mouse is followed everywhere: G grabs from where it is.
+                    hoverEnabled: true
+                    // A grab (G) follows the mouse until a click.
+                    property bool grabbing: false
+                    property bool handling: false
+                    property bool orbiting: false
                     property bool lassoing: false
                     property point lassoAt
 
                     onPressed: function (mouse) {
                         win.focusCanvas();
-                        // The middle button pans the view, whatever the tool.
-                        if (mouse.button === Qt.MiddleButton) {
+                        if (grabbing) {
+                            backend.endHandle(mouse.button === Qt.LeftButton);
+                            grabbing = false;
+                            return;
+                        }
+                        // The middle button pans the view, whatever the tool;
+                        // in the free view it orbits (Shift pans), and so
+                        // does Alt with the left button, for touchpads.
+                        if (mouse.button === Qt.MiddleButton || (backend.freeView && (mouse.modifiers & Qt.AltModifier))) {
                             panFrom = Qt.point(mouse.x, mouse.y);
+                            orbiting = backend.freeView;
                             return;
                         }
                         const p = view.toScene(mouse.x, mouse.y);
@@ -358,17 +412,49 @@ ApplicationWindow {
                             backend.setPivotAt(p.x, p.y);
                             return;
                         }
+                        // A handle on what's selected in the world moves it.
+                        const v = view.toView(mouse.x, mouse.y);
+                        if (mouse.button === Qt.LeftButton) {
+                            const h = backend.handleAt(v.x, v.y, 9 / view.viewZoom());
+                            if (h >= 0) {
+                                backend.beginHandle(h, v.x, v.y);
+                                handling = true;
+                                return;
+                            }
+                        }
                         // With the camera selected, dragging pans the view.
                         // Otherwise, Shift drags the selected layer even
                         // when another one is on top of it.
                         if (!backend.cameraSelected && !(mouse.modifiers & Qt.ShiftModifier))
-                            backend.selectAt(p.x, p.y);
+                            backend.pickAt(v.x, v.y);
+                        // In the free view, a piece of the world moves across
+                        // the view as it's dragged.
+                        if (backend.freeView) {
+                            if (mouse.button === Qt.LeftButton) {
+                                backend.beginHandle(0, v.x, v.y);
+                                handling = backend.handle >= 0;
+                            }
+                            return;
+                        }
                         if ((backend.selected >= 0 || backend.cameraSelected) && mouse.button === Qt.LeftButton) {
                             backend.beginDrag(p.x, p.y, (mouse.modifiers & Qt.ShiftModifier) !== 0);
                             dragging = true;
                         }
                     }
                     onPositionChanged: function (mouse) {
+                        if (grabbing || handling) {
+                            const g = view.toView(mouse.x, mouse.y);
+                            backend.handleTo(g.x, g.y);
+                            return;
+                        }
+                        if (orbiting) {
+                            if (mouse.modifiers & Qt.ShiftModifier)
+                                backend.panView(mouse.x - panFrom.x, mouse.y - panFrom.y);
+                            else
+                                backend.orbitView(mouse.x - panFrom.x, mouse.y - panFrom.y);
+                            panFrom = Qt.point(mouse.x, mouse.y);
+                            return;
+                        }
                         if (pressedButtons & Qt.MiddleButton) {
                             view.panBy(mouse.x - panFrom.x, mouse.y - panFrom.y);
                             panFrom = Qt.point(mouse.x, mouse.y);
@@ -404,6 +490,11 @@ ApplicationWindow {
                         backend.dragTo(p.x, p.y);
                     }
                     onReleased: {
+                        if (handling) {
+                            backend.endHandle(true);
+                            handling = false;
+                        }
+                        orbiting = false;
                         if (backend.tool === "brush")
                             backend.endBrush();
                         if (pinDrag >= 0) {
@@ -417,6 +508,10 @@ ApplicationWindow {
                         lassoing = false;
                     }
                     onWheel: function (wheel) {
+                        if (backend.freeView) {
+                            backend.zoomView(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15);
+                            return;
+                        }
                         // Ctrl looks closer, about the mouse.
                         if (wheel.modifiers & Qt.ControlModifier) {
                             view.zoomBy(wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15, wheel.x, wheel.y);
@@ -477,7 +572,7 @@ ApplicationWindow {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 14
-                    visible: backend.hasProject && backend.tool !== "move"
+                    visible: backend.hasProject && (backend.tool !== "move" || backend.handle >= 0)
                     radius: 6
                     color: "#e0141417"
                     border.color: theme.accent
@@ -491,7 +586,10 @@ ApplicationWindow {
                         color: win.text
                         horizontalAlignment: Text.AlignHCenter
                         lineHeight: 1.3
-                        text: backend.tool === "pin"
+                        text: backend.handle >= 0
+                              ? (backend.handle === 4 ? "Turning" : backend.handle === 0 ? "Moving" : "Moving along " + ["", "x", "y", "z"][backend.handle])
+                                + "   ·   X, Y, Z keep to an axis (again frees it)   ·   click or Enter to place   ·   right-click or Esc puts it back"
+                              : backend.tool === "pin"
                               ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
                               : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"

@@ -32,6 +32,9 @@ public:
 
     void setScene(const Scene &scene, const QString &directory);
     void setTime(double t);
+    // The window's free view, shown instead of the shot's camera; off for
+    // exports.
+    void setView(bool free, const World::View &view = {});
 
     bool active() const { return m_info.valid; }
     QVariantList layers() const { return m_layers; }
@@ -60,6 +63,8 @@ private:
     QByteArray m_meshKey;
     double m_time = 0;
     int m_revision = 0;
+    bool m_free = false;
+    World::View m_view;
 };
 
 // A world layer's mesh, for a Model in QML.

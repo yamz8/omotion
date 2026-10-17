@@ -150,6 +150,28 @@ struct Frame {
     QList<Placement> layers;
 };
 Frame frame(const Scene &scene, AssetCache &assets, double t);
+// A way of looking at the world: the shot's camera, or the window's free
+// view. Looks down -z, as Qt Quick 3D's cameras do; fov is vertical.
+struct View {
+    QVector3D position;
+    QQuaternion rotation;
+    double fov = 40;
+};
+View cameraView(const Frame &frame);
+// Where a world point lands on an image of this size seen through the view;
+// false when it's behind the view.
+bool project(const View &view, const QSizeF &size, const QVector3D &point, QPointF *onScreen);
+// The ray from the view through a point of that image: where it starts and
+// which way it goes (a unit vector).
+void ray(const View &view, const QSizeF &size, const QPointF &onScreen, QVector3D *origin, QVector3D *direction);
+// The world layer nearest the view under a point of that image, where its
+// picture isn't see-through; -1 for none.
+int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen);
+// The corners of a world layer's mesh box where it is at time t (8 points:
+// bit 0 of the index picks x's end, bit 1 y's, bit 2 z's), and its pivot
+// there; false for no mesh.
+bool box(const Scene &scene, AssetCache &assets, int index, double t, QList<QVector3D> *corners, QVector3D *pivot);
+
 // How far the world moves on screen between two moments, in pixels of an
 // image this size: the most that any point of its pieces' meshes travels,
 // as the camera and the pieces move. For how many moments a shutter needs.
