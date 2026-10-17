@@ -316,6 +316,10 @@ public:
     // Tracking: the point of the selected video layer under a canvas point
     // followed from the playhead to the end; an empty keyed to follow it.
     Q_INVOKABLE void trackAt(double x, double y);
+    // The track tool's points: added by clicks, then followed (one keys an
+    // empty to it; more solve the footage's move), or the footage held still.
+    Q_INVOKABLE void addTrackPoint(double x, double y);
+    Q_INVOKABLE void finishTrack(bool stabilize);
     // The selected layer's warp (Project::setWarp).
     Q_INVOKABLE void setWarp(const QString &name, double value);
     // The selected video layer's start, speed or loop.

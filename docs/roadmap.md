@@ -88,11 +88,12 @@ materials; video layers and tracking; imported models; billowing layers.
 Done since: bodies tumble (spin from knocks and the ground, rest on a
 side); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
-property.
+property; several tracked points solving the footage's move (in its
+plane: shift, turn, growth) or stabilizing it.
 
 Still to do there: collisions with shapes rather than boxes; 3D particles
 beyond dust; cloth and real fluids; light probes and shadows from added
-lights; video tracking with several points (to solve a camera).
+lights; a 3D camera solve from tracks (a moving camera's path in depth).
 
 ## Realism (folded into the world)
 

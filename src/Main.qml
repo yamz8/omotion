@@ -157,6 +157,8 @@ ApplicationWindow {
     // A path for the selected layer to follow, drawn as a cut's points are.
     Shortcut { sequence: "Shift+P"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setTool(backend.tool === "path" ? "move" : "path") }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(false) }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "track"; onActivated: backend.finishTrack(false) }
+    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "track"; onActivated: backend.finishTrack(true) }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(true) }
     Shortcut { sequence: "Shift+A"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addEmpty() }
     // Drawing, as Grease Pencil: strokes on a drawing layer, frame by frame.
@@ -217,7 +219,7 @@ ApplicationWindow {
     Shortcut { sequence: "Y"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(2) }
     Shortcut { sequence: "Z"; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: backend.setHandleAxis(3) }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.handle >= 0; onActivated: { backend.endHandle(true); canvasMouse.grabbing = false } }
-    Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "path"); onActivated: backend.removeCutPoint() }
+    Shortcut { sequence: "Backspace"; context: Qt.ApplicationShortcut; enabled: win.ready && (backend.tool === "cut" || backend.tool === "path" || backend.tool === "track"); onActivated: backend.removeCutPoint() }
 
     // ---- Layout ----------------------------------------------------------
 
@@ -459,7 +461,7 @@ ApplicationWindow {
                             return;
                         }
                         if (backend.tool === "track") {
-                            backend.trackAt(p.x, p.y);
+                            backend.addTrackPoint(p.x, p.y);
                             return;
                         }
                         // A handle on what's selected in the world moves it.
@@ -659,7 +661,8 @@ ApplicationWindow {
                               : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
                               : backend.tool === "track"
-                              ? "Track: click a point on " + (backend.values.name || "the video") + " with some detail around it; it's followed from the playhead to the end, and an empty keyed there   ·   Esc cancel"
+                              ? "Track " + (backend.values.name || "the video") + ": click points with some detail around them (" + backend.cutPoints.length + " so far)"
+                                + "\nEnter: one is followed by an empty, more solve the footage's move onto one   ·   Shift+Enter: hold the footage still   ·   Backspace drops a point   ·   Esc cancel"
                               : backend.tool === "draw"
                               ? "Draw on " + (backend.values.name || "the drawing") + ": drag to draw, right-click takes back a stroke, the wheel sizes the pen ("
                                 + Math.round(backend.brushRadius / 4 * 10) / 10 + " px)   ·   , . to another frame: drawing there starts a new drawing   ·   Esc done"

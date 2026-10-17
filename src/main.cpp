@@ -80,9 +80,12 @@ const char *Usage = R"(Usage:
                                          Add a video clip as a layer that plays (its frames written
                                          into the project), from start seconds, at a speed, looping
                                          unless --hold
-  omotion track <project> <video-layer> <x,y> [--from <s>] [--to <s>] [--onto <layer>]
+  omotion track <project> <video-layer> <x,y> [<x,y>...] [--from <s>] [--to <s>] [--onto <layer>] [--stabilize]
                                          Follow the point of a video under x,y (canvas pixels) frame
-                                         by frame, and key a layer (or a new empty) to follow it
+                                         by frame, and key a layer (or a new empty) to follow it;
+                                         with more points, solve how the footage moves, turns and
+                                         grows, and key that (x, y, rotation, scale); --stabilize
+                                         keys the video the opposite way, to hold it still
   omotion model <project> <file> <right,up,ahead> [--size <meters>]
                                          Import a 3D model (glTF, GLB or OBJ) into a world, standing
                                          there, that tall at its longest
@@ -696,25 +699,37 @@ int command(const QStringList &args) {
             return fail("track takes a project, a video layer and x,y.");
         Scene edited = scene;
         const int video = edited.indexOf(args.at(3));
-        const QStringList xy = args.at(4).split(',');
-        if (video < 0 || xy.size() != 2)
-            return fail("track takes a video layer's name and a point, x,y.");
+        if (video < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QList<QPointF> points;
         double from = 0, to = edited.duration;
         QString onto;
-        for (int i = 5; i + 1 < args.size(); i += 2) {
-            if (args.at(i) == "--from")
-                from = args.at(i + 1).toDouble();
-            else if (args.at(i) == "--to")
-                to = args.at(i + 1).toDouble();
-            else if (args.at(i) == "--onto")
-                onto = args.at(i + 1);
+        bool stabilize = false;
+        for (int i = 4; i < args.size(); ++i) {
+            const QStringList xy = args.at(i).split(',');
+            if (xy.size() == 2 && !args.at(i).startsWith("--"))
+                points << QPointF(xy.at(0).toDouble(), xy.at(1).toDouble());
+            else if (args.at(i) == "--stabilize")
+                stabilize = true;
+            else if (i + 1 < args.size() && args.at(i) == "--from")
+                from = args.at(++i).toDouble();
+            else if (i + 1 < args.size() && args.at(i) == "--to")
+                to = args.at(++i).toDouble();
+            else if (i + 1 < args.size() && args.at(i) == "--onto")
+                onto = args.at(++i);
             else
                 return fail(QString("track doesn't know %1.").arg(args.at(i)));
         }
-        const int follower = Project::track(edited, assets, video, QPointF(xy.at(0).toDouble(), xy.at(1).toDouble()), from, to, &error, onto);
-        if (follower < 0 || !Project::save(directory, edited, &error))
+        if (points.isEmpty())
+            return fail("track takes a point, x,y, or more.");
+        // One point is followed; more (or holding it still) solve the move.
+        const int keyed = points.size() == 1 && !stabilize
+                              ? Project::track(edited, assets, video, points.first(), from, to, &error, onto)
+                              : Project::solve(edited, assets, video, points, from, to, stabilize, &error, onto);
+        if (keyed < 0 || !Project::save(directory, edited, &error))
             return fail(error);
-        QTextStream(stdout) << edited.layers.at(follower).name << " follows it.\n";
+        QTextStream(stdout) << (stabilize ? QString("%1 holds still.\n").arg(edited.layers.at(keyed).name)
+                                          : QString("%1 follows it.\n").arg(edited.layers.at(keyed).name));
         return 0;
     }
 

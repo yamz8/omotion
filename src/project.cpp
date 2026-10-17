@@ -2298,20 +2298,19 @@ std::vector<float> greyOf(const QImage &image) {
 }
 }
 
-int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, double from, double to, QString *error,
-          const QString &onto, QList<QPointF> *path) {
+namespace {
+// Follows the patch of a video layer's picture about a canvas point from
+// one time, frame by frame, as far as frames: where it is on the canvas at
+// each (fewer when it runs off the frame), or nothing, with why.
+QList<QPointF> follow(const Scene &scene, AssetCache &assets, int video, const QPointF &point, double from, int frames,
+                      QString *error) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
-        return -1;
+        return QList<QPointF>();
     };
-    if (video < 0 || video >= scene.layers.size() || !scene.layers.at(video).raw.contains("video"))
-        return fail("Track a point on a video layer.");
     const Layer &clip = scene.layers.at(video);
     const double step = 1 / std::max(1.0, scene.fps);
-    from = std::clamp(from, 0.0, scene.duration);
-    to = std::clamp(to, from, scene.duration);
-    const int frames = int(std::lround((to - from) / step)) + 1;
     bool invertible = false;
     QTransform back = layerTransform(scene, assets, video, from).inverted(&invertible);
     if (!invertible)
@@ -2328,6 +2327,42 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
         return fail("Pick a point inside the video, away from its edges.");
     std::vector<float> grey = greyOf(first);
     const int side = 2 * half + 1;
+    // Between pixels, smoothly: the frame's grey at any point.
+    auto sample = [&](const std::vector<float> &from, double x, double y) {
+        x = std::clamp(x, 0.0, w - 1.001);
+        y = std::clamp(y, 0.0, h - 1.001);
+        const int ix = int(x), iy = int(y);
+        const double fx = x - ix, fy = y - iy;
+        const float *row = &from[size_t(iy) * w + ix], *below = row + w;
+        return (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
+    };
+    // The first frame's patch, the one every later frame is matched to in
+    // the end, so small errors don't add up into a drift.
+    const QPointF origin = at;
+    std::vector<double> reference(size_t(side) * side);
+    double referenceMean = 0;
+    for (int y = -half; y <= half; ++y)
+        for (int x = -half; x <= half; ++x)
+            referenceMean += reference[size_t(y + half) * side + x + half] = sample(grey, origin.x() + x, origin.y() + y);
+    referenceMean /= reference.size();
+    // Too plain a patch (or one with only edges one way) can't be followed:
+    // its weakest direction of detail, as Shi and Tomasi tell it.
+    {
+        double xx = 0, xy = 0, yy = 0;
+        for (int y = -half; y <= half; ++y)
+            for (int x = -half; x <= half; ++x) {
+                const double gx = sample(grey, origin.x() + x + .5, origin.y() + y) - sample(grey, origin.x() + x - .5, origin.y() + y);
+                const double gy = sample(grey, origin.x() + x, origin.y() + y + .5) - sample(grey, origin.x() + x, origin.y() + y - .5);
+                xx += gx * gx, xy += gx * gy, yy += gy * gy;
+            }
+        const double n = double(reference.size());
+        const double weakest = ((xx + yy) - std::sqrt((xx - yy) * (xx - yy) + 4 * xy * xy)) / 2 / n;
+        if (weakest < 5)
+            return fail("There's too little detail around that point to follow: pick a corner, a spot or some texture.");
+    }
+    // How the patch has turned and stretched since: x' = shape · x.
+    double shape[4] = {1, 0, 0, 1};
+    QPointF last = at;
     std::vector<float> pattern(size_t(side) * side);
     auto cut = [&](const std::vector<float> &from, int cx, int cy, std::vector<float> &into) {
         for (int y = -half; y <= half; ++y)
@@ -2352,7 +2387,10 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
         for (const float v : pattern)
             patternMean += v;
         patternMean /= pattern.size();
-        const int cx = int(std::lround(at.x())), cy = int(std::lround(at.y()));
+        // Looked for first where it would be going on as it went.
+        const QPointF guess = at + (at - last);
+        last = at;
+        const int cx = int(std::lround(guess.x())), cy = int(std::lround(guess.y()));
         for (int dy = -search; dy <= search; ++dy)
             for (int dx = -search; dx <= search; ++dx) {
                 const int x0 = cx + dx, y0 = cy + dy;
@@ -2386,12 +2424,101 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
             return scores[size_t(dy + search) * (2 * search + 1) + dx + search];
         };
         at = QPointF(cx + bx + refine(score(bx - 1, by), best, score(bx + 1, by)), cy + by + refine(score(bx, by - 1), best, score(bx, by + 1)));
-        std::vector<float> now(pattern.size());
-        cut(grey, int(std::lround(at.x())), int(std::lround(at.y())), now);
-        for (size_t i = 0; i < pattern.size(); ++i)
-            pattern[i] = pattern[i] * .8f + now[i] * .2f;
+        // Then fitted to the first frame's patch, as Lucas and Kanade do:
+        // where it is and how it has turned and grown, a few steps of
+        // Gauss-Newton on the difference, brightness and contrast aside.
+        double c[2] = {at.x(), at.y()}, a[4] = {shape[0], shape[1], shape[2], shape[3]};
+        bool fitted = false;
+        for (int step = 0; step < 30; ++step) {
+            std::vector<double> values(reference.size()), dx(reference.size()), dy(reference.size());
+            double mean = 0;
+            for (int y = -half; y <= half; ++y)
+                for (int x = -half; x <= half; ++x) {
+                    const size_t i = size_t(y + half) * side + x + half;
+                    const double px = c[0] + a[0] * x + a[1] * y, py = c[1] + a[2] * x + a[3] * y;
+                    values[i] = sample(grey, px, py);
+                    dx[i] = (sample(grey, px + .5, py) - sample(grey, px - .5, py));
+                    dy[i] = (sample(grey, px, py + .5) - sample(grey, px, py - .5));
+                    mean += values[i];
+                }
+            mean /= values.size();
+            double hessian[6][7] = {};
+            for (int y = -half; y <= half; ++y)
+                for (int x = -half; x <= half; ++x) {
+                    const size_t i = size_t(y + half) * side + x + half;
+                    const double g[6] = {dx[i], dy[i], dx[i] * x, dx[i] * y, dy[i] * x, dy[i] * y};
+                    const double e = (reference[i] - referenceMean) - (values[i] - mean);
+                    for (int r = 0; r < 6; ++r) {
+                        for (int k = 0; k < 6; ++k)
+                            hessian[r][k] += g[r] * g[k];
+                        hessian[r][6] += g[r] * e;
+                    }
+                }
+            // Solved by elimination, the largest pivot first.
+            bool solvable = true;
+            for (int col = 0; col < 6 && solvable; ++col) {
+                int pivot = col;
+                for (int r = col + 1; r < 6; ++r)
+                    if (std::abs(hessian[r][col]) > std::abs(hessian[pivot][col]))
+                        pivot = r;
+                if (std::abs(hessian[pivot][col]) < 1e-9) {
+                    solvable = false;
+                    break;
+                }
+                std::swap(hessian[col], hessian[pivot]);
+                for (int r = 0; r < 6; ++r)
+                    if (r != col) {
+                        const double factor = hessian[r][col] / hessian[col][col];
+                        for (int k = col; k < 7; ++k)
+                            hessian[r][k] -= factor * hessian[col][k];
+                    }
+            }
+            if (!solvable)
+                break;
+            double change[6];
+            for (int r = 0; r < 6; ++r)
+                change[r] = hessian[r][6] / hessian[r][r];
+            c[0] += change[0];
+            c[1] += change[1];
+            for (int k = 0; k < 4; ++k)
+                a[k] += change[2 + k];
+            fitted = true;
+            if (std::hypot(change[0], change[1]) < 1e-3)
+                break;
+        }
+        // Kept only when it stayed near and the patch stayed a patch.
+        const double det = a[0] * a[3] - a[1] * a[2];
+        if (fitted && std::isfinite(c[0]) && std::isfinite(c[1]) && det > .3 && det < 3 && QLineF(at, QPointF(c[0], c[1])).length() < half) {
+            at = QPointF(c[0], c[1]);
+            std::copy(a, a + 4, shape);
+        }
+        // The next frame is looked for by how it looks now.
+        for (int y = -half; y <= half; ++y)
+            for (int x = -half; x <= half; ++x)
+                pattern[size_t(y + half) * side + x + half] =
+                    float(sample(grey, at.x() + shape[0] * x + shape[1] * y, at.y() + shape[2] * x + shape[3] * y));
         canvas << layerTransform(scene, assets, video, t).map(at);
     }
+    return canvas;
+}
+}
+
+int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, double from, double to, QString *error,
+          const QString &onto, QList<QPointF> *path) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return -1;
+    };
+    if (video < 0 || video >= scene.layers.size() || !scene.layers.at(video).raw.contains("video"))
+        return fail("Track a point on a video layer.");
+    const Layer &clip = scene.layers.at(video);
+    const double step = 1 / std::max(1.0, scene.fps);
+    from = std::clamp(from, 0.0, scene.duration);
+    to = std::clamp(to, from, scene.duration);
+    const QList<QPointF> canvas = follow(scene, assets, video, point, from, int(std::lround((to - from) / step)) + 1, error);
+    if (canvas.isEmpty())
+        return -1;
     if (path)
         *path = canvas;
     // What follows it: the named layer, or a new empty.
@@ -2421,6 +2548,166 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
         std::sort(keys.begin(), keys.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
         follower.keys[property] = keys;
     }
+    return target;
+}
+
+namespace {
+// A move, turn and growth in the picture's plane: where a point p goes is
+// scale times p turned by angle, then moved by shift.
+struct Similar {
+    double scale = 1, angle = 0;  // Degrees, clockwise on the canvas.
+    QPointF shift;
+    QPointF map(const QPointF &p) const {
+        const double r = qDegreesToRadians(angle), c = std::cos(r) * scale, s = std::sin(r) * scale;
+        return QPointF(c * p.x() - s * p.y(), s * p.x() + c * p.y()) + shift;
+    }
+    Similar inverted() const {
+        Similar back;
+        back.scale = 1 / scale;
+        back.angle = -angle;
+        back.shift = -back.map(shift);
+        return back;
+    }
+};
+
+// The move that best takes the points from to the points to, by least
+// squares: its shift, turn and growth (only a shift for a single point).
+Similar fit(const QList<QPointF> &from, const QList<QPointF> &to) {
+    Similar m;
+    const qsizetype n = std::min(from.size(), to.size());
+    if (n == 0)
+        return m;
+    QPointF a, b;
+    for (qsizetype i = 0; i < n; ++i)
+        a += from.at(i), b += to.at(i);
+    a /= double(n);
+    b /= double(n);
+    if (n == 1) {
+        m.shift = b - a;
+        return m;
+    }
+    double dot = 0, cross = 0, spread = 0;
+    for (qsizetype i = 0; i < n; ++i) {
+        const QPointF p = from.at(i) - a, q = to.at(i) - b;
+        dot += p.x() * q.x() + p.y() * q.y();
+        cross += p.x() * q.y() - p.y() * q.x();
+        spread += p.x() * p.x() + p.y() * p.y();
+    }
+    if (spread < 1e-9) {
+        m.shift = b - a;
+        return m;
+    }
+    m.angle = qRadiansToDegrees(std::atan2(cross, dot));
+    m.scale = std::hypot(dot, cross) / spread;
+    m.shift = b - Similar{m.scale, m.angle, {}}.map(a);
+    return m;
+}
+}
+
+int solve(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &points, double from, double to, bool stabilize,
+          QString *error, const QString &onto) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return -1;
+    };
+    if (video < 0 || video >= scene.layers.size() || !scene.layers.at(video).raw.contains("video"))
+        return fail("Solve on a video layer.");
+    if (points.isEmpty())
+        return fail("Pick points on the video to follow.");
+    const double step = 1 / std::max(1.0, scene.fps);
+    from = std::clamp(from, 0.0, scene.duration);
+    to = std::clamp(to, from, scene.duration);
+    const int frames = int(std::lround((to - from) / step)) + 1;
+    QList<QList<QPointF>> paths;
+    for (const QPointF &point : points) {
+        QString why;
+        const QList<QPointF> path = follow(scene, assets, video, point, from, frames, &why);
+        if (path.isEmpty())
+            return fail(QString("Point %1: %2").arg(paths.size() + 1).arg(why));
+        paths << path;
+    }
+    // Each frame's move from the first, from the points still followed then;
+    // the turn kept going the same way round rather than jumping at 180°.
+    QList<Similar> moves;
+    for (int f = 0; f < frames; ++f) {
+        QList<QPointF> start, now;
+        for (const QList<QPointF> &path : paths)
+            if (f < path.size())
+                start << path.first(), now << path.at(f);
+        if (start.isEmpty())
+            break;
+        Similar move = fit(start, now);
+        if (!moves.isEmpty())
+            move.angle = moves.last().angle + std::remainder(move.angle - moves.last().angle, 360.0);
+        moves << move;
+    }
+    auto keep = [&](Layer &layer, const QString &property, const QList<Key> &keys) {
+        QList<Key> all;
+        for (const Key &key : layer.keys.value(property))
+            if (key.t < from - 1e-9 || key.t > from + (moves.size() - 1) * step + 1e-9)
+                all << key;
+        all << keys;
+        std::sort(all.begin(), all.end(), [](const Key &a, const Key &b) { return a.t < b.t; });
+        layer.keys[property] = all;
+    };
+    auto round = [](double v) { return std::round(v * 1e4) / 1e4; };
+    if (stabilize) {
+        // Each frame undone: the layer's own place taken back by that
+        // frame's move, its turn and size less it. Its x and y live in its
+        // parent's pixels, which the move is worked out on the canvas of.
+        const Scene before = scene;
+        QList<Key> xs, ys, turns, sizes;
+        for (int f = 0; f < moves.size(); ++f) {
+            const double t = from + f * step;
+            const Similar back = moves.at(f).inverted();
+            const QTransform toCanvas = parentTransform(before, assets, video, t);
+            const QPointF place(before.ownValue(before.layers.at(video), "x", t), before.ownValue(before.layers.at(video), "y", t));
+            const QPointF moved = toCanvas.inverted().map(back.map(toCanvas.map(place)));
+            xs << Key{t, round(moved.x()), "linear"};
+            ys << Key{t, round(moved.y()), "linear"};
+            turns << Key{t, round(before.ownValue(before.layers.at(video), "rotation", t) + back.angle), "linear"};
+            sizes << Key{t, round(before.ownValue(before.layers.at(video), "scale", t) * back.scale), "linear"};
+        }
+        Layer &layer = scene.layers[video];
+        keep(layer, "x", xs);
+        keep(layer, "y", ys);
+        keep(layer, "rotation", turns);
+        keep(layer, "scale", sizes);
+        return video;
+    }
+    // What follows it: the named layer, or a new empty where the points'
+    // middle is to start with.
+    int target = onto.isEmpty() ? -1 : scene.indexOf(onto);
+    if (!onto.isEmpty() && target < 0)
+        return fail(QString("There's no layer named \"%1\".").arg(onto));
+    QPointF middle;
+    for (const QList<QPointF> &path : paths)
+        middle += path.first();
+    middle /= double(paths.size());
+    if (target < 0)
+        target = addEmpty(scene, scene.layers.at(video).name + " solve", {}, QPointF());
+    const int parent = scene.indexOf(scene.layers.at(target).parent);
+    // Where onto is on the canvas at the start rides along with the move.
+    const QPointF anchor = onto.isEmpty() ? middle : layerTransform(scene, assets, target, from).map(QPointF());
+    const double turn = onto.isEmpty() ? 0 : scene.ownValue(scene.layers.at(target), "rotation", from);
+    const double size = onto.isEmpty() ? 1 : scene.ownValue(scene.layers.at(target), "scale", from);
+    QList<Key> xs, ys, turns, sizes;
+    for (int f = 0; f < moves.size(); ++f) {
+        const double t = from + f * step;
+        const QTransform toCanvas = (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
+                                    cameraTransform(scene, followOf(scene, target), t);
+        const QPointF p = toCanvas.inverted().map(moves.at(f).map(anchor));
+        xs << Key{t, round(p.x()), "linear"};
+        ys << Key{t, round(p.y()), "linear"};
+        turns << Key{t, round(turn + moves.at(f).angle), "linear"};
+        sizes << Key{t, round(size * moves.at(f).scale), "linear"};
+    }
+    Layer &follower = scene.layers[target];
+    keep(follower, "x", xs);
+    keep(follower, "y", ys);
+    keep(follower, "rotation", turns);
+    keep(follower, "scale", sizes);
     return target;
 }
 

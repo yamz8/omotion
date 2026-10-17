@@ -139,7 +139,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `Shift+R` | Paint a piece's shape with a brush: drag adds, right-drag takes away, the wheel sizes it, `Enter` applies |
 | `P` | Pivot tool: click where the layer turns and scales around |
 | `Shift+P` | Path: click points (or drag) for the selected layer to follow from the playhead to the end, `Enter`; `Shift+Enter` turns it with the way |
-| `Shift+T` | Track: click a point with some detail on the selected video layer; it's followed frame by frame from the playhead to the end, and an empty keyed to it, to parent things to so they stick to the footage. `omotion track` does the same (`--onto` keys a layer you have) |
+| `Shift+T` | Track: click points with some detail on the selected video layer, then `Enter`: one point is followed frame by frame from the playhead to the end, and an empty keyed to it; with more, the footage's move is solved (how it shifts, turns and grows) and keyed onto an empty, to parent things to so they stick to the footage. `Shift+Enter` holds the footage still instead (stabilizes it). `omotion track` does the same (`--onto` keys a layer you have, `--stabilize`) |
 | `Shift+A` | Add an empty: a cross, a point for rigs to aim at |
 | `Ctrl+Shift+F` | Film: the shots beside this project, played in the panel (`Space` plays, the slider scrubs), their transitions, their order, and export |
 | `Shift+B` | Draw, as Grease Pencil does: drag to draw strokes on the selected drawing layer (or a new one), the wheel sizes the pen, right-click takes back a stroke. What's drawn at a frame shows until the next drawing, so moving the playhead and drawing again animates it frame by frame; the drawing before shows faintly. The layer moves, turns and follows like any |

@@ -2494,6 +2494,104 @@ private slots:
         QCOMPARE(sourceAt(scene.layers[clip], .55), scene.layers[clip].source);
     }
 
+    void solvingFollowsTheFootagesMove() {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg isn't installed");
+        QTemporaryDir dir;
+        // Blotches over a ground, turning 2° a frame about the middle,
+        // growing 1% a frame and drifting right 2 px a frame.
+        QImage ground(240, 160, QImage::Format_RGB32);
+        ground.fill(QColor(120, 120, 120));
+        {
+            QPainter painter(&ground);
+            painter.setRenderHint(QPainter::Antialiasing);
+            QRandomGenerator random(3);
+            for (int k = 0; k < 160; ++k) {
+                const int v = int(random.bounded(256));
+                painter.setBrush(QColor(v, 255 - v, (v * 7) % 256));
+                painter.setPen(Qt::NoPen);
+                painter.drawEllipse(QPointF(random.bounded(240), random.bounded(160)), 3 + random.bounded(5), 3 + random.bounded(5));
+            }
+        }
+        for (int f = 0; f < 10; ++f) {
+            QImage frame(240, 160, QImage::Format_RGB32);
+            frame.fill(QColor(120, 120, 120));
+            QPainter painter(&frame);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.translate(120 + 2 * f, 80);
+            painter.rotate(2 * f);
+            painter.scale(std::pow(1.01, f), std::pow(1.01, f));
+            painter.drawImage(QPointF(-120, -80), ground);
+            painter.end();
+            frame.save(dir.filePath(QString("f%1.png").arg(f, 2, 10, QChar('0'))));
+        }
+        QProcess make;
+        make.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-framerate", "10", "-i", dir.filePath("f%02d.png"),
+                              "-pix_fmt", "yuv444p", "-crf", "5", dir.filePath("clip.mp4")});
+        QVERIFY(make.waitForFinished(30000) && make.exitCode() == 0);
+        QImage canvas(240, 160, QImage::Format_RGB32);
+        canvas.fill(Qt::black);
+        canvas.save(dir.filePath("p.png"));
+        const QString project = Project::open(dir.filePath("p.png"), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        scene.fps = 10;
+        scene.duration = 1;
+        AssetCache assets(project);
+        QString error;
+        const int clip = Project::importVideo(scene, project, dir.filePath("clip.mp4"), &error);
+        QVERIFY2(clip >= 0, qPrintable(error));
+        // A point with detail in each quarter, as one would pick them.
+        QList<QPointF> points;
+        const QImage grey = ground.convertToFormat(QImage::Format_Grayscale8);
+        for (const QRect &quarter : {QRect(30, 25, 60, 40), QRect(150, 25, 60, 40), QRect(30, 95, 60, 40), QRect(150, 95, 60, 40)}) {
+            double most = -1;
+            QPointF best;
+            for (int y = quarter.top(); y < quarter.bottom(); y += 2)
+                for (int x = quarter.left(); x < quarter.right(); x += 2) {
+                    double edges = 0;
+                    for (int v = -5; v <= 5; ++v)
+                        for (int u = -5; u <= 5; ++u)
+                            edges += std::abs(qGray(grey.pixel(x + u + 1, y + v)) - qGray(grey.pixel(x + u - 1, y + v))) *
+                                     std::abs(qGray(grey.pixel(x + u, y + v + 1)) - qGray(grey.pixel(x + u, y + v - 1)));
+                    if (edges > most)
+                        most = edges, best = QPointF(x, y);
+                }
+            points << best;
+        }
+        // A plain spot can't be followed, and says so.
+        QVERIFY(Project::track(scene, assets, clip, QPointF(170, 55), 0, .9, &error) < 0);
+        QVERIFY2(error.contains("detail"), qPrintable(error));
+        Scene stable = scene;
+        const int solved = Project::solve(scene, assets, clip, points, 0, .9, false, &error);
+        QVERIFY2(solved >= 0, qPrintable(error));
+        const Layer &empty = scene.layers.at(solved);
+        QVERIFY(empty.raw["empty"].toBool());
+        const double turn = scene.value(empty, "rotation", .9), size = scene.value(empty, "scale", .9);
+        QVERIFY2(std::abs(turn - 18) < 2, qPrintable(QString::number(turn)));
+        QVERIFY2(std::abs(size - std::pow(1.01, 9)) < .03, qPrintable(QString::number(size)));
+        // A point on the footage, carried by the empty, lands where the
+        // footage took it: the middle drifted 18 px right.
+        const QPointF middle = layerTransform(scene, assets, solved, .9).map(QPointF());
+        QVERIFY2(QLineF(middle, QPointF(122.5 + 18, 82.5)).length() < 12, qPrintable(QString("%1,%2").arg(middle.x()).arg(middle.y())));
+        // Stabilized, the video turns and shrinks back the other way.
+        QCOMPARE(Project::solve(stable, assets, clip, points, 0, .9, true, &error), clip);
+        QVERIFY(std::abs(stable.value(stable.layers[clip], "rotation", .9) + 18) < 2);
+        QVERIFY(std::abs(stable.value(stable.layers[clip], "scale", .9) * std::pow(1.01, 9) - stable.value(stable.layers[clip], "scale", 0)) < .03);
+        // So a point of the footage stays put on the canvas: where the
+        // footage took it by the last frame is shown where it was.
+        QTransform moved;
+        moved.translate(120 + 18, 80);
+        moved.rotate(18);
+        moved.scale(std::pow(1.01, 9), std::pow(1.01, 9));
+        moved.translate(-120, -80);
+        const QTransform first = layerTransform(stable, assets, clip, 0), last = layerTransform(stable, assets, clip, .9);
+        for (const QPointF &p : points) {
+            const QPointF shown = last.map(moved.map(first.inverted().map(p)));
+            QVERIFY2(QLineF(shown, p).length() < 2, qPrintable(QString("%1,%2").arg(shown.x()).arg(shown.y())));
+        }
+        QVERIFY(Project::solve(stable, assets, 0, points, 0, .9, false, &error) < 0);
+    }
+
     void trackingFollowsAPointInAVideo() {
         if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
             QSKIP("ffmpeg isn't installed");

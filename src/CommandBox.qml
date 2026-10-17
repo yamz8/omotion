@@ -71,7 +71,7 @@ Rectangle {
         ["Remove the layer's rig", "", () => (win.idle && backend.selected >= 0) && (backend.values.rig || []).length > 0, () => backend.unrigSelected()],
         ["Draw: strokes on a drawing layer, frame by frame", "Shift+B", () => win.idle, () => backend.startDrawing()],
         ["Film: shots in a row, add this one, export", "Ctrl+Shift+F", () => win.idle, () => win.filmVisible = true],
-        ["Track a point in the video", "Shift+T", () => (win.idle && backend.selected >= 0), () => backend.setTool("track")],
+        ["Track points in the video, solve its move, stabilize it", "Shift+T", () => (win.idle && backend.selected >= 0), () => backend.setTool("track")],
         ["Add a light to the world", "Shift+L", () => win.idle && backend.world.active, () => backend.addLight()],
         ["Make it a rigid body", "", () => (win.idle && backend.selected >= 0), () => backend.setBody(true, false, .3)],
         ["Simulate the bodies from the playhead", "", () => win.idle, () => backend.simulate()],

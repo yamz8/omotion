@@ -911,6 +911,40 @@ void Backend::trackAt(double x, double y) {
     setNotice(QString("%1 follows it. Parent a layer to it (or link to it) to stick it to the footage.").arg(m_scene.layers.at(follower).name));
 }
 
+void Backend::addTrackPoint(double x, double y) {
+    if (m_tool != "track")
+        return;
+    m_cut << QPointF(x, y);
+    emit toolChanged();
+}
+
+void Backend::finishTrack(bool stabilize) {
+    if (m_tool != "track" || m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
+        return setNotice("Select a video layer to track points on.");
+    if (m_cut.isEmpty())
+        return setNotice("Click points with some detail on the video first.");
+    if (m_cut.size() == 1 && !stabilize)
+        return trackAt(m_cut.first().x(), m_cut.first().y());
+    Scene scene = m_scene;
+    QString error;
+    setBusy(stabilize ? "Holding the footage still…" : "Solving the footage's move…");
+    QCoreApplication::processEvents();
+    const int keyed = Project::solve(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, stabilize, &error);
+    setBusy({});
+    if (keyed < 0)
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    const int points = int(m_cut.size());
+    setTool("move");
+    changed();
+    select(keyed);
+    setNotice(stabilize ? QString("The footage holds still from here, from %1 points: scale it up to hide its edges.").arg(points)
+                        : QString("%1 moves, turns and grows as the footage does, from %2 points: parent layers to it to stick them on.")
+                              .arg(m_scene.layers.at(keyed).name)
+                              .arg(points));
+}
+
 void Backend::setWarp(const QString &name, double value) {
     Scene scene = m_scene;
     QString error;

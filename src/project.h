@@ -230,6 +230,16 @@ bool setVideo(Scene &scene, int layer, const QString &name, const QVariant &valu
 int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, double from, double to, QString *error,
           const QString &onto = {}, QList<QPointF> *path = nullptr);
 
+// Solving the shot's move, as Blender's tracker solves a camera, in the
+// picture's plane: several points of a video layer followed at once, and
+// from how they move together, how the footage shifts, turns and grows
+// each frame since the first. Keys an empty (onto, or a new one where the
+// points' middle is) with x, y, rotation and scale, so layers parented to
+// it stick to the footage; or, stabilizing, keys the video layer the
+// opposite way, so the footage holds still. The layer it keyed, or -1.
+int solve(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &points, double from, double to, bool stabilize,
+          QString *error, const QString &onto = {});
+
 // Copies an image into the project's assets and adds it as a layer on top.
 int importImage(Scene &scene, const QString &directory, const QString &path, QString *error);
 

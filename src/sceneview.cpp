@@ -497,8 +497,10 @@ void SceneView::paint(QPainter *painter) {
             shape.append(view.map(point));
         QPainterPath path;
         path.addPolygon(shape);
-        // A path stays open; a cut's shape closes.
-        const bool open = m_backend->tool() == "path";
+        // A path stays open; a cut's shape closes; points to track are
+        // only points.
+        const bool track = m_backend->tool() == "track";
+        const bool open = m_backend->tool() == "path" || track;
         if (shape.size() > 2 && !open)
             path.closeSubpath();
         QColor fill = m_accent;
@@ -507,7 +509,8 @@ void SceneView::paint(QPainter *painter) {
             painter->fillPath(path, fill);
         painter->setPen(QPen(m_accent, 2));
         painter->setBrush(Qt::NoBrush);
-        painter->drawPolyline(shape);
+        if (!track)
+            painter->drawPolyline(shape);
         if (shape.size() > 2 && !open) {
             painter->setPen(QPen(m_accent, 1.5, Qt::DashLine));
             painter->drawLine(shape.last(), shape.first());
