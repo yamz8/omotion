@@ -1161,12 +1161,18 @@ const Heightfield &heightfield(const Scene &scene, AssetCache &assets) {
             normal = -normal;
         isGround[i] = normal.y() > .5f;
     }
+    // From the lowest ground in each column, in the bottom quarter: the
+    // very bottom rows, where the mesh meets its edge, can be too steep.
     QList<size_t> queue;
-    for (int c = 0; c < columns; ++c) {
-        const size_t i = size_t(rowsOf - 1) * columns + c;
-        if (isGround[i])
-            reached[i] = 1, queue.append(i);
-    }
+    for (int c = 0; c < columns; ++c)
+        for (int r = rowsOf - 1; r >= rowsOf * 3 / 4; --r) {
+            const size_t i = size_t(r) * columns + c;
+            if (isGround[i]) {
+                reached[i] = 1;
+                queue.append(i);
+                break;
+            }
+        }
     while (!queue.isEmpty()) {
         const size_t i = queue.takeLast();
         const double here = (vertex(i) - eyeAt).length();
