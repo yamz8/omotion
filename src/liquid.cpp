@@ -61,12 +61,55 @@ struct Drop {
     QPointF p, v;
 };
 
+// A layer the water meets (a body, in the inspector's Physics): its
+// picture's solid part where it is at a time.
+struct Solid {
+    QImage picture;  // Its alpha only matters.
+    QTransform toPicture, toCanvas;
+    bool holds(const QPointF &canvas) const {
+        const QPointF p = toPicture.map(canvas);
+        const int x = int(std::floor(p.x())), y = int(std::floor(p.y()));
+        return x >= 0 && y >= 0 && x < picture.width() && y < picture.height() && qAlpha(picture.pixel(x, y)) > 128;
+    }
+};
+
+QList<Solid> solidsAt(const Scene &scene, AssetCache &assets, double t) {
+    QList<Solid> solids;
+    for (int i = 0; i < scene.layers.size(); ++i) {
+        const Layer &layer = scene.layers.at(i);
+        if (layer.raw.isEmpty() || layer.raw.value("body").toObject().isEmpty() || !layer.visible || layer.source.isEmpty())
+            continue;
+        Solid solid;
+        solid.picture = assets.image(layer.source);
+        if (solid.picture.isNull())
+            continue;
+        solid.toCanvas = layerTransform(scene, assets, i, t);
+        bool invertible = false;
+        solid.toPicture = solid.toCanvas.inverted(&invertible);
+        if (invertible)
+            solids << solid;
+    }
+    return solids;
+}
+
+// What the water depends on outside itself at a time, to tell when it
+// changes: where it comes from, and where what it meets is.
+QString signatureAt(const Scene &scene, AssetCache &assets, const QPointF &source, double t) {
+    QString text = QString::number(source.x(), 'f', 3) + "," + QString::number(source.y(), 'f', 3);
+    for (const Solid &solid : solidsAt(scene, assets, t)) {
+        const QTransform &m = solid.toCanvas;
+        text += QString("|%1,%2,%3,%4,%5,%6").arg(m.m11(), 0, 'f', 4).arg(m.m12(), 0, 'f', 4).arg(m.m21(), 0, 'f', 4)
+                    .arg(m.m22(), 0, 'f', 4).arg(m.dx(), 0, 'f', 2).arg(m.dy(), 0, 'f', 2);
+    }
+    return text;
+}
+
 // A run from the start: the drops now, each frame's places, and where its
 // source was, to tell when its source has moved since.
 struct Run {
     QList<Drop> drops;
     QList<QList<QPointF>> frames;
-    QList<QPointF> sources;
+    QList<QString> signatures;
     qint64 born = 0;
 };
 
@@ -75,7 +118,7 @@ QHash<QString, std::shared_ptr<Run>> runs;
 constexpr int substeps = 3;
 constexpr int most = 3000;
 
-void step(Run &run, const Settings &s, const Scene &scene, const QPointF &source, double t, double dt) {
+void step(Run &run, const Settings &s, const Scene &scene, const QList<Solid> &solids, const QPointF &source, double t, double dt) {
     // New drops, a few a step, as the rate has them: each from the source,
     // poured out its way, scattered a little.
     const qint64 due = qint64(std::floor((t + dt) * s.rate));
@@ -173,9 +216,27 @@ void step(Run &run, const Settings &s, const Scene &scene, const QPointF &source
         });
         run.drops[i].p += moved;
     }
-    // The floor and the canvas's sides hold it, a little slippery.
+    // The floor and the canvas's sides hold it, a little slippery; so do
+    // the layers it meets: a drop inside one goes back out the way it came,
+    // or else up, sliding along.
     for (int i = 0; i < n; ++i) {
         Drop &d = run.drops[i];
+        for (const Solid &solid : solids) {
+            if (!solid.holds(d.p))
+                continue;
+            QPointF back = before[i] - d.p;
+            const double length = std::hypot(back.x(), back.y());
+            back = length > 1e-6 ? back / length : QPointF(0, -1);
+            QPointF out = d.p;
+            for (int k = 1; k <= 12 && solid.holds(out); ++k)
+                out = d.p + back * (k * s.size * .5);
+            if (solid.holds(out))
+                for (int k = 1; k <= 24 && solid.holds(out); ++k)
+                    out = d.p + QPointF(0, -k * s.size * .5);
+            // Kept on its surface, still moving along it but no longer into it.
+            d.p = out;
+            before[i] = QPointF(before[i].x(), out.y());
+        }
         if (d.p.y() > s.floor - s.size)
             d.p.ry() = s.floor - s.size;
         if (d.p.x() < s.size)
@@ -193,9 +254,11 @@ std::shared_ptr<Run> runTo(const Scene &scene, AssetCache &assets, const Layer &
                         QString::number(scene.width) + "x" + QString::number(scene.height) + "|" + QString::number(fps);
     QMutexLocker lock(&runsLock);
     std::shared_ptr<Run> &run = runs[key];
+    // Its source or what it meets moved differently since: worked out
+    // again from the start.
     if (run)
-        for (int k = 0; k < run->sources.size() && k <= frame; ++k)
-            if (QLineF(run->sources.at(k), sourceAt(scene, assets, s, k / fps)).length() > .01) {
+        for (int k = 0; k < run->signatures.size() && k <= frame; ++k)
+            if (run->signatures.at(k) != signatureAt(scene, assets, sourceAt(scene, assets, s, k / fps), k / fps)) {
                 run.reset();
                 break;
             }
@@ -205,10 +268,12 @@ std::shared_ptr<Run> runTo(const Scene &scene, AssetCache &assets, const Layer &
     while (run->frames.size() <= frame) {
         const int k = int(run->frames.size());
         const QPointF source = sourceAt(scene, assets, s, k / fps);
-        if (k > 0)
+        if (k > 0) {
+            const QList<Solid> solids = solidsAt(scene, assets, (k - 1) / fps);
             for (int sub = 0; sub < substeps; ++sub)
-                step(*run, s, scene, source, (k - 1) / fps + sub * dt, dt);
-        run->sources << source;
+                step(*run, s, scene, solids, source, (k - 1) / fps + sub * dt, dt);
+        }
+        run->signatures << signatureAt(scene, assets, source, k / fps);
         QList<QPointF> places;
         for (const Drop &d : run->drops)
             places << d.p;

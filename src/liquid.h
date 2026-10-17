@@ -2,7 +2,8 @@
 
 // Water, as Blender's liquid simulation pours it, in the picture's plane:
 // drops from a source (a point of the canvas, or of a layer as it moves)
-// that fall, splash, pool on the floor and against the canvas's sides, and
+// that fall, splash, pool on the floor, against the canvas's sides and on
+// layers that are bodies (by their pictures' solid parts), and
 // hold together as water does (Clavet's particle fluid: each drop pushed
 // apart from crowding neighbours and drawn to sparse ones). Drawn as one
 // body of water, where the drops run together. Worked out from the scene's

@@ -1993,6 +1993,21 @@ private slots:
             for (int x = 0; x < drawn.width(); ++x)
                 wet += qAlpha(drawn.pixel(x, y)) > 100;
         QVERIFY(wet > 100);
+        // A layer that's a body holds it: poured onto the square, none of it
+        // ends up inside, and some rests on top.
+        Scene onto = scene;
+        onto.layers[water].particles["x"] = 50;
+        onto.layers[water].particles["y"] = 5;
+        onto.layers[water].particles["speed"] = 20;
+        QVERIFY(Physics::setBody(onto, 0, {{"fixed", true}}, &error));
+        const QList<QPointF> held = Liquid::drops(onto, assets, onto.layers[water], 2);
+        int inside = 0, on = 0;
+        for (const QPointF &p : held) {
+            inside += p.x() > 32 && p.x() < 68 && p.y() > 32 && p.y() < 68;
+            on += p.x() > 30 && p.x() < 70 && p.y() > 20 && p.y() <= 32;
+        }
+        QVERIFY2(inside < held.size() / 50 + 1, qPrintable(QString("%1 of %2").arg(inside).arg(held.size())));
+        QVERIFY(on > 0);
     }
 
     void clipsBlendAndFade() {

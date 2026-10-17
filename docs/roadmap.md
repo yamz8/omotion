@@ -93,12 +93,12 @@ property; several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
 video's frame under the playhead; soft shadows from added lights; emitters on a world's pieces throw
 particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire as a 2D
-fluid; water that pours, splashes and pools.
+fluid; water that pours, splashes and pools,
+meeting layers that are bodies.
 
 Still to do there: bodies with their own shapes rather than boxes; particles
 hidden behind what's nearer (they're drawn over the world, but stop at the
-ground); water meeting layers (it meets the floor and the canvas's sides) and fluids
-in 3D; light probes, and true shadow maps (a light's
+ground); fluids in 3D; light probes, and true shadow maps (a light's
 shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).
 
 ## Realism (folded into the world)

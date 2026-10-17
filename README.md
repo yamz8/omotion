@@ -396,8 +396,9 @@ photo.omotion/
 - Particles of kind **`water`** are drops that run together: poured from
   `x`, `y` (or `from` a layer, at `at`), `rate` drops a second, `size` a
   drop's radius, `speed` and `direction` (90 is down) and `spread`, pulled
-  by `gravity`, held by the canvas's sides and its `floor` (canvas y; the
-  bottom when left out), `viscosity` (0 to 1) for how thick. They splash
+  by `gravity`, held by the canvas's sides, its `floor` (canvas y; the
+  bottom when left out) and every layer that's a body (by its picture's
+  solid part, as it moves), `viscosity` (0 to 1) for how thick. They splash
   and pool; worked out from the start, looping with the scene unless
   `"loop": false`.
 - A particle layer with **`from`** in its `particles` is an emitter: from
