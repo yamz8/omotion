@@ -2512,6 +2512,36 @@ private slots:
         QVERIFY(Scene::fromJson(scene.toJson(), &error).layers.size() == scene.layers.size());
         QVERIFY2(error.isEmpty(), qPrintable(error));
         QVERIFY(!Project::isModel(dir.filePath("box.png")));
+
+        // It goes into glTF exports as it was made, under a node that
+        // moves it; and a GLB omotion wrote can come back in as a model.
+        QVERIFY2(Gltf::write(scene, assets, dir.filePath("with-box.glb"), &error), qPrintable(error));
+        auto names = [](const QString &path) {
+            QFile file(path);
+            file.open(QIODevice::ReadOnly);
+            const QByteArray bytes = file.readAll();
+            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + 12);
+            QStringList list;
+            for (const QJsonValue &node : QJsonDocument::fromJson(bytes.mid(20, length)).object()["nodes"].toArray())
+                list << node.toObject()["name"].toString();
+            return list;
+        };
+        const QString boxName = scene.layers[box].name;
+        QVERIFY2(names(dir.filePath("with-box.glb")).contains(boxName), qPrintable(names(dir.filePath("with-box.glb")).join(",")));
+        const int again = Project::importModel(scene, project, dir.filePath("with-box.glb"), QVector3D(2, 0, 8), 1, &error);
+        QVERIFY2(again >= 0, qPrintable(error));
+        QStringList skipped;
+        QVERIFY2(Gltf::write(scene, assets, dir.filePath("twice.glb"), &error, &skipped), qPrintable(error));
+        QVERIFY2(skipped.isEmpty(), qPrintable(skipped.join(",")));
+        QVERIFY(names(dir.filePath("twice.glb")).contains(scene.layers[again].name));
+        QVERIFY(names(dir.filePath("twice.glb")).count(boxName) > names(dir.filePath("with-box.glb")).count(boxName));
+
+        // A model is a body too: dropped, it lands on the ground.
+        scene.layers[box].base["worldY"] = 3;
+        scene.duration = 3;
+        QVERIFY(Physics::setBody(scene, box, {{"bounce", 0}}, &error));
+        QVERIFY2(Physics::bake(scene, assets, 0, 3, &error) == 1, qPrintable(error));
+        QVERIFY(scene.value(scene.layers[box], "worldY", 3) < 1);
     }
 
     void theWindowEditsTheFilmBesideIt() {

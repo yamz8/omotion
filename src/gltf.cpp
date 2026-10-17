@@ -1,6 +1,9 @@
 #include "gltf.h"
 
 #include <QBuffer>
+#include <QDir>
+#include <QFileInfo>
+#include <QUrl>
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>
@@ -71,6 +74,26 @@ struct Builder {
             {"doubleSided", true},
             {"extensions", QJsonObject{{"KHR_materials_unlit", QJsonObject{}}}}});
         return int(materials.size()) - 1;
+    }
+    // A plain colour, lit: an OBJ model's material without a picture.
+    int colour(const QColor &c, const QString &name) {
+        materials.append(QJsonObject{
+            {"name", name},
+            {"pbrMetallicRoughness", QJsonObject{{"baseColorFactor", QJsonArray{c.redF(), c.greenF(), c.blueF(), 1}},
+                                                 {"metallicFactor", 0}, {"roughnessFactor", .8}}},
+            {"doubleSided", true}});
+        return int(materials.size()) - 1;
+    }
+    // A picture as an OBJ model's material, lit as models are.
+    int litPicture(const QImage &picture, const QString &name) {
+        const int unlit = material(picture, name);
+        QJsonObject m = materials.at(unlit).toObject();
+        m.remove("extensions");
+        QJsonObject pbr = m.value("pbrMetallicRoughness").toObject();
+        pbr["roughnessFactor"] = .8;
+        m["pbrMetallicRoughness"] = pbr;
+        materials[unlit] = m;
+        return unlit;
     }
     // A mesh from positions, texture coordinates (top-left origin) and
     // triangles.
@@ -175,6 +198,303 @@ void animate(Builder &b, const QList<Track> &tracks, const QList<float> &times, 
         b.animations.append(QJsonObject{{"name", name}, {"channels", channels}, {"samplers", samplers}});
 }
 
+// Every texture a material names ("baseColorTexture", "normalTexture", and
+// those in its extensions), moved along by where the model's textures start.
+QJsonValue moveTextures(const QJsonValue &value, int by) {
+    if (value.isArray()) {
+        QJsonArray list;
+        for (const QJsonValue &v : value.toArray())
+            list.append(moveTextures(v, by));
+        return list;
+    }
+    if (!value.isObject())
+        return value;
+    QJsonObject object = value.toObject();
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        if (it.key().endsWith("Texture") && it.value().isObject()) {
+            QJsonObject texture = moveTextures(it.value(), by).toObject();
+            texture["index"] = texture.value("index").toInt() + by;
+            it.value() = texture;
+        } else
+            it.value() = moveTextures(it.value(), by);
+    }
+    return object;
+}
+
+// An imported glTF or GLB copied in: its buffers into ours, and every index
+// into its lists moved along by where they start in ours. Its skins (it
+// stands in its rest pose), cameras and animations stay behind. Adds the
+// roots of its scene to roots.
+bool copyGltf(Builder &b, const QString &path, QJsonArray *roots, QStringList *extensions, QString *error) {
+    auto fail = [error, path](const QString &why) {
+        if (error)
+            *error = QString("%1: %2").arg(QFileInfo(path).fileName(), why);
+        return false;
+    };
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return fail("couldn't read it");
+    const QByteArray bytes = file.readAll();
+    QByteArray text;
+    QList<QByteArray> buffers;
+    if (bytes.startsWith("glTF")) {
+        // Chunks after the header: the JSON, then the binary.
+        for (qsizetype at = 12; at + 8 <= bytes.size();) {
+            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + at);
+            const quint32 type = *reinterpret_cast<const quint32 *>(bytes.constData() + at + 4);
+            if (type == 0x4E4F534A)
+                text = bytes.mid(at + 8, length);
+            else if (type == 0x004E4942)
+                buffers << bytes.mid(at + 8, length);
+            at += 8 + length;
+        }
+    } else
+        text = bytes;
+    const QJsonObject gltf = QJsonDocument::fromJson(text).object();
+    if (gltf.isEmpty())
+        return fail("it isn't glTF");
+    for (const QJsonValue &required : gltf.value("extensionsRequired").toArray())
+        if (!required.toString().startsWith("KHR_materials_") && required.toString() != "KHR_texture_transform" &&
+            required.toString() != "KHR_mesh_quantization")
+            return fail(QString("it's packed with %1, which omotion can't copy").arg(required.toString()));
+    const QDir beside = QFileInfo(path).absoluteDir();
+    auto load = [&](const QString &uri, QByteArray *out) {
+        if (uri.startsWith("data:")) {
+            *out = QByteArray::fromBase64(uri.mid(uri.indexOf(',') + 1).toLatin1());
+            return true;
+        }
+        QFile f(beside.filePath(QUrl::fromPercentEncoding(uri.toUtf8())));
+        if (!f.open(QIODevice::ReadOnly))
+            return false;
+        *out = f.readAll();
+        return true;
+    };
+    // A GLB's own binary is buffer 0; anything else names a file.
+    const QJsonArray bufferList = gltf.value("buffers").toArray();
+    QList<QByteArray> data;
+    for (int i = 0; i < bufferList.size(); ++i) {
+        const QString uri = bufferList.at(i).toObject().value("uri").toString();
+        QByteArray d;
+        if (uri.isEmpty())
+            d = buffers.value(0);
+        else if (!load(uri, &d))
+            return fail(QString("couldn't read its %1").arg(uri.startsWith("data:") ? QString("buffer") : uri));
+        data << d;
+    }
+    const int views = int(b.views.size()), accessors = int(b.accessors.size()), images = int(b.images.size()),
+              samplers = int(b.samplers.size()), textures = int(b.textures.size()), materials = int(b.materials.size()),
+              meshes = int(b.meshes.size()), nodes = int(b.nodes.size());
+    for (const QJsonValue &v : gltf.value("bufferViews").toArray()) {
+        const QJsonObject view = v.toObject();
+        const QByteArray &from = data.value(view.value("buffer").toInt());
+        const qsizetype offset = view.value("byteOffset").toInteger(), length = view.value("byteLength").toInteger();
+        if (offset + length > from.size())
+            return fail("its buffers are shorter than it says");
+        b.view(from.mid(offset, length), view.value("target").toInt());
+        if (view.contains("byteStride")) {
+            QJsonObject copy = b.views.last().toObject();
+            copy["byteStride"] = view.value("byteStride");
+            b.views.last() = copy;
+        }
+    }
+    for (const QJsonValue &v : gltf.value("accessors").toArray()) {
+        QJsonObject accessor = v.toObject();
+        if (accessor.contains("bufferView"))
+            accessor["bufferView"] = accessor.value("bufferView").toInt() + views;
+        if (accessor.contains("sparse")) {
+            QJsonObject sparse = accessor.value("sparse").toObject();
+            for (const QString &part : {"indices", "values"}) {
+                QJsonObject p = sparse.value(part).toObject();
+                p["bufferView"] = p.value("bufferView").toInt() + views;
+                sparse[part] = p;
+            }
+            accessor["sparse"] = sparse;
+        }
+        b.accessors.append(accessor);
+    }
+    for (const QJsonValue &v : gltf.value("images").toArray()) {
+        QJsonObject image = v.toObject();
+        if (image.contains("bufferView"))
+            image["bufferView"] = image.value("bufferView").toInt() + views;
+        else {
+            // Pictures beside it go inside the GLB.
+            const QString uri = image.value("uri").toString();
+            QByteArray picture;
+            if (!load(uri, &picture))
+                return fail(QString("couldn't read its picture %1").arg(uri));
+            const QString suffix = QFileInfo(uri).suffix().toLower();
+            image.remove("uri");
+            if (!image.contains("mimeType"))
+                image["mimeType"] = uri.startsWith("data:") ? uri.mid(5, uri.indexOf(';') - 5)
+                                    : suffix == "png"       ? QString("image/png")
+                                    : suffix == "webp"      ? QString("image/webp")
+                                                            : QString("image/jpeg");
+            image["bufferView"] = b.view(picture);
+        }
+        b.images.append(image);
+    }
+    for (const QJsonValue &v : gltf.value("samplers").toArray())
+        b.samplers.append(v);
+    for (const QJsonValue &v : gltf.value("textures").toArray()) {
+        QJsonObject texture = v.toObject();
+        if (texture.contains("source"))
+            texture["source"] = texture.value("source").toInt() + images;
+        if (texture.contains("sampler"))
+            texture["sampler"] = texture.value("sampler").toInt() + samplers;
+        // Pictures in other formats (WebP, Basis) name theirs in an extension.
+        QJsonObject more = texture.value("extensions").toObject();
+        for (auto it = more.begin(); it != more.end(); ++it) {
+            QJsonObject e = it.value().toObject();
+            if (e.contains("source"))
+                e["source"] = e.value("source").toInt() + images;
+            it.value() = e;
+        }
+        if (!more.isEmpty())
+            texture["extensions"] = more;
+        b.textures.append(texture);
+    }
+    for (const QJsonValue &v : gltf.value("materials").toArray())
+        b.materials.append(moveTextures(v, textures));
+    for (const QJsonValue &v : gltf.value("meshes").toArray()) {
+        QJsonObject mesh = v.toObject();
+        QJsonArray primitives;
+        for (const QJsonValue &p : mesh.value("primitives").toArray()) {
+            QJsonObject primitive = p.toObject();
+            QJsonObject attributes;
+            const QJsonObject from = primitive.value("attributes").toObject();
+            for (auto it = from.begin(); it != from.end(); ++it)
+                if (!it.key().startsWith("JOINTS_") && !it.key().startsWith("WEIGHTS_"))
+                    attributes[it.key()] = it.value().toInt() + accessors;
+            primitive["attributes"] = attributes;
+            if (primitive.contains("indices"))
+                primitive["indices"] = primitive.value("indices").toInt() + accessors;
+            if (primitive.contains("material"))
+                primitive["material"] = primitive.value("material").toInt() + materials;
+            if (primitive.contains("targets")) {
+                QJsonArray targets;
+                for (const QJsonValue &t : primitive.value("targets").toArray()) {
+                    QJsonObject target = t.toObject();
+                    for (auto it = target.begin(); it != target.end(); ++it)
+                        it.value() = it.value().toInt() + accessors;
+                    targets.append(target);
+                }
+                primitive["targets"] = targets;
+            }
+            primitives.append(primitive);
+        }
+        mesh["primitives"] = primitives;
+        b.meshes.append(mesh);
+    }
+    for (const QJsonValue &v : gltf.value("nodes").toArray()) {
+        QJsonObject node = v.toObject();
+        node.remove("skin");
+        node.remove("camera");
+        node.remove("extensions");
+        if (node.contains("mesh"))
+            node["mesh"] = node.value("mesh").toInt() + meshes;
+        if (node.contains("children")) {
+            QJsonArray children;
+            for (const QJsonValue &c : node.value("children").toArray())
+                children.append(c.toInt() + nodes);
+            node["children"] = children;
+        }
+        b.nodes.append(node);
+    }
+    const QJsonArray scenes = gltf.value("scenes").toArray();
+    const QJsonArray own = scenes.at(gltf.value("scene").toInt(0)).toObject().value("nodes").toArray();
+    for (const QJsonValue &root : own)
+        roots->append(root.toInt() + nodes);
+    for (const QJsonValue &e : gltf.value("extensionsUsed").toArray())
+        if (!extensions->contains(e.toString()))
+            *extensions << e.toString();
+    return true;
+}
+
+// An OBJ model as a mesh a material: its corners (with their picture
+// coordinates), and each material's colour or picture from its library.
+bool copyObj(Builder &b, const QString &path, QJsonArray *roots, QString *error) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = QString("%1: couldn't read it").arg(QFileInfo(path).fileName());
+        return false;
+    }
+    const QDir beside = QFileInfo(path).absoluteDir();
+    QList<QVector3D> positions;
+    QList<QPointF> coords;
+    struct Part {
+        QList<QVector3D> points;
+        QList<QPointF> uv;
+        QList<quint32> triangles;
+        QHash<QPair<int, int>, quint32> corner;
+    };
+    QMap<QString, Part> parts;
+    QHash<QString, QPair<QColor, QString>> library;  // A material's colour and picture.
+    QString current;
+    for (const QByteArray &raw : file.readAll().split('\n')) {
+        const QList<QByteArray> words = raw.simplified().split(' ');
+        const QByteArray &what = words.first();
+        if (what == "v" && words.size() >= 4)
+            positions << QVector3D(words.at(1).toFloat(), words.at(2).toFloat(), words.at(3).toFloat());
+        else if (what == "vt" && words.size() >= 3)
+            coords << QPointF(words.at(1).toDouble(), 1 - words.at(2).toDouble());  // OBJ counts up from the bottom.
+        else if (what == "usemtl" && words.size() >= 2)
+            current = QString::fromUtf8(words.at(1));
+        else if (what == "mtllib" && words.size() >= 2) {
+            QFile mtl(beside.filePath(QString::fromUtf8(raw.simplified().mid(7))));
+            if (!mtl.open(QIODevice::ReadOnly))
+                continue;
+            QString name;
+            for (const QByteArray &line : mtl.readAll().split('\n')) {
+                const QList<QByteArray> m = line.simplified().split(' ');
+                if (m.first() == "newmtl" && m.size() >= 2)
+                    name = QString::fromUtf8(m.at(1)), library[name] = {QColor(200, 200, 200), QString()};
+                else if (m.first() == "Kd" && m.size() >= 4 && !name.isEmpty())
+                    library[name].first = QColor::fromRgbF(std::clamp(m.at(1).toFloat(), 0.f, 1.f), std::clamp(m.at(2).toFloat(), 0.f, 1.f),
+                                                           std::clamp(m.at(3).toFloat(), 0.f, 1.f));
+                else if (m.first() == "map_Kd" && m.size() >= 2 && !name.isEmpty())
+                    library[name].second = beside.filePath(QString::fromUtf8(m.last()));
+            }
+        } else if (what == "f" && words.size() >= 4) {
+            Part &part = parts[current];
+            QList<quint32> face;
+            for (int k = 1; k < words.size(); ++k) {
+                const QList<QByteArray> ids = words.at(k).split('/');
+                // Counted from 1, or back from the end when negative.
+                auto at = [](const QByteArray &id, qsizetype count) {
+                    const int n = id.toInt();
+                    return n < 0 ? int(count) + n : n - 1;
+                };
+                const int v = at(ids.at(0), positions.size());
+                const int t = ids.size() > 1 && !ids.at(1).isEmpty() ? at(ids.at(1), coords.size()) : -1;
+                if (v < 0 || v >= positions.size())
+                    continue;
+                const auto key = qMakePair(v, t);
+                if (!part.corner.contains(key)) {
+                    part.corner.insert(key, quint32(part.points.size()));
+                    part.points << positions.at(v);
+                    part.uv << (t >= 0 && t < coords.size() ? coords.at(t) : QPointF());
+                }
+                face << part.corner.value(key);
+            }
+            // A fan across the face.
+            for (int k = 2; k < face.size(); ++k)
+                part.triangles << face.at(0) << face.at(k - 1) << face.at(k);
+        }
+    }
+    const QString stem = QFileInfo(path).completeBaseName();
+    for (auto it = parts.begin(); it != parts.end(); ++it) {
+        if (it->triangles.isEmpty())
+            continue;
+        const auto look = library.value(it.key(), {QColor(200, 200, 200), QString()});
+        const QImage picture = look.second.isEmpty() ? QImage() : QImage(look.second);
+        const QString name = it.key().isEmpty() ? stem : it.key();
+        const int material = picture.isNull() ? b.colour(look.first, name) : b.litPicture(picture, name);
+        roots->append(b.node(QJsonObject{{"name", name}, {"mesh", b.mesh(it->points, it->uv, it->triangles, material, name)}}));
+    }
+    return true;
+}
+
 // A world mesh as glTF wants it.
 int worldMesh(Builder &b, const World::Mesh &mesh, int material, const QString &name) {
     const float *v = reinterpret_cast<const float *>(mesh.vertices.constData());
@@ -192,7 +512,7 @@ int worldMesh(Builder &b, const World::Mesh &mesh, int material, const QString &
 
 }
 
-bool write(const Scene &scene, AssetCache &assets, const QString &path, QString *error) {
+bool write(const Scene &scene, AssetCache &assets, const QString &path, QString *error, QStringList *skipped) {
     auto fail = [error](const QString &message) {
         if (error)
             *error = message;
@@ -200,6 +520,7 @@ bool write(const Scene &scene, AssetCache &assets, const QString &path, QString 
     };
     Builder b;
     QJsonArray roots;
+    QStringList extensions{"KHR_materials_unlit"};
     QList<Track> tracks;
     QList<float> times;
     const int frames = std::max(1, scene.frameCount());
@@ -233,12 +554,44 @@ bool write(const Scene &scene, AssetCache &assets, const QString &path, QString 
             track.node = node;
             tracks << track;
         }
+        // Each model as it was made, under a node that stands it on its
+        // point (its offset, fixed) and one that moves it as the scene does.
+        const World::Frame start = World::frame(scene, assets, 0);
+        QHash<int, int> modelOf;
+        for (const World::Placement &model : start.models) {
+            QJsonArray own;
+            QString why;
+            const bool obj = QFileInfo(model.model).suffix().toLower() == "obj";
+            const int before[] = {int(b.views.size()), int(b.accessors.size()), int(b.images.size()), int(b.samplers.size()),
+                                  int(b.textures.size()), int(b.materials.size()), int(b.meshes.size()), int(b.nodes.size())};
+            const qsizetype bytes = b.bin.size();
+            if (!(obj ? copyObj(b, model.model, &own, &why) : copyGltf(b, model.model, &own, &extensions, &why))) {
+                // What it got halfway through copying goes again.
+                QJsonArray *lists[] = {&b.views, &b.accessors, &b.images, &b.samplers, &b.textures, &b.materials, &b.meshes, &b.nodes};
+                for (int k = 0; k < 8; ++k)
+                    while (lists[k]->size() > before[k])
+                        lists[k]->removeLast();
+                b.bin.truncate(bytes);
+                if (skipped)
+                    *skipped << why;
+                continue;
+            }
+            const int standing = b.node(QJsonObject{{"name", scene.layers.at(model.layer).name + " model"},
+                                                    {"translation", json(model.offset)}, {"children", own}});
+            const int node = b.node(QJsonObject{{"name", scene.layers.at(model.layer).name}, {"children", QJsonArray{standing}}});
+            roots.append(node);
+            nodeOf.insert(model.layer, node);
+            modelOf.insert(model.layer, node);
+            Track track;
+            track.node = node;
+            tracks << track;
+        }
         for (int f = 0; f < frames; ++f) {
             const World::Frame now = World::frame(scene, assets, times.at(f));
             for (Track &track : tracks) {
                 const int index = nodeOf.key(track.node, World::FarLayer - 1);
                 World::Placement place;
-                for (const World::Placement &p : now.layers)
+                for (const World::Placement &p : modelOf.contains(index) ? now.models : now.layers)
                     if (p.layer == index)
                         place = p;
                 track.translation << place.position;
@@ -319,7 +672,7 @@ bool write(const Scene &scene, AssetCache &assets, const QString &path, QString 
 
     b.align();
     QJsonObject gltf{{"asset", QJsonObject{{"version", "2.0"}, {"generator", "omotion"}}},
-                     {"extensionsUsed", QJsonArray{"KHR_materials_unlit"}},
+                     {"extensionsUsed", QJsonArray::fromStringList(extensions)},
                      {"scene", 0},
                      {"scenes", QJsonArray{QJsonObject{{"name", "omotion"}, {"nodes", roots}}}},
                      {"nodes", b.nodes},

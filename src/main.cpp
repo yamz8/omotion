@@ -134,8 +134,8 @@ const char *Usage = R"(Usage:
                                          (or a stretch of one) joined by cuts, dissolves, fades or
                                          wipes; rendered as render does (see the README's Films)
   omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
-                                         pictures, its pieces and camera moving as they do; a flat
-                                         scene as cards moving as its layers do
+                                         pictures, its pieces, models and camera moving as they do;
+                                         a flat scene as cards moving as its layers do
   omotion steps <project> [<layer>]       The AI steps behind each layer (or one): what it was cut
                                          from, how the hole was filled, the world, its shape; and
                                          which are out of date, as JSON
@@ -606,8 +606,11 @@ int command(const QStringList &args) {
     if (args.at(1) == "gltf") {
         if (args.size() != 4)
             return fail("gltf takes a project and the .glb file to write.");
-        if (!Gltf::write(scene, assets, args.at(3), &error))
+        QStringList skipped;
+        if (!Gltf::write(scene, assets, args.at(3), &error, &skipped))
             return fail(error);
+        for (const QString &why : skipped)
+            QTextStream(stderr) << "Left out " << why << "\n";
         QTextStream(stdout) << args.at(3) << "\n";
         return 0;
     }

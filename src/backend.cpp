@@ -3386,15 +3386,20 @@ void Backend::exportAs(const QString &format, double scale) {
         m_job.disconnect(this);
         connect(&m_job, &QFutureWatcher<void>::finished, this, [this, failed, output] {
             setBusy({});
-            if (!failed->isEmpty())
-                return setError(*failed);
-            setNotice("Exported " + QFileInfo(output).fileName() + ": open it in Blender (File ▸ Import ▸ glTF).");
+            if (failed->startsWith("!"))
+                return setError(failed->mid(1));
+            setNotice("Exported " + QFileInfo(output).fileName() + ": open it in Blender (File ▸ Import ▸ glTF)." +
+                      (failed->isEmpty() ? QString() : " Left out " + *failed + "."));
         });
         m_job.setFuture(QtConcurrent::run([scene, directory, output, failed] {
             AssetCache assets(directory);
             QString error;
-            if (!Gltf::write(scene, assets, output, &error))
-                *failed = error;
+            QStringList skipped;
+            // A leading ! marks a failure; otherwise what was left out.
+            if (!Gltf::write(scene, assets, output, &error, &skipped))
+                *failed = "!" + error;
+            else
+                *failed = skipped.join("; ");
         }));
         return;
     }
