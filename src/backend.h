@@ -322,6 +322,8 @@ public:
     Q_INVOKABLE void finishTrack(bool stabilize);
     // The selected layer's warp (Project::setWarp).
     Q_INVOKABLE void setWarp(const QString &name, double value);
+    // The selected layer as cloth: "on" (true or false), or one setting.
+    Q_INVOKABLE void setCloth(const QString &name, const QVariant &value);
     // The selected video layer's start, speed or loop.
     Q_INVOKABLE void setVideo(const QString &name, const QVariant &value);
     // Lights in a world: a new one in front of the camera; the selected

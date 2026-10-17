@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "cloth.h"
 #include "world.h"
 
 #include <QDir>
@@ -2009,17 +2010,18 @@ namespace {
 
 // Draws a pinned layer's image (and its glow) bent: a mesh of small
 // triangles, each mapped from where it was in the image to where the pins
-// take it, into a scratch image first, then laid on once with the layer's
-// opacity and blend, so where triangles meet nothing is drawn twice.
-void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double t, const QImage &image, const QImage &glow,
-              double factor, int margin, const QSizeF &size, const QTransform &toOutput, double opacity,
-              QPainter::CompositionMode blend) {
-    const PinSet pins = pinsAt(scene, layer, t);
+// (or its cloth) take it, into a scratch image first, then laid on once
+// with the layer's opacity and blend, so where triangles meet nothing is
+// drawn twice. Cloth's folds are shaded, darker as they turn away.
+void drawBent(QPainter &painter, const std::function<QPointF(const QPointF &)> &bendPoint,
+              const std::function<double(const QPointF &)> &foldAt, const QImage &image, const QImage &glow, double factor,
+              int margin, const QSizeF &size, const QTransform &toOutput, double opacity, QPainter::CompositionMode blend) {
     // About a triangle side every 40 output pixels, over the padding too, so
     // a blur's or glow's halo bends with the picture.
     const double drawn = std::max(size.width(), size.height()) *
                          std::max(std::hypot(toOutput.m11(), toOutput.m12()), std::hypot(toOutput.m21(), toOutput.m22()));
-    const int cells = std::clamp(int(drawn / 40), 6, 32);
+    // Finer for cloth, whose shading is flat across each triangle.
+    const int cells = foldAt ? std::clamp(int(drawn / 10), 16, 64) : std::clamp(int(drawn / 40), 6, 32);
     const double pad = margin / factor;
     const QRectF spread(-pad, -pad, size.width() + 2 * pad, size.height() + 2 * pad);
     const double cw = spread.width() / cells, ch = spread.height() / cells;
@@ -2029,7 +2031,7 @@ void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double 
         for (int x = 0; x <= cells; ++x) {
             const int i = y * (cells + 1) + x;
             from[i] = spread.topLeft() + QPointF(x * cw, y * ch);
-            to[i] = bendWith(pins, from[i]);
+            to[i] = bendPoint(from[i]);
             const QPointF out = toOutput.map(to[i]);
             reach |= QRectF(out, QSizeF(1, 1));
         }
@@ -2039,7 +2041,7 @@ void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double 
         return;
     auto copyAt = [&](const QPointF &p) { return p * factor + QPointF(margin, margin); };
 
-    auto mesh = [&](const QImage &picture) {
+    auto mesh = [&](const QImage &picture, bool shaded) {
         QImage scratch(area.size(), QImage::Format_ARGB32_Premultiplied);
         scratch.fill(Qt::transparent);
         QPainter into(&scratch);
@@ -2080,6 +2082,14 @@ void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double 
                     into.setClipPath(path);
                     const QRectF bounds = clip.boundingRect().adjusted(-1, -1, 1, 1) & QRectF(picture.rect());
                     into.drawImage(bounds, picture, bounds);
+                    if (shaded) {
+                        const double shade = foldAt((from[corners[tri[0]]] + from[corners[tri[1]]] + from[corners[tri[2]]]) / 3);
+                        if (shade > .01) {
+                            into.setCompositionMode(QPainter::CompositionMode_SourceAtop);
+                            into.fillRect(bounds, QColor::fromRgbF(0, 0, 0, std::min(.7, shade * .8)));
+                            into.setCompositionMode(QPainter::CompositionMode_Source);
+                        }
+                    }
                 }
             }
         return scratch;
@@ -2089,10 +2099,10 @@ void drawBent(QPainter &painter, const Scene &scene, const Layer &layer, double 
     painter.setTransform(QTransform());
     painter.setOpacity(opacity);
     painter.setCompositionMode(blend);
-    painter.drawImage(area.topLeft(), mesh(image));
+    painter.drawImage(area.topLeft(), mesh(image, bool(foldAt)));
     if (!glow.isNull()) {
         painter.setCompositionMode(QPainter::CompositionMode_Screen);
-        painter.drawImage(area.topLeft(), mesh(glow));
+        painter.drawImage(area.topLeft(), mesh(glow, false));
     }
     painter.restore();
 }
@@ -2521,9 +2531,19 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         painter.setOpacity(opacity);
         painter.setCompositionMode(compositionFor(layer.blend));
         if (!layer.pins.isEmpty() && isBent(scene, layer, t)) {
-            drawBent(painter, scene, layer, t, image, glow, factor, margin, assets.size(layer.source), toOutput, opacity,
-                     compositionFor(layer.blend));
+            const PinSet pins = pinsAt(scene, layer, t);
+            drawBent(painter, [&](const QPointF &p) { return bendWith(pins, p); }, {}, image, glow, factor, margin,
+                     assets.size(layer.source), toOutput, opacity, compositionFor(layer.blend));
             continue;
+        }
+        if (!layer.raw.isEmpty() && layer.raw.contains("cloth")) {
+            const Cloth::State cloth = Cloth::at(scene, layer, assets.size(layer.source), t);
+            if (!cloth.isNull()) {
+                drawBent(painter, [&](const QPointF &p) { return Cloth::bend(cloth, p); },
+                         [&](const QPointF &p) { return Cloth::fold(cloth, p); }, image, glow, factor, margin,
+                         assets.size(layer.source), toOutput, opacity, compositionFor(layer.blend));
+                continue;
+            }
         }
         // The copy is drawn back up to the image's full size, less its padding.
         const QTransform fromCopy(1 / factor, 0, 0, 1 / factor, -margin / factor, -margin / factor);

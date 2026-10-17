@@ -409,6 +409,54 @@ Rectangle {
                 }
             }
 
+            // Cloth: the picture as fabric, pinned, in the wind.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !inspector.isParticles && !!inspector.v.source
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var cloth: inspector.v.cloth || {}
+                readonly property bool on: cloth.pin !== undefined
+                CheckBox {
+                    text: "Cloth"
+                    font.bold: true
+                    checked: parent.on
+                    onClicked: { backend.setCloth("on", checked); inspector.done() }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "The picture as fabric: held where it's pinned, blown by the wind, folding"
+                }
+                RowLayout {
+                    visible: parent.on
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Pinned"; color: win.text; Layout.preferredWidth: 90 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        implicitHeight: 32
+                        font.pixelSize: 12
+                        model: ["left", "right", "top", "bottom", "top corners", "corners"]
+                        currentIndex: Math.max(0, model.indexOf(parent.parent.cloth.pin || "left"))
+                        onActivated: function (i) { backend.setCloth("pin", model[i]); inspector.done() }
+                    }
+                }
+                Repeater {
+                    model: [["wind", "Wind px/s", 300], ["direction", "Wind way°", 0], ["gust", "Gusts", .5],
+                            ["stiffness", "Stiffness", .8], ["weight", "Weight", .3]]
+                    delegate: RowLayout {
+                        required property var modelData
+                        visible: parent.on
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label { text: modelData[1]; color: win.text; Layout.preferredWidth: 90 }
+                        NumberField {
+                            Layout.fillWidth: true
+                            value: parent.parent.cloth[parent.modelData[0]] === undefined ? parent.modelData[2] : parent.parent.cloth[parent.modelData[0]]
+                            onCommitted: function (n) { backend.setCloth(parent.modelData[0], n) }
+                        }
+                    }
+                }
+            }
+
             // An imported model's size.
             RowLayout {
                 visible: backend.selected >= 0 && !!(inspector.v.model || {}).file

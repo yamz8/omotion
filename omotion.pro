@@ -14,6 +14,7 @@ HEADERS += \
     src/graphview.h \
     src/portalfilepicker.h \
     src/physics.h \
+    src/cloth.h \
     src/project.h \
     src/scene.h \
     src/sceneview.h \
@@ -33,6 +34,7 @@ SOURCES += \
     src/graphview.cpp \
     src/portalfilepicker.cpp \
     src/physics.cpp \
+    src/cloth.cpp \
     src/project.cpp \
     src/scene.cpp \
     src/sceneview.cpp \

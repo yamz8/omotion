@@ -17,6 +17,7 @@
 #include <cmath>
 #include <limits>
 
+#include "cloth.h"
 #include "film.h"
 #include "gltf.h"
 #include "physics.h"
@@ -945,6 +946,25 @@ void Backend::finishTrack(bool stabilize) {
                               .arg(points));
 }
 
+void Backend::setCloth(const QString &name, const QVariant &value) {
+    if (m_selected < 0)
+        return;
+    QJsonObject cloth = m_scene.layers.at(m_selected).raw.value("cloth").toObject();
+    if (name == "on")
+        cloth = value.toBool() ? QJsonObject{{"pin", "left"}, {"wind", 300}, {"gust", .5}} : QJsonObject();
+    else if (cloth.isEmpty())
+        return;
+    else
+        cloth[name] = QJsonValue::fromVariant(value);
+    Scene scene = m_scene;
+    QString error;
+    if (!Cloth::set(scene, m_selected, cloth, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::setWarp(const QString &name, double value) {
     Scene scene = m_scene;
     QString error;
@@ -1216,6 +1236,7 @@ QVariantMap Backend::values() const {
     map.insert("drawing", layer.raw.contains("drawing"));
     map.insert("video", layer.raw.value("video").toObject().toVariantMap());
     map.insert("warp", layer.raw.value("warp").toObject().toVariantMap());
+    map.insert("cloth", layer.raw.value("cloth").toObject().toVariantMap());
     map.insert("shapeModifiers", layer.raw.value("shape").toObject().value("modifiers").toArray().toVariantList());
     map.insert("shaped", !layer.raw.value("shape").toObject().isEmpty());
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());

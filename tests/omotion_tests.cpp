@@ -23,6 +23,7 @@
 #include "film.h"
 #include "gltf.h"
 #include "physics.h"
+#include "cloth.h"
 #include "theme.h"
 #include "world.h"
 
@@ -1871,6 +1872,38 @@ private slots:
         QCOMPARE(backend.scene().value(backend.scene().layers[0], "opacity", 0), .5);
         backend.undo();
         QVERIFY(backend.scene().layers[0].keys.contains("opacity"));
+    }
+
+    void clothFlapsHeldWhereItsPinned() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        scene.duration = 3;
+        QString error;
+        QVERIFY(Cloth::set(scene, 1, {{"pin", "left"}, {"wind", 400}, {"gust", .6}}, &error));
+        QVERIFY(!Cloth::set(scene, 1, {{"pin", "middle"}}, &error));
+        QVERIFY(!Cloth::set(scene, 1, {{"wind", "lots"}}, &error));
+        const QSizeF size(40, 40);
+        const Cloth::State start = Cloth::at(scene, scene.layers[1], size, 0), later = Cloth::at(scene, scene.layers[1], size, 2);
+        QVERIFY(!start.isNull());
+        // Its pinned edge holds; its free edge moves, and folds.
+        QCOMPARE(Cloth::bend(later, QPointF(0, 20)), QPointF(0, 20));
+        QVERIFY(QLineF(Cloth::bend(later, QPointF(40, 20)), Cloth::bend(start, QPointF(40, 20))).length() > 1);
+        double folded = 0;
+        for (int x = 5; x < 40; x += 5)
+            folded = std::max(folded, Cloth::fold(later, QPointF(x, 20)));
+        QVERIFY(folded > .05);
+        // The same time is the same cloth, worked out again or not.
+        const Cloth::State again = Cloth::at(scene, scene.layers[1], size, 2);
+        QCOMPARE(again.points, later.points);
+        // Drawn bent: the picture isn't where it was.
+        const QImage still = renderFrame(twoSquares(dir, assets), assets, 2, QSize(100, 100));
+        const QImage flapping = renderFrame(scene, assets, 2, QSize(100, 100));
+        QVERIFY(still != flapping);
+        // Through scene.json, and taken away.
+        QVERIFY(Scene::fromJson(scene.toJson(), &error).layers[1].raw.contains("cloth"));
+        QVERIFY(Cloth::set(scene, 1, {}, &error));
+        QVERIFY(!scene.layers[1].raw.contains("cloth"));
     }
 
     void clipsBlendAndFade() {

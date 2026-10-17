@@ -19,6 +19,7 @@
 #include "ai.h"
 #include "backend.h"
 #include "exporter.h"
+#include "cloth.h"
 #include "film.h"
 #include "gltf.h"
 #include "physics.h"
@@ -73,6 +74,10 @@ const char *Usage = R"(Usage:
                                          horizon is, down the picture, for which way is level
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
+  omotion cloth <project> <layer> [--pin left|right|top|bottom|top corners|corners] [--wind <px/s>]
+                [--direction <degrees>] [--gust <0-1>] [--stiffness <0-1>] [--weight <n>] [--seed <n>] | --none
+                                         Make a layer cloth: held where it's pinned, blown by the
+                                         wind in gusts, folding (shaded) as it flaps
   omotion warp <project> <layer> [--amount <px>] [--scale <px>] [--speed <n>] [--seed <n>]
                                          Make a layer billow, as smoke, cloud or water: its picture
                                          pushed about by slow noise, looping; --amount 0 stops it
@@ -733,6 +738,33 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "cloth") {
+        if (args.size() < 4)
+            return fail("cloth takes a project and a layer.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QJsonObject cloth = edited.layers.at(layer).raw.value("cloth").toObject();
+        if (cloth.isEmpty())
+            cloth = QJsonObject{{"pin", "left"}, {"wind", 300}, {"gust", .5}};
+        for (int i = 4; i < args.size(); ++i) {
+            if (args.at(i) == "--none")
+                cloth = QJsonObject();
+            else if (i + 1 < args.size() && args.at(i) == "--pin")
+                cloth["pin"] = args.at(++i);
+            else if (i + 1 < args.size() && QStringList{"--wind", "--direction", "--gust", "--stiffness", "--weight", "--seed"}.contains(args.at(i))) {
+                const QString name = args.at(i).mid(2);
+                cloth[name] = args.at(++i).toDouble();
+            } else
+                return fail(QString("cloth doesn't know %1.").arg(args.at(i)));
+        }
+        if (!Cloth::set(edited, layer, cloth, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << (cloth.isEmpty() ? QString("%1 is a picture again.\n") : QString("%1 is cloth.\n")).arg(args.at(3));
+        return 0;
+    }
+
     if (args.at(1) == "warp") {
         if (args.size() < 4)
             return fail("warp takes a project and a layer.");
@@ -1160,7 +1192,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "warp") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "model") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "warp") || !std::strcmp(argv[1], "cloth") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "model") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.
