@@ -986,6 +986,10 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
 }
 
 namespace {
+QVector3D fluidPoint(const Scene &scene, AssetCache &assets, const Layer &layer, double when);
+}
+
+namespace {
 // A shape as a few ellipsoids, one round each part of it: its points
 // gathered into parts by k-means, each part's spread along its own main
 // ways (the eigenvectors of its covariance) giving its size and turn.
@@ -1284,6 +1288,30 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
                 frame.puffs.append(puff);
         }
     }
+    // Water from its pieces: drops running over its ground.
+    for (int index = 0; index < scene.layers.size(); ++index) {
+        const Layer &layer = scene.layers.at(index);
+        if (!layer.visible || !fluidInWorld(scene, layer) || layer.particles.value("kind").toString() != "water")
+            continue;
+        const double fps = std::max(1.0, scene.fps);
+        const QList<Liquid::Drop3> drops = Liquid::drops3(
+            layer.name + "|" + QString::number(index), layer.particles, fps, scene.duration,
+            [&](int k) { return fluidPoint(scene, assets, layer, std::min(k / fps, scene.duration)); },
+            [&](double x, double z) { return groundAt(scene, assets, x, z); }, t);
+        const QColor colour(layer.particles.value("color").toString("#5aa8e8"));
+        const double opacity = std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0);
+        // Wide enough that drops side by side run into one body of water.
+        const float size = float(std::max(1.0, layer.particles.value("size").toDouble(4)) / 100 * 5);
+        for (const Liquid::Drop3 &drop : drops) {
+            Puff puff;
+            puff.position = drop.position;
+            puff.size = size;
+            puff.alpha = float(.85 * opacity * drop.weight);
+            puff.colour = colour;
+            if (puff.alpha > .004f)
+                frame.puffs.append(puff);
+        }
+    }
     // With lights about, what can cast shadows from them.
     if (!frame.lights.isEmpty()) {
         auto add = [&](int index, const QList<QVector3D> &corners) {
@@ -1343,6 +1371,27 @@ bool fluidInWorld(const Scene &scene, const Layer &layer) {
     return source >= 0 && layers(scene).contains(source) && source != scene.indexOf(info(scene).picture);
 }
 
+namespace {
+// Where a world fluid comes from at a time: its piece's pivot, or "at" on
+// its picture, as far off the pivot as that is at its distance, moved and
+// turned as the piece is.
+QVector3D fluidPoint(const Scene &scene, AssetCache &assets, const Layer &layer, double when) {
+    const Info world = info(scene);
+    const int source = scene.indexOf(layer.particles.value("from").toString());
+    const Layer &from = scene.layers.at(source);
+    const QVector3D centre = pivot(scene, assets, source);
+    const QSizeF picture = assets.size(from.source);
+    const QJsonArray at = layer.particles.value("at").toArray();
+    const QPointF anchor(from.anchor.x() * picture.width(), from.anchor.y() * picture.height());
+    const QPointF off = at.size() == 2 ? QPointF(at.at(0).toDouble(), at.at(1).toDouble()) - anchor : QPointF();
+    const double metersAPixel = (centre - pictureToWorld(world).map(QVector3D())).length() / std::max(1.0, world.focal);
+    const QVector3D move(float(scene.value(from, "worldX", when)), float(scene.value(from, "worldY", when)), float(-scene.value(from, "worldZ", when)));
+    return centre + move +
+           turn(scene.value(from, "yaw", when), scene.value(from, "pitch", when), scene.value(from, "roll", when))
+               .rotatedVector(QVector3D(float(off.x() * metersAPixel), float(-off.y() * metersAPixel), 0));
+}
+}
+
 QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
     QList<Sheet> list;
     const Info world = info(scene);
@@ -1350,22 +1399,10 @@ QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
         const Layer &layer = scene.layers.at(index);
         if (!layer.visible || !fluidInWorld(scene, layer))
             continue;
-        const int source = scene.indexOf(layer.particles.value("from").toString());
-        const Layer &from = scene.layers.at(source);
-        // The piece's point in the world at a time: its pivot, or "at" on
-        // its picture, as far off the pivot as that is at its distance.
-        const QVector3D centre = pivot(scene, assets, source);
-        const QSizeF picture = assets.size(from.source);
-        const QJsonArray at = layer.particles.value("at").toArray();
-        const QPointF anchor(from.anchor.x() * picture.width(), from.anchor.y() * picture.height());
-        const QPointF off = at.size() == 2 ? QPointF(at.at(0).toDouble(), at.at(1).toDouble()) - anchor : QPointF();
-        const double metersAPixel = (centre - pictureToWorld(world).map(QVector3D())).length() / std::max(1.0, world.focal);
-        auto pointAt = [&](double when) {
-            const QVector3D move(float(scene.value(from, "worldX", when)), float(scene.value(from, "worldY", when)), float(-scene.value(from, "worldZ", when)));
-            return centre + move +
-                   turn(scene.value(from, "yaw", when), scene.value(from, "pitch", when), scene.value(from, "roll", when))
-                       .rotatedVector(QVector3D(float(off.x() * metersAPixel), float(-off.y() * metersAPixel), 0));
-        };
+        auto pointAt = [&](double when) { return fluidPoint(scene, assets, layer, when); };
+        // Water is drops in the world (see frame), not a sheet.
+        if (layer.particles.value("kind").toString() == "water")
+            continue;
         // The sheet: upright, square to the camera, round the point; in
         // centimeters, the source low in its middle. The source moves over
         // it as the point moves, as far as a third of the sheet each way;

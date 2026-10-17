@@ -19,6 +19,8 @@
 
 #include <QImage>
 #include <QRectF>
+#include <QVector3D>
+#include <functional>
 
 #include "scene.h"
 
@@ -30,5 +32,16 @@ QImage at(const Scene &scene, AssetCache &assets, const Layer &layer, double t, 
 
 // Where its drops are at a time, in canvas pixels.
 QList<QPointF> drops(const Scene &scene, AssetCache &assets, const Layer &layer, double t);
+
+// The same in a world, in three dimensions (meters, up is +y): drops
+// poured from the source's point at each frame, running over the ground
+// (its height at x, z; NaN where there's none) and down its slopes. Each
+// with how much it shows (it fades in and out as the scene loops).
+struct Drop3 {
+    QVector3D position;
+    float weight = 1;
+};
+QList<Drop3> drops3(const QString &key, const QJsonObject &settings, double fps, double duration,
+                    const std::function<QVector3D(int frame)> &sourceAt, const std::function<double(double, double)> &ground, double t);
 
 }

@@ -93,13 +93,12 @@ property (its drag fixed, found by the window's mouse test); several tracked poi
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
 video's frame under the playhead; shadows from added lights (casters as a few ellipsoids each,
 in the shaders); the picture as a light probe for models; the camera solved in depth
-from tracks on a world; emitters on a world's pieces throw
+from tracks on a world; water as 3D drops over a world's ground; emitters on a world's pieces throw
 particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire as a 2D
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
-Still to do there: water in 3D (it's a sheet standing in the world; smoke
-and fire are 3D); exact shadow shapes (a caster's shadow is made of
+Still to do there: exact shadow shapes (a caster's shadow is made of
 a few rounded parts).
 
 ## Realism (folded into the world)

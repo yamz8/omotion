@@ -2904,10 +2904,26 @@ private slots:
         }
         QCOMPARE(keys.size(), sheets.size());
         QVERIFY(smoky > 20);
-        // Water stays a sheet.
-        scene.layers[smoke].particles["kind"] = "water";
-        QCOMPARE(World::sheets(scene, assets, 1).size(), 1);
-        scene.layers[smoke].particles["kind"] = "smoke";
+        // Water is drops in the world, poured onto its ground: on it, not
+        // through it, and spread over it.
+        scene.layers[smoke].particles = QJsonObject{{"kind", "water"}, {"from", "piece"}, {"rate", 120}, {"size", 5}, {"loop", false}};
+        QVERIFY(World::sheets(scene, assets, 1.5).isEmpty());
+        int resting = 0, wet = 0;
+        double left = 1e9, right = -1e9;
+        for (const World::Puff &puff : World::frame(scene, assets, 1.5).puffs) {
+            if (!puff.colour.isValid())
+                continue;
+            ++wet;
+            const double floor = World::groundAt(scene, assets, puff.position.x(), puff.position.z());
+            if (std::isnan(floor))
+                continue;
+            QVERIFY2(puff.position.y() >= floor - 1e-3, qPrintable(QString("%1 %2").arg(puff.position.y()).arg(floor)));
+            if (puff.position.y() < floor + .2)
+                ++resting, left = std::min(left, double(puff.position.x())), right = std::max(right, double(puff.position.x()));
+        }
+        QVERIFY2(wet > 50 && resting > wet / 3, qPrintable(QString("%1 %2").arg(resting).arg(wet)));
+        QVERIFY(right - left > .2);
+        scene.layers[smoke].particles = QJsonObject{{"kind", "smoke"}, {"from", "piece"}};
         // Not drawn again over the world.
         QVERIFY(!throwsIntoWorld(scene, scene.layers[smoke]));
     }

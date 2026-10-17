@@ -396,8 +396,8 @@ photo.omotion/
   they're worked out in the world instead (their pixel settings counting
   as centimeters), among the pieces so nearer ones hide them: smoke and
   fire in a box of air by the piece, in three dimensions, drawn as slices
-  through it; water on a sheet by the piece, upright and square to the
-  camera, its floor the ground there.
+  through it; water as drops in the world, poured from the piece, running
+  over the ground and down its slopes.
 - Particles of kind **`water`** are drops that run together: poured from
   `x`, `y` (or `from` a layer, at `at`), `rate` drops a second, `size` a
   drop's radius, `speed` and `direction` (90 is down) and `spread`, pulled

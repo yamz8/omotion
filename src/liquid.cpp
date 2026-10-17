@@ -8,6 +8,7 @@
 #include <QRadialGradient>
 #include <QRandomGenerator>
 #include <QtMath>
+#include <array>
 #include <cmath>
 #include <memory>
 
@@ -359,6 +360,156 @@ QImage at(const Scene &scene, AssetCache &assets, const Layer &layer, double t, 
         }
     }
     return mixed;
+}
+
+namespace {
+struct Drop3Run {
+    QList<QVector3D> p, v;
+    QList<QList<QVector3D>> frames;
+    QList<QVector3D> sources;
+    qint64 born = 0;
+};
+QMutex runs3Lock;
+QHash<QString, std::shared_ptr<Drop3Run>> runs3;
+
+// A step of the drops in meters: poured, pulled down, held apart and
+// together as on the canvas, then kept out of the ground, sliding along it.
+void step3(Drop3Run &run, const Settings &s, const QVector3D &source, const std::function<double(double, double)> &ground, double t,
+           double dt) {
+    const double size = s.size / 100, speed = s.speed / 100, gravity = s.gravity / 100;
+    const qint64 due = qint64(std::floor((t + dt) * s.rate));
+    for (; run.born < due; ++run.born) {
+        QRandomGenerator random(s.seed * 2654435761u + quint32(run.born) * 40503u);
+        // Poured the way it says as seen from ahead (90 down), spread about
+        // the pour in both ways across it.
+        const double angle = qDegreesToRadians(s.direction + s.spread * (random.generateDouble() * 2 - 1));
+        const double turn = random.generateDouble() * 2 * M_PI;
+        const QVector3D way(float(std::cos(angle)), float(-std::sin(angle)), 0);
+        const double gap = size * 1.4;
+        const int wide = std::max(1, int(std::lround(std::sqrt(s.rate * gap / std::max(.1, std::abs(speed))))));
+        const QVector3D jitter(float(std::cos(turn) * gap * (run.born % wide) * .5), 0, float(std::sin(turn) * gap * (run.born % wide) * .5));
+        run.p << source + jitter;
+        run.v << way * float(speed * (.85 + .3 * random.generateDouble()));
+        if (run.p.size() > 2500)
+            run.p.removeFirst(), run.v.removeFirst();
+    }
+    const int n = int(run.p.size());
+    QList<QVector3D> before = run.p;
+    for (int i = 0; i < n; ++i) {
+        run.v[i].setY(run.v[i].y() - float(gravity * dt));
+        run.p[i] += run.v[i] * float(dt);
+    }
+    const double reach = size * 3;
+    QHash<qint64, QList<int>> cells;
+    auto cellKey = [&](qint64 x, qint64 y, qint64 z) { return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791); };
+    auto cellOf = [&](const QVector3D &p) { return std::array<qint64, 3>{qint64(std::floor(p.x() / reach)), qint64(std::floor(p.y() / reach)), qint64(std::floor(p.z() / reach))}; };
+    for (int i = 0; i < n; ++i) {
+        const auto c = cellOf(run.p.at(i));
+        cells[cellKey(c[0], c[1], c[2])] << i;
+    }
+    const double rest = 6, stiff = .004 * reach * reach, nearStiff = .04 * reach * reach;
+    for (int i = 0; i < n; ++i) {
+        const auto c = cellOf(run.p.at(i));
+        QList<int> near;
+        for (qint64 z = c[2] - 1; z <= c[2] + 1; ++z)
+            for (qint64 y = c[1] - 1; y <= c[1] + 1; ++y)
+                for (qint64 x = c[0] - 1; x <= c[0] + 1; ++x)
+                    for (const int j : cells.value(cellKey(x, y, z)))
+                        if (j != i)
+                            near << j;
+        double density = 0, nearDensity = 0;
+        for (const int j : near) {
+            const double q = (run.p.at(j) - run.p.at(i)).length() / reach;
+            if (q < 1)
+                density += (1 - q) * (1 - q), nearDensity += (1 - q) * (1 - q) * (1 - q);
+        }
+        const double pressure = stiff * std::max(density - rest, (density - rest) * .15), nearPressure = nearStiff * nearDensity;
+        QVector3D moved;
+        for (const int j : near) {
+            QVector3D d = run.p.at(j) - run.p.at(i);
+            const double r = d.length();
+            if (r <= 1e-7 || r >= reach)
+                continue;
+            const double q = r / reach;
+            const double amount = std::clamp(dt * dt * (pressure * (1 - q) + nearPressure * (1 - q) * (1 - q)) * 3600, -size * .1, size * .3);
+            const QVector3D push = d / float(r) * float(amount);
+            run.p[j] += push / 2;
+            moved -= push / 2;
+        }
+        run.p[i] += moved;
+    }
+    // The ground: out of it along its slope's facing, no longer moving
+    // into it, so it runs downhill.
+    for (int i = 0; i < n; ++i) {
+        QVector3D &p = run.p[i];
+        const double floor = ground(p.x(), p.z());
+        if (!std::isnan(floor) && p.y() < floor + size) {
+            const double e = .05;
+            const double gx = (ground(p.x() + e, p.z()) - ground(p.x() - e, p.z())) / (2 * e),
+                         gz = (ground(p.x(), p.z() + e) - ground(p.x(), p.z() - e)) / (2 * e);
+            const QVector3D normal = std::isnan(gx) || std::isnan(gz) ? QVector3D(0, 1, 0) : QVector3D(float(-gx), 1, float(-gz)).normalized();
+            p.setY(float(floor + size));
+            QVector3D v = (p - before.at(i)) / float(dt);
+            v -= normal * std::min(0.f, QVector3D::dotProduct(v, normal));
+            run.v[i] = v * .98f;
+        } else
+            run.v[i] = (p - before.at(i)) / float(dt);
+    }
+}
+
+QList<QVector3D> drops3At(const QString &key, const Settings &s, double fps, const std::function<QVector3D(int)> &sourceAt,
+                          const std::function<double(double, double)> &ground, int frame) {
+    QMutexLocker lock(&runs3Lock);
+    std::shared_ptr<Drop3Run> &run = runs3[key];
+    if (run)
+        for (int k = 0; k < run->sources.size() && k <= frame; ++k)
+            if ((run->sources.at(k) - sourceAt(k)).length() > 1e-4f) {
+                run.reset();
+                break;
+            }
+    if (!run)
+        run = std::make_shared<Drop3Run>();
+    const double dt = 1 / fps / substeps;
+    while (run->frames.size() <= frame) {
+        const int k = int(run->frames.size());
+        const QVector3D source = sourceAt(k);
+        if (k > 0)
+            for (int sub = 0; sub < substeps; ++sub)
+                step3(*run, s, source, ground, (k - 1) / fps + sub * dt, dt);
+        run->sources << source;
+        run->frames << run->p;
+    }
+    const std::shared_ptr<Drop3Run> kept = run;
+    if (runs3.size() > 16) {
+        runs3.clear();
+        runs3.insert(key, kept);
+    }
+    return kept->frames.at(frame);
+}
+}
+
+QList<Drop3> drops3(const QString &key, const QJsonObject &settings, double fps, double duration,
+                    const std::function<QVector3D(int frame)> &sourceAt, const std::function<double(double, double)> &ground, double t) {
+    Scene stand;
+    const Settings s = settingsOf(stand, settings);
+    fps = std::max(1.0, fps);
+    const QString full = key + "|" + QString::fromUtf8(QJsonDocument(settings).toJson(QJsonDocument::Compact)) + "|" + QString::number(fps);
+    auto at = [&](double when) { return drops3At(full, s, fps, sourceAt, ground, std::clamp(int(std::floor(when * fps + 1e-6)), 0, 20000)); };
+    QList<Drop3> list;
+    const QList<QVector3D> now = at(t);
+    if (!settings.value("loop").toBool(true) || duration <= 0) {
+        for (const QVector3D &p : now)
+            list << Drop3{p, 1};
+        return list;
+    }
+    // Looping with the scene: the water a scene's length on fading out as
+    // the water now fades in.
+    const float into = float(std::clamp(t / duration, 0.0, 1.0));
+    for (const QVector3D &p : at(t + duration))
+        list << Drop3{p, 1 - into};
+    for (const QVector3D &p : now)
+        list << Drop3{p, into};
+    return list;
 }
 
 }
