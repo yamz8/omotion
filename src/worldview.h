@@ -50,6 +50,9 @@ public:
     const QByteArray &dustIndices() const { return m_dustIndices; }
     // A world fluid's sheet (its layer's), as a texture for the 3D view.
     Q_INVOKABLE QQuick3DTextureData *sheet(int layer);
+    // What casts shadows from the lights, for the shaders: three texels a
+    // row (middle, half sizes, turn), a row each.
+    Q_INVOKABLE QQuick3DTextureData *occluders();
 
 signals:
     void changed();
@@ -66,6 +69,7 @@ private:
     QVariantMap m_frame;
     QHash<int, World::Mesh> m_meshes;
     QHash<int, std::shared_ptr<QQuick3DTextureData>> m_sheets;
+    std::shared_ptr<QQuick3DTextureData> m_occluders;
     QByteArray m_dustVertices;
     QByteArray m_dustIndices;
     QByteArray m_meshKey;

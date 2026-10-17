@@ -1126,38 +1126,6 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         shadow.opacity = float(.75 * place.opacity / (1 + 1.2 * height * height));
         frame.shadows.append(shadow);
 
-        // Each added light above it throws its shadow away from it along
-        // the ground: as far as the light is low, as dark as it's bright
-        // there, and longer the more it slants.
-        const double tall = body.maximum.y() - body.minimum.y();
-        const double middle = height + tall / 2;
-        for (const Light &light : frame.lights) {
-            const double above = light.position.y() - ground;
-            if (above <= middle * 1.05)
-                continue;
-            const QVector2D away(at.x() - light.position.x(), at.z() - light.position.z());
-            const double along = away.length();
-            const double reach = along * middle / (above - middle);
-            const double brightness = (light.colour.x() + light.colour.y() + light.colour.z()) / 3;
-            const double distance = (light.position - at).length() / light.reach;
-            const double strength = std::min(.7, .55 * brightness / (1 + distance * distance)) * place.opacity;
-            if (strength < .02)
-                continue;
-            const QVector2D way = along > 1e-4 ? away / float(along) : QVector2D(0, 1);
-            const double footprint = std::max(body.maximum.x() - body.minimum.x(), body.maximum.z() - body.minimum.z());
-            // Its middle where the light through its middle meets the
-            // ground, no farther than a few times its size.
-            const double shift = std::min(reach, 4.0 * footprint + tall);
-            Shadow cast;
-            const double x = at.x() + way.x() * shift, z = at.z() + way.y() * shift;
-            const double there = floorAt(x, z);
-            cast.position = QVector3D(float(x), float((std::isnan(there) ? ground : there) + .021), float(z));
-            cast.width = float(footprint);
-            cast.length = float(footprint + std::min(2 * shift, tall * along / std::max(.1, above - middle)));
-            cast.yaw = float(qRadiansToDegrees(std::atan2(way.x(), -way.y())));
-            cast.opacity = float(strength / (1 + .3 * height));
-            frame.shadows.append(cast);
-        }
     }
     // The dust: each burst throws up puffs, every one worked out from its
     // own seed and the time since, so any frame can be drawn on its own.
@@ -1207,6 +1175,47 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             puff.colour = spark.colour;
             if (puff.alpha > .004f)
                 frame.puffs.append(puff);
+        }
+    }
+    // With lights about, what can cast shadows from them.
+    if (!frame.lights.isEmpty()) {
+        auto add = [&](int index, const QList<QVector3D> &corners) {
+            if (corners.size() != 8 || frame.occluders.size() >= 8)
+                return;
+            const QVector3D x = corners.at(1) - corners.at(0), y = corners.at(2) - corners.at(0), z = corners.at(4) - corners.at(0);
+            if (x.length() < 1e-4f || y.length() < 1e-4f || z.length() < 1e-4f)
+                return;
+            Occluder o;
+            o.layer = index;
+            o.centre = (corners.at(0) + corners.at(7)) / 2;
+            o.half = QVector3D(x.length(), y.length(), z.length()) / 2;
+            o.rotation = QQuaternion::fromAxes(x.normalized(), y.normalized(), z.normalized());
+            frame.occluders << o;
+        };
+        for (const Placement &model : frame.models) {
+            QVector3D low, high;
+            if (!model.visible || !modelBounds(model.model, &low, &high))
+                continue;
+            QList<QVector3D> corners;
+            for (int k = 0; k < 8; ++k) {
+                const QVector3D own(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
+                corners << model.position + model.rotation.rotatedVector((own + model.offset) * model.scale);
+            }
+            add(model.layer, corners);
+        }
+        for (const Placement &place : frame.layers) {
+            if (!place.visible || scene.layers.at(place.layer).raw.value("shape").toObject().isEmpty())
+                continue;
+            const Mesh shape = mesh(scene, assets, place.layer);
+            if (shape.isNull())
+                continue;
+            QList<QVector3D> corners;
+            for (int k = 0; k < 8; ++k) {
+                const QVector3D rest(k & 1 ? shape.maximum.x() : shape.minimum.x(), k & 2 ? shape.maximum.y() : shape.minimum.y(),
+                                     k & 4 ? shape.maximum.z() : shape.minimum.z());
+                corners << place.position + place.rotation.rotatedVector(rest * place.scale);
+            }
+            add(place.layer, corners);
         }
     }
     return frame;

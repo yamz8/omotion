@@ -188,12 +188,20 @@ struct Sheet {
     float opacity = 1;
 };
 bool fluidInWorld(const Scene &scene, const Layer &layer);
+// What casts shadows from the added lights: a shaped piece or a model, as
+// the ellipsoid round its box where it is.
+struct Occluder {
+    int layer = -1;
+    QVector3D centre, half;
+    QQuaternion rotation;
+};
 QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t);
 struct Frame {
     double time = 0;
     QList<Light> lights;
     QColor haze{200, 140, 160};
     QList<Shadow> shadows;
+    QList<Occluder> occluders;  // Eight at most, only with lights about.
     QList<Burst> bursts;
     QList<Puff> puffs;
     QColor dust{217, 160, 142};

@@ -91,14 +91,15 @@ a face; with their own outlines and shapes, so round things roll); models in glT
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property; several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
-video's frame under the playhead; soft shadows from added lights; emitters on a world's pieces throw
+video's frame under the playhead; shadows from added lights (casters as ellipsoids, in the
+shaders); the picture as a light probe for models; emitters on a world's pieces throw
 particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire as a 2D
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
 Still to do there: fluids worked out in 3D (they're 2D sheets standing in
-the world); light probes, and true shadow maps (a light's
-shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).
+the world); exact shadow shapes (a caster's shadow is the
+rounded shape of its box); a 3D camera solve from tracks (a moving camera's path in depth).
 
 ## Realism (folded into the world)
 

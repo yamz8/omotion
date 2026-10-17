@@ -16,6 +16,8 @@
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
 #include <QQuickWindow>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QtQml>
 #include <rhi/qrhi.h>
@@ -168,6 +170,44 @@ void WorldSource::update() {
                                       {"opacity", sheet.opacity}});
         }
         frame["sheets"] = sheets;
+        // Shadows from the lights: each caster's ellipsoid, and which one is
+        // a layer's own.
+        QVariantMap ownOccluder;
+        QByteArray packed(8 * 3 * 4 * int(sizeof(float)), '\0');
+        float *o = reinterpret_cast<float *>(packed.data());
+        for (int k = 0; k < f.occluders.size(); ++k) {
+            const World::Occluder &c = f.occluders.at(k);
+            float *row = o + k * 12;
+            row[0] = c.centre.x(), row[1] = c.centre.y(), row[2] = c.centre.z();
+            row[4] = c.half.x(), row[5] = c.half.y(), row[6] = c.half.z();
+            row[8] = c.rotation.x(), row[9] = c.rotation.y(), row[10] = c.rotation.z(), row[11] = c.rotation.scalar();
+            ownOccluder.insert(QString::number(c.layer), k);
+        }
+        QQuick3DTextureData *texture = occluders();
+        texture->setSize(QSize(3, 8));
+        texture->setFormat(QQuick3DTextureData::RGBA32F);
+        texture->setTextureData(packed);
+        frame["occluderCount"] = f.occluders.size();
+        // The world's own picture as the light all round, for imported
+        // models' materials, so they take its colours.
+        // A small copy of its own, in the cache: the picture's file is the
+        // cards' texture too, and a probe made from it would take its place.
+        const int root = m_scene.indexOf(m_info.picture);
+        if (root >= 0 && !m_scene.layers.at(root).source.isEmpty()) {
+            const QString file = QDir(m_assets->directory()).absoluteFilePath(m_scene.layers.at(root).source);
+            const QDir cache(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/probes");
+            const QString probe = cache.filePath(QString::number(qHash(file + QString::number(QFileInfo(file).lastModified().toMSecsSinceEpoch())), 16) + ".png");
+            if (!QFileInfo::exists(probe)) {
+                cache.mkpath(".");
+                const QImage small = m_assets->image(m_scene.layers.at(root).source).scaled(512, 256, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                QSaveFile out(probe);
+                if (!small.isNull() && out.open(QIODevice::WriteOnly) && small.save(&out, "PNG"))
+                    out.commit();
+            }
+            if (QFileInfo::exists(probe))
+                frame["probe"] = QUrl::fromLocalFile(probe).toString();
+        }
+        frame["ownOccluder"] = ownOccluder;
 
         // Puffs face the camera and are drawn far to near, so they blend.
         QList<World::Puff> puffs = f.puffs;
@@ -203,6 +243,14 @@ void WorldSource::update() {
     }
     m_frame = frame;
     emit frameChanged();
+}
+
+QQuick3DTextureData *WorldSource::occluders() {
+    if (!m_occluders) {
+        m_occluders = std::make_shared<QQuick3DTextureData>();
+        QQmlEngine::setObjectOwnership(m_occluders.get(), QQmlEngine::CppOwnership);
+    }
+    return m_occluders.get();
 }
 
 QQuick3DTextureData *WorldSource::sheet(int layer) {

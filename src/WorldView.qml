@@ -16,6 +16,18 @@ Item {
         const list = frame.lights || [];
         return i < list.length ? list[i][key] : Qt.vector3d(0, 0, 0);
     }
+    // The occluders' data, one texture for every material.
+    readonly property Texture occluderTexture: Texture {
+        textureData: view.source ? view.source.occluders() : null
+        minFilter: Texture.Nearest
+        magFilter: Texture.Nearest
+        mipFilter: Texture.None
+    }
+    Texture {
+        id: probe
+        source: view.frame.probe || ""
+        mappingMode: Texture.LightProbe
+    }
     function reach(i) {
         const list = frame.lights || [];
         return i < list.length ? list[i].reach : 1;
@@ -26,6 +38,10 @@ Item {
         camera: camera
         environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Transparent
+            // Imported models are lit by the picture all round them (only
+            // they use it; the picture's own surfaces carry their light).
+            lightProbe: view.source && view.source.models.length > 0 && view.frame.probe ? probe : null
+            probeExposure: 1.0
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.High
         }
@@ -54,6 +70,9 @@ Item {
             delegate: PointLight {
                 required property var modelData
                 position: modelData.position
+                // Models shadow each other by Qt's own shadow maps.
+                castsShadow: true
+                shadowMapQuality: Light.ShadowMapQualityHigh
                 // Its colour times its power, as a brightness and a hue.
                 readonly property real power: Math.max(modelData.colour.x, modelData.colour.y, modelData.colour.z)
                 color: power > 0 ? Qt.rgba(modelData.colour.x / power, modelData.colour.y / power, modelData.colour.z / power, 1) : "black"
@@ -174,6 +193,10 @@ Item {
                         property real shine: holder.place.shine || 0
                         property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
                         property real lightCount: (view.frame.lights || []).length
+                        // What stands between it and the lights.
+                        property real occluderCount: view.frame.occluderCount || 0
+                        property real ownOccluder: { const own = (view.frame.ownOccluder || {})[String(holder.modelData.layer)]; return own === undefined ? -1 : own }
+                        property TextureInput occluders: TextureInput { texture: view.occluderTexture }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10
@@ -224,6 +247,10 @@ Item {
                         property real shine: holder.place.shine || 0
                         property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
                         property real lightCount: (view.frame.lights || []).length
+                        // What stands between it and the lights.
+                        property real occluderCount: view.frame.occluderCount || 0
+                        property real ownOccluder: { const own = (view.frame.ownOccluder || {})[String(holder.modelData.layer)]; return own === undefined ? -1 : own }
+                        property TextureInput occluders: TextureInput { texture: view.occluderTexture }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10

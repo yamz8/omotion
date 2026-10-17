@@ -3,6 +3,38 @@ VARYING vec3 worldPos;
 VARYING vec3 toEye;
 VARYING vec3 surface;
 
+// Whether something stands between a point and a light: each shaped
+// piece and model as an ellipsoid round its box (up to eight, packed in
+// the occluders texture: its middle, its half sizes, its turn), the line
+// to the light passing through or near it. Its own one doesn't count.
+vec3 turnBack(vec4 q, vec3 v)
+{
+    vec3 u = -q.xyz;
+    return v + 2.0 * cross(u, cross(u, v) + q.w * v);
+}
+
+float shadowed(vec3 p, vec3 light)
+{
+    float lit = 1.0;
+    for (int i = 0; i < 8; ++i) {
+        if (float(i) >= occluderCount)
+            break;
+        if (float(i) == ownOccluder)
+            continue;
+        vec3 middle = texelFetch(occluders, ivec2(0, i), 0).xyz;
+        vec3 size = max(texelFetch(occluders, ivec2(1, i), 0).xyz, vec3(0.001));
+        vec4 q = texelFetch(occluders, ivec2(2, i), 0);
+        vec3 a = turnBack(q, p - middle) / size;
+        vec3 b = turnBack(q, light - middle) / size;
+        if (length(a) < 1.0)
+            continue;
+        vec3 d = b - a;
+        float t = clamp(-dot(a, d) / max(dot(d, d), 0.000001), 0.0, 1.0);
+        lit *= mix(0.12, 1.0, smoothstep(0.7, 1.15, length(a + d * t)));
+    }
+    return lit;
+}
+
 // The lights added to the picture's own: each brightens what faces it,
 // falling off with distance, with a highlight as shiny and rough as the
 // piece is.
@@ -15,7 +47,7 @@ vec3 oneLight(vec3 albedo, vec3 n, vec3 p, vec3 eye, vec3 at, vec3 colour, float
     float diffuse = max(dot(n, l), 0.0);
     vec3 r = reflect(-l, n);
     float highlight = shine * pow(max(dot(r, normalize(eye)), 0.0), mix(80.0, 6.0, roughness)) * step(0.0, diffuse);
-    return (albedo * diffuse + vec3(highlight)) * colour * fall;
+    return (albedo * diffuse + vec3(highlight)) * colour * fall * shadowed(p, at);
 }
 
 vec3 lights(vec3 albedo, vec3 n, vec3 p, vec3 eye)
