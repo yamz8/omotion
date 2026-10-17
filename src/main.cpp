@@ -162,7 +162,7 @@ const char *Usage = R"(Usage:
                                          world doesn't reach)
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
-  omotion particles <project> <snow|rain|dust|fireflies|leaves|embers|smoke|fire> [--<setting> <value>]...
+  omotion particles <project> <snow|rain|dust|fireflies|leaves|embers|smoke|fire|water> [--<setting> <value>]...
                                          Add a particle layer; settings: count, size, speed,
                                          direction, spread, sway, twinkle, color, seed; smoke and fire:
                                          size, speed, rate, life, wind, swirl, x, y (or from, at)

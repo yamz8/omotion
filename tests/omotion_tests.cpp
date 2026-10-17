@@ -25,6 +25,7 @@
 #include "physics.h"
 #include "cloth.h"
 #include "fluid.h"
+#include "liquid.h"
 #include "theme.h"
 #include "world.h"
 
@@ -1959,6 +1960,39 @@ private slots:
             for (int x = 0; x < flames.width(); ++x)
                 warm += qAlpha(flames.pixel(x, y)) > 40 && qRed(flames.pixel(x, y)) > qBlue(flames.pixel(x, y)) + 30;
         QVERIFY(warm > 5);
+    }
+
+    void waterPoursAndPools() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // 100×100.
+        scene.duration = 4;
+        QString error;
+        const int water = Project::addParticles(scene, "water", {{"x", 30}, {"y", 20}, {"rate", 80}, {"size", 2}, {"loop", false}}, &error);
+        QVERIFY2(water >= 0, qPrintable(error));
+        const QList<QPointF> early = Liquid::drops(scene, assets, scene.layers[water], .2);
+        const QList<QPointF> late = Liquid::drops(scene, assets, scene.layers[water], 3.5);
+        QVERIFY(late.size() > early.size());
+        // Most of it has come down and lies on the floor, none through it,
+        // spread along it.
+        int pooled = 0;
+        double left = 1e9, right = -1e9;
+        for (const QPointF &p : late) {
+            QVERIFY(p.y() <= 100 + 1e-6 && p.x() >= 0 && p.x() <= 100);
+            if (p.y() > 85)
+                ++pooled, left = std::min(left, p.x()), right = std::max(right, p.x());
+        }
+        QVERIFY2(pooled > late.size() / 2, qPrintable(QString("%1 of %2").arg(pooled).arg(late.size())));
+        QVERIFY(right - left > 30);
+        // The same moment is the same water; drawn, it's there.
+        QCOMPARE(Liquid::drops(scene, assets, scene.layers[water], 3.5), late);
+        QRectF covers;
+        const QImage drawn = Liquid::at(scene, assets, scene.layers[water], 3.5, 1, &covers);
+        int wet = 0;
+        for (int y = 85; y < drawn.height(); ++y)
+            for (int x = 0; x < drawn.width(); ++x)
+                wet += qAlpha(drawn.pixel(x, y)) > 100;
+        QVERIFY(wet > 100);
     }
 
     void clipsBlendAndFade() {

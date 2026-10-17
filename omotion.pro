@@ -16,6 +16,7 @@ HEADERS += \
     src/physics.h \
     src/cloth.h \
     src/fluid.h \
+    src/liquid.h \
     src/project.h \
     src/scene.h \
     src/sceneview.h \
@@ -37,6 +38,7 @@ SOURCES += \
     src/physics.cpp \
     src/cloth.cpp \
     src/fluid.cpp \
+    src/liquid.cpp \
     src/project.cpp \
     src/scene.cpp \
     src/sceneview.cpp \

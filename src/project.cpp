@@ -1302,7 +1302,7 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
         return false;
     };
     static const QStringList numbers{"count", "size", "speed", "direction", "spread", "sway", "twinkle", "seed",
-                                     "rate", "life", "inherit", "gravity", "wind", "drag", "swirl", "x", "y"};
+                                     "rate", "life", "inherit", "gravity", "wind", "drag", "swirl", "x", "y", "viscosity", "floor"};
     // An emitter: the layer they come from, and the point on it (its pixels).
     if (name == "from") {
         *json = value.toString();

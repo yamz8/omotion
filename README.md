@@ -81,7 +81,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `O` / `Shift+O` | Animate an image / open an animation folder |
 | `I` | Add an image as a layer, a 3D model (glTF, GLB or OBJ) into a world, standing in front of the camera (moved and turned by its handles, its size in the inspector; `omotion model`), or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
 | `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
-| `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene; or smoke or fire, a fluid that rises, curls and drifts from a source |
+| `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene; or smoke or fire, a fluid that rises, curls and drifts from a source; or water that pours, splashes and pools |
 | `Ctrl+E` | Export MP4, WebM, GIF, PNG frames, or glTF for Blender, with a world's imported models in it (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
 | `F3` / `Ctrl+K` | Say or search: type to find any operator by name and `Enter` runs it; or say what you want ("make the car jump over the crest") and `Ctrl+Enter` hands it to Claude Code (see [Saying what you want](#saying-what-you-want)) |
@@ -393,6 +393,13 @@ photo.omotion/
   the right), `swirl` (0 to 1), `color`, `seed`. Worked out from the
   start, so every frame is the same each time; it loops with the scene
   (fading into itself) unless `"loop": false`.
+- Particles of kind **`water`** are drops that run together: poured from
+  `x`, `y` (or `from` a layer, at `at`), `rate` drops a second, `size` a
+  drop's radius, `speed` and `direction` (90 is down) and `spread`, pulled
+  by `gravity`, held by the canvas's sides and its `floor` (canvas y; the
+  bottom when left out), `viscosity` (0 to 1) for how thick. They splash
+  and pool; worked out from the start, looping with the scene unless
+  `"loop": false`.
 - A particle layer with **`from`** in its `particles` is an emitter: from
   that layer's `at` point (its pixels; its pivot when left out), `rate` a
   second, each living `life` seconds, with `inherit` of the layer's speed,

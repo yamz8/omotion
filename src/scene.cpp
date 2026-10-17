@@ -1,6 +1,7 @@
 #include "scene.h"
 #include "cloth.h"
 #include "fluid.h"
+#include "liquid.h"
 #include "world.h"
 
 #include <QDir>
@@ -60,7 +61,7 @@ const QStringList &Scene::eases() {
 }
 
 const QStringList &Scene::particleKinds() {
-    static const QStringList list{"snow", "rain", "dust", "fireflies", "leaves", "embers", "smoke", "fire"};
+    static const QStringList list{"snow", "rain", "dust", "fireflies", "leaves", "embers", "smoke", "fire", "water"};
     return list;
 }
 
@@ -86,6 +87,10 @@ QJsonObject Scene::particleDefaults(const QString &kind) {
     if (kind == "fire")
         return {{"kind", kind}, {"size", 24}, {"speed", 140}, {"rate", 1}, {"life", 1.2}, {"wind", 0}, {"swirl", .7},
                 {"color", "#ffa040"}, {"seed", 1}};
+    // Water is drops that run together (see Liquid): a pour.
+    if (kind == "water")
+        return {{"kind", kind}, {"rate", 150}, {"size", 4}, {"speed", 120}, {"direction", 90}, {"spread", 10},
+                {"gravity", 900}, {"viscosity", .2}, {"color", "#5aa8e8"}, {"seed", 1}};
     if (kind == "embers")
         return {{"kind", kind}, {"count", 90}, {"size", 2.5}, {"speed", 60}, {"direction", -90}, {"spread", 25},
                 {"sway", 20}, {"twinkle", .6}, {"color", "#ff9a3c"}, {"seed", 1}};
@@ -2335,6 +2340,23 @@ void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, do
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
         settings.insert(it.key(), it.value());
+    if (settings.value("kind").toString() == "water") {
+        if (!assets)
+            return;
+        Layer water = layer;
+        water.particles = settings;
+        // Drawn at most at the canvas's size, half that for speed, and
+        // spread smoothly onto the output.
+        const double scale = std::min(1.0, std::hypot(canvasToOutput.m11(), canvasToOutput.m12())) * .5;
+        QRectF covers;
+        const QImage image = Liquid::at(scene, *assets, water, t, scale, &covers);
+        painter.save();
+        painter.setTransform(canvasToOutput);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(covers, image);
+        painter.restore();
+        return;
+    }
     if (Fluid::isFluid(settings.value("kind").toString())) {
         if (!assets)
             return;
