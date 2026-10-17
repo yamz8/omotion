@@ -5,7 +5,14 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
 cd "$ROOT/build"
 
+# Objects built against another Qt's headers crash at run time (QRhi has no
+# binary compatibility between versions), and make doesn't notice the change.
+QT="$(qmake6 -query QT_VERSION)"
+if [ -f Makefile ] && [ "$(cat .qt-version 2>/dev/null)" != "$QT" ]; then
+    make clean >/dev/null
+fi
 qmake6 "$ROOT/omotion.pro"
+echo "$QT" > .qt-version
 make -j"$(nproc)"
 
 echo "Built $ROOT/build/omotion"
