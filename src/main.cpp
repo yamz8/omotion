@@ -118,10 +118,11 @@ const char *Usage = R"(Usage:
                                          The scene's look: exposure (stops), contrast, saturation,
                                          temperature, tint, vignette, bloom, bloomThreshold, and
                                          depth of field: focus (z, or meters in a world), aperture
-  omotion body <project> <layer> [--mass <kg>] [--bounce <0-1>] [--friction <0-1>] [--fixed]
+  omotion body <project> <layer> [--mass <kg>] [--bounce <0-1>] [--friction <0-1>] [--fixed] [--no-tumble]
   omotion body <project> <layer> --none
                                          Make a layer a rigid body (or a fixed one, that others hit),
-                                         or not
+                                         or not; bodies spin as they're knocked and roll over,
+                                         unless --no-tumble keeps them upright
   omotion simulate <project> [--from <s>] [--to <s>]
                                          Let the bodies fall, land, bounce and knock into each other,
                                          from the time they're keyed moving at; baked into keyframes
@@ -552,6 +553,8 @@ int command(const QStringList &args) {
                 none = true;
             else if (args.at(i) == "--fixed")
                 body["fixed"] = true;
+            else if (args.at(i) == "--no-tumble")
+                body["tumble"] = false;
             else if (i + 1 < args.size() && (args.at(i) == "--mass" || args.at(i) == "--bounce" || args.at(i) == "--friction"))
                 body[args.at(i).mid(2)] = args.at(++i).toDouble();
             else

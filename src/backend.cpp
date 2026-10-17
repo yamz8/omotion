@@ -347,7 +347,31 @@ void Backend::setBody(bool body, bool fixed, double bounce) {
         return;
     Scene scene = m_scene;
     QString error;
-    const QJsonObject settings = body ? QJsonObject{{"mass", 1}, {"bounce", std::clamp(bounce, 0.0, 1.0)}, {"fixed", fixed}} : QJsonObject();
+    // Its other settings (mass, friction, tumble) stay as they were.
+    QJsonObject settings;
+    if (body) {
+        settings = m_scene.layers.at(m_selected).raw.value("body").toObject();
+        if (!settings.contains("mass"))
+            settings["mass"] = 1;
+        settings["bounce"] = std::clamp(bounce, 0.0, 1.0);
+        settings["fixed"] = fixed;
+    }
+    if (!Physics::setBody(scene, m_selected, settings, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
+void Backend::setBodyValue(const QString &name, const QVariant &value) {
+    if (m_selected < 0)
+        return;
+    QJsonObject settings = m_scene.layers.at(m_selected).raw.value("body").toObject();
+    if (settings.isEmpty())
+        return;
+    settings[name] = QJsonValue::fromVariant(value);
+    Scene scene = m_scene;
+    QString error;
     if (!Physics::setBody(scene, m_selected, settings, &error))
         return setError(error);
     checkpoint();

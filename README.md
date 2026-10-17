@@ -99,7 +99,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Shape | In the inspector, for a piece with a 3D shape: *Smooth* relaxes the AI's lumps, *Simplify* makes it lighter; kept apart from the shape as Blender's modifiers are, so 0 takes them away. `omotion mesh` does the same |
 | Look | In the inspector with nothing selected: the scene's grade (exposure, contrast, saturation, warmth, tint), a vignette, bloom (what's brighter than a level glows), and depth of field (a focus and an aperture; in a world, the focus is meters from the camera). The canvas then shows the frame as it's exported. `omotion look` does the same |
 | Emitters | A particle layer's *From* (in the inspector) makes it come from a layer: a wheel throwing dust, a chimney's embers. So many a second, each living a while, carrying on with some of the layer's speed, under gravity and wind. `omotion particles <project> dust --from car --rate 60` does the same |
-| Physics | In the inspector: make a layer a rigid *Body* (or a *Fixed* one that others land on, with how much it bounces), then *Simulate from the playhead*: the bodies fall, land on the ground (a world's, or the canvas's bottom), bounce and knock into each other, baked into keys. `omotion body` and `omotion simulate` do the same |
+| Physics | In the inspector: make a layer a rigid *Body* (or a *Fixed* one that others land on, with how much it bounces), then *Simulate from the playhead*: the bodies fall, land on the ground (a world's, or the canvas's bottom), bounce, knock into each other and tumble, baked into keys (*Tumble* off keeps one upright). `omotion body` and `omotion simulate` do the same |
 | Ctrl+click | Add a layer to the selection, or take it out (also in the outliner): they move together, by the arrows, rings and G in a world, by dragging on a flat canvas |
 | `G` | Grab the selected piece of a world: it follows the mouse, `X` `Y` `Z` keep it to an axis, a click or `Enter` places it, right-click or `Esc` puts it back |
 | Steps | In the inspector, how the selected layer came to be: cut from what, how the hole behind it was filled, the world, its 3D shape. Each can be done again or differently (fill by the AI, smoothly, or leave open); ⚠ marks one made from something that has changed since, and the top bar's button redoes all of those in order. `omotion steps` and `omotion redo` do the same |
@@ -375,7 +375,9 @@ photo.omotion/
   second, each living `life` seconds, with `inherit` of the layer's speed,
   pulled by `gravity` (down, px/s²) and `wind` (right), slowed by `drag`.
 - **`body`** on a layer makes it a rigid body: `mass`, `bounce` (0 to 1),
-  `friction` (0 to 1), `fixed`. A flat scene's bodies land on its bottom,
+  `friction` (0 to 1), `fixed`, `tumble` (true unless set false: bodies
+  spin when knocked off their middle or caught by the ground, and tip onto
+  a side as they rest). A flat scene's bodies land on its bottom,
   or at the scene's `floor` (canvas y) when set.
 - **`constraints`** on a layer rig it, as Blender's do: `{"type": "ik", "lower",
   "target", "pivot", "tip", "bend"}` turns it (the upper bone) and its child

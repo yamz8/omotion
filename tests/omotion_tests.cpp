@@ -2067,6 +2067,26 @@ private slots:
         QVERIFY(std::abs(fixed.value(fixed.layers[1], "y", 2) - 10) < 1.5);
         QVERIFY(!Physics::setBody(fixed, 5, {{"mass", 1}}, &error));
 
+        // Thrown sideways, a body rolls over as the floor catches it, and
+        // comes to rest on a side; told not to tumble, it only slides.
+        Scene thrown = twoSquares(dir, assets);
+        thrown.duration = 3;
+        thrown.layers.removeLast();
+        thrown.layers[0].keys["x"] = {Key{0, 10, "linear"}, Key{.1, 40, "linear"}};
+        QVERIFY(Physics::setBody(thrown, 0, {{"bounce", 0}, {"friction", .8}}, &error));
+        Scene sliding = thrown;
+        QCOMPARE(Physics::bake(thrown, assets, 0, 3, &error), 1);
+        QVERIFY(thrown.layers[0].keys.contains("rotation"));
+        double most = 0;
+        for (double t = 0; t < 3; t += .05)
+            most = std::max(most, std::abs(thrown.value(thrown.layers[0], "rotation", t)));
+        QVERIFY2(most > 20, qPrintable(QString::number(most)));
+        const double rest = thrown.value(thrown.layers[0], "rotation", 3);
+        QVERIFY2(std::abs(rest - std::round(rest / 90) * 90) < 1, qPrintable(QString::number(rest)));
+        sliding.layers[0].raw["body"] = QJsonObject{{"bounce", 0}, {"friction", .8}, {"tumble", false}};
+        QCOMPARE(Physics::bake(sliding, assets, 0, 3, &error), 1);
+        QVERIFY(!sliding.layers[0].keys.contains("rotation"));
+
         // In a world: dropped from up high, it lands on the ground there.
         QTemporaryDir worldDir;
         const QString project = madeUpWorld(worldDir);

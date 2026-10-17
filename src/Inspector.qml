@@ -555,6 +555,12 @@ Rectangle {
                         checked: !!parent.parent.body.fixed
                         onClicked: { backend.setBody(true, checked, parent.parent.body.bounce === undefined ? .3 : parent.parent.body.bounce); inspector.done() }
                     }
+                    CheckBox {
+                        text: "Tumble"
+                        enabled: parent.parent.isBody
+                        checked: parent.parent.body.tumble !== false
+                        onClicked: { backend.setBodyValue("tumble", checked); inspector.done() }
+                    }
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -565,6 +571,17 @@ Rectangle {
                         Layout.fillWidth: true
                         value: parent.parent.body.bounce === undefined ? .3 : parent.parent.body.bounce
                         onCommitted: function (n) { backend.setBody(true, !!parent.parent.body.fixed, n) }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: parent.isBody
+                    spacing: 8
+                    Label { text: "Friction"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField {
+                        Layout.fillWidth: true
+                        value: parent.parent.body.friction === undefined ? .5 : parent.parent.body.friction
+                        onCommitted: function (n) { backend.setBodyValue("friction", Math.max(0, Math.min(1, n))) }
                     }
                 }
                 ToolButton {

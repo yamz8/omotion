@@ -340,6 +340,8 @@ public:
     // Rigid bodies: the selected layer as one (or a fixed one), or not; and
     // every body let fall from the playhead to the end, baked into keys.
     Q_INVOKABLE void setBody(bool body, bool fixed, double bounce);
+    // One setting of the selected body (tumble, friction, mass), kept with the rest.
+    Q_INVOKABLE void setBodyValue(const QString &name, const QVariant &value);
     Q_INVOKABLE void simulate();
     // Moves a key of the selected thing's property to a new time and value
     // (between its neighbours); a drag of them is one undo step, from
