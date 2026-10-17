@@ -209,6 +209,13 @@ int importVideo(Scene &scene, const QString &directory, const QString &path, QSt
 // A video layer's "start" (seconds into the scene), "speed" or "loop".
 bool setVideo(Scene &scene, int layer, const QString &name, const QVariant &value, QString *error);
 
+// Motion tracking, as Blender's: follows the patch of a video layer's
+// picture around a canvas point from one time to another, frame by frame,
+// and keys a layer (onto, or a new empty) to follow it, x and y in its
+// parent's pixels. The layer it keyed, or -1.
+int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, double from, double to, QString *error,
+          const QString &onto = {}, QList<QPointF> *path = nullptr);
+
 // Copies an image into the project's assets and adds it as a layer on top.
 int importImage(Scene &scene, const QString &directory, const QString &path, QString *error);
 

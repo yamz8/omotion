@@ -1,6 +1,7 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QLinearGradient>
 #include <QDir>
@@ -2384,6 +2385,51 @@ private slots:
         QVERIFY(colourAt(.7).red() > 200);
         QVERIFY(!Project::setVideo(scene, 0, "speed", 2, &error));
         QCOMPARE(sourceAt(scene.layers[clip], .55), scene.layers[clip].source);
+    }
+
+    void trackingFollowsAPointInAVideo() {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg isn't installed");
+        QTemporaryDir dir;
+        // A white square sliding right 60 px a second (6 a frame) over a
+        // speckled ground, made as frames and encoded.
+        QImage ground(200, 100, QImage::Format_RGB32);
+        QRandomGenerator random(7);
+        for (int y = 0; y < 100; ++y)
+            for (int x = 0; x < 200; ++x) {
+                const int v = 90 + int(random.bounded(60));
+                ground.setPixelColor(x, y, QColor(v, v, v));
+            }
+        for (int f = 0; f < 10; ++f) {
+            QImage frame = ground;
+            QPainter painter(&frame);
+            painter.fillRect(QRect(30 + 6 * f, 40, 14, 14), Qt::white);
+            painter.end();
+            frame.save(dir.filePath(QString("f%1.png").arg(f, 2, 10, QChar('0'))));
+        }
+        QProcess make;
+        make.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-framerate", "10", "-i", dir.filePath("f%02d.png"),
+                              "-pix_fmt", "yuv444p", "-crf", "5", dir.filePath("clip.mp4")});
+        QVERIFY(make.waitForFinished(30000) && make.exitCode() == 0);
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);  // 200×100.
+        Scene scene = Project::load(project, nullptr);
+        scene.fps = 10;
+        scene.duration = 1;
+        AssetCache assets(project);
+        QString error;
+        const int clip = Project::importVideo(scene, project, dir.filePath("clip.mp4"), &error);
+        QVERIFY2(clip >= 0, qPrintable(error));
+        QList<QPointF> path;
+        const int follower = Project::track(scene, assets, clip, QPointF(37, 47), 0, .9, &error, {}, &path);
+        QVERIFY2(follower >= 0, qPrintable(error));
+        QCOMPARE(path.size(), 10);
+        QVERIFY2(std::abs(path.last().x() - (37 + 54)) < 3, qPrintable(QString::number(path.last().x())));
+        QVERIFY(std::abs(path.last().y() - 47) < 3);
+        // The empty it made follows: where the square is, there it is.
+        const Layer &empty = scene.layers.at(follower);
+        QVERIFY(empty.raw["empty"].toBool());
+        QVERIFY(std::abs(layerTransform(scene, assets, follower, .9).map(QPointF()).x() - path.last().x()) < .5);
+        QVERIFY(Project::track(scene, assets, 0, QPointF(37, 47), 0, 1, &error) < 0);
     }
 
     void surfacesWrapSolidsFacingOut() {

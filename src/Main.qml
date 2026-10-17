@@ -160,6 +160,7 @@ ApplicationWindow {
     // Drawing, as Grease Pencil: strokes on a drawing layer, frame by frame.
     Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.startDrawing() }
     Shortcut { sequence: "Shift+L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addLight() }
+    Shortcut { sequence: "Shift+T"; context: Qt.ApplicationShortcut; enabled: win.hasLayer; onActivated: backend.setTool(backend.tool === "track" ? "move" : "track") }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
     Shortcut { sequence: "Shift+R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startBrush() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "brush"; onActivated: backend.finishBrush() }
@@ -450,6 +451,10 @@ ApplicationWindow {
                             backend.setPivotAt(p.x, p.y);
                             return;
                         }
+                        if (backend.tool === "track") {
+                            backend.trackAt(p.x, p.y);
+                            return;
+                        }
                         // A handle on what's selected in the world moves it.
                         const v = view.toView(mouse.x, mouse.y);
                         if (mouse.button === Qt.LeftButton) {
@@ -646,6 +651,8 @@ ApplicationWindow {
                               ? "Pins: click the layer to pin it, drag a pin to bend it, right-click one to take it away   ·   K keyframes the bend   ·   Esc done"
                               : backend.tool === "brush"
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
+                              : backend.tool === "track"
+                              ? "Track: click a point on " + (backend.values.name || "the video") + " with some detail around it; it's followed from the playhead to the end, and an empty keyed there   ·   Esc cancel"
                               : backend.tool === "draw"
                               ? "Draw on " + (backend.values.name || "the drawing") + ": drag to draw, right-click takes back a stroke, the wheel sizes the pen ("
                                 + Math.round(backend.brushRadius / 4 * 10) / 10 + " px)   ·   , . to another frame: drawing there starts a new drawing   ·   Esc done"

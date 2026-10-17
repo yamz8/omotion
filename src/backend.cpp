@@ -607,6 +607,25 @@ void Backend::undoStroke() {
     changed();
 }
 
+void Backend::trackAt(double x, double y) {
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
+        return setNotice("Select a video layer to track a point on.");
+    Scene scene = m_scene;
+    QString error;
+    setBusy("Tracking…");
+    QCoreApplication::processEvents();
+    const int follower = Project::track(scene, m_assets, m_selected, QPointF(x, y), m_time, m_scene.duration, &error);
+    setBusy({});
+    if (follower < 0)
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    setTool("move");
+    changed();
+    select(follower);
+    setNotice(QString("%1 follows it. Parent a layer to it (or link to it) to stick it to the footage.").arg(m_scene.layers.at(follower).name));
+}
+
 void Backend::setVideo(const QString &name, const QVariant &value) {
     Scene scene = m_scene;
     QString error;
@@ -1701,7 +1720,7 @@ void Backend::endDrag() {
 
 void Backend::setTool(const QString &tool) {
     if (tool != "move" && tool != "cut" && tool != "pivot" && tool != "wand" && tool != "brush" && tool != "pin" && tool != "path" &&
-        tool != "draw")
+        tool != "draw" && tool != "track")
         return;
     if (tool != "brush") {
         m_brushPiece.clear();
