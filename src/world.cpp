@@ -986,6 +986,60 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
 }
 
 namespace {
+// Which cells of a grid over a shape's box its surface passes through,
+// thickened a cell, so a line through it can't slip between.
+QByteArray cellsOf(const Mesh &shape) {
+    static QMutex lock;
+    static QHash<QByteArray, QByteArray> cache;
+    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
+    {
+        QMutexLocker locked(&lock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    constexpr int n = Frame::solid;
+    QByteArray cells(n * n * n, '\0');
+    const QVector3D low = shape.minimum, size = shape.maximum - shape.minimum;
+    const QVector3D cell(std::max(size.x(), 1e-6f) / n, std::max(size.y(), 1e-6f) / n, std::max(size.z(), 1e-6f) / n);
+    const float smallest = std::min({cell.x(), cell.y(), cell.z()});
+    const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
+    const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
+    const qsizetype triangles = shape.indices.size() / qsizetype(3 * sizeof(quint32));
+    auto at = [&](quint32 k) { return QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]); };
+    auto mark = [&](const QVector3D &p) {
+        const int x = std::clamp(int((p.x() - low.x()) / cell.x()), 0, n - 1), y = std::clamp(int((p.y() - low.y()) / cell.y()), 0, n - 1),
+                  z = std::clamp(int((p.z() - low.z()) / cell.z()), 0, n - 1);
+        cells[(z * n + y) * n + x] = char(255);
+    };
+    for (qsizetype i = 0; i < triangles; ++i) {
+        const QVector3D a = at(index[3 * i]), b = at(index[3 * i + 1]), c = at(index[3 * i + 2]);
+        const float longest = std::max({(b - a).length(), (c - a).length(), (c - b).length()});
+        const int steps = std::clamp(int(std::ceil(longest / smallest * 2)), 1, 256);
+        for (int u = 0; u <= steps; ++u)
+            for (int w = 0; w <= steps - u; ++w)
+                mark(a + (b - a) * (float(u) / steps) + (c - a) * (float(w) / steps));
+    }
+    QByteArray thick = cells;
+    for (int z = 0; z < n; ++z)
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x) {
+                if (!cells[(z * n + y) * n + x])
+                    continue;
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dy = -1; dy <= 1; ++dy)
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            const int xx = x + dx, yy = y + dy, zz = z + dz;
+                            if (xx >= 0 && yy >= 0 && zz >= 0 && xx < n && yy < n && zz < n)
+                                thick[(zz * n + yy) * n + xx] = char(255);
+                        }
+            }
+    QMutexLocker locked(&lock);
+    cache.insert(key, thick);
+    return thick;
+}
+}
+
+namespace {
 QVector3D fluidPoint(const Scene &scene, AssetCache &assets, const Layer &layer, double when);
 }
 
@@ -1344,8 +1398,19 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             const Mesh shape = mesh(scene, assets, place.layer);
             if (shape.isNull())
                 continue;
-            // A few ellipsoids, each round a part of its shape, so its
-            // shadow is shaped like it.
+            // The first few by their shape itself, cell by cell.
+            if (frame.solids.size() < 4) {
+                Frame::Solid solid;
+                solid.box.layer = place.layer;
+                solid.box.centre = place.position + place.rotation.rotatedVector((shape.minimum + shape.maximum) / 2 * place.scale);
+                solid.box.half = (shape.maximum - shape.minimum) / 2 * place.scale;
+                solid.box.rotation = place.rotation;
+                solid.cells = cellsOf(shape);
+                frame.solids << solid;
+                continue;
+            }
+            // The rest as a few ellipsoids, each round a part of its shape,
+            // so its shadow is shaped like it.
             for (const Occluder &part : partsOf(shape)) {
                 if (frame.occluders.size() >= 32)
                     break;

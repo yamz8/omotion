@@ -14,6 +14,38 @@ vec3 turnBack(vec4 q, vec3 v)
     return v + 2.0 * cross(u, cross(u, v) + q.w * v);
 }
 
+// A shaped piece's own shape between a point and a light: the line,
+// brought into its box (-1 to 1 each way), walked through the cells its
+// shape fills; how much of the light gets through.
+float throughCells(sampler3D cells, int i, vec3 p, vec3 light)
+{
+    vec3 middle = texelFetch(solids, ivec2(0, i), 0).xyz;
+    vec4 sizeOf = texelFetch(solids, ivec2(1, i), 0);
+    if (sizeOf.w == ownLayer)
+        return 1.0;
+    vec3 size = max(sizeOf.xyz, vec3(0.001));
+    vec4 q = texelFetch(solids, ivec2(2, i), 0);
+    vec3 a = turnBack(q, p - middle) / size;
+    vec3 b = turnBack(q, light - middle) / size;
+    vec3 d = b - a;
+    // Where the line is inside the box.
+    vec3 inverse = 1.0 / (sign(d) * max(abs(d), vec3(0.000001)));
+    vec3 t0 = (-1.0 - a) * inverse, t1 = (1.0 - a) * inverse;
+    float enter = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), max(min(t0.z, t1.z), 0.0));
+    float leave = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), min(max(t0.z, t1.z), 1.0));
+    if (enter >= leave)
+        return 1.0;
+    float lit = 1.0;
+    for (int k = 0; k < 48; ++k) {
+        float t = mix(enter, leave, (float(k) + 0.5) / 48.0);
+        vec3 at = (a + d * t) * 0.5 + 0.5;
+        lit *= 1.0 - 0.35 * smoothstep(0.3, 0.7, texture(cells, at).r);
+        if (lit < 0.1)
+            break;
+    }
+    return mix(0.12, 1.0, smoothstep(0.1, 0.9, lit));
+}
+
 float shadowed(vec3 p, vec3 light)
 {
     float lit = 1.0;
@@ -33,6 +65,14 @@ float shadowed(vec3 p, vec3 light)
         float t = clamp(-dot(a, d) / max(dot(d, d), 0.000001), 0.0, 1.0);
         lit *= mix(0.12, 1.0, smoothstep(0.7, 1.15, length(a + d * t)));
     }
+    if (solidCount > 0.5)
+        lit *= throughCells(solid0, 0, p, light);
+    if (solidCount > 1.5)
+        lit *= throughCells(solid1, 1, p, light);
+    if (solidCount > 2.5)
+        lit *= throughCells(solid2, 2, p, light);
+    if (solidCount > 3.5)
+        lit *= throughCells(solid3, 3, p, light);
     return lit;
 }
 

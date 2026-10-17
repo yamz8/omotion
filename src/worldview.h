@@ -54,6 +54,10 @@ public:
     // What casts shadows from the lights, for the shaders: three texels a
     // row (middle, half sizes, turn), a row each.
     Q_INVOKABLE QQuick3DTextureData *occluders();
+    // Shaped pieces casting shadows by their shape: their boxes (as the
+    // occluders are packed, a row each) and each one's cells, in 3D.
+    Q_INVOKABLE QQuick3DTextureData *solids();
+    Q_INVOKABLE QQuick3DTextureData *solidCells(int i);
 
 signals:
     void changed();
@@ -70,7 +74,8 @@ private:
     QVariantMap m_frame;
     QHash<int, World::Mesh> m_meshes;
     QHash<int, std::shared_ptr<QQuick3DTextureData>> m_sheets;
-    std::shared_ptr<QQuick3DTextureData> m_occluders;
+    std::shared_ptr<QQuick3DTextureData> m_occluders, m_solids;
+    std::shared_ptr<QQuick3DTextureData> m_solidCells[4];
     QByteArray m_dustVertices;
     QByteArray m_dustIndices;
     QByteArray m_meshKey;

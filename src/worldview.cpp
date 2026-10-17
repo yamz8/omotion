@@ -187,6 +187,25 @@ void WorldSource::update() {
         texture->setFormat(QQuick3DTextureData::RGBA32F);
         texture->setTextureData(packed);
         frame["occluderCount"] = f.occluders.size();
+        QByteArray boxes(4 * 3 * 4 * int(sizeof(float)), '\0');
+        float *boxRows = reinterpret_cast<float *>(boxes.data());
+        for (int k = 0; k < f.solids.size() && k < 4; ++k) {
+            const World::Occluder &c = f.solids.at(k).box;
+            float *row = boxRows + k * 12;
+            row[0] = c.centre.x(), row[1] = c.centre.y(), row[2] = c.centre.z();
+            row[4] = c.half.x(), row[5] = c.half.y(), row[6] = c.half.z(), row[7] = float(c.layer);
+            row[8] = c.rotation.x(), row[9] = c.rotation.y(), row[10] = c.rotation.z(), row[11] = c.rotation.scalar();
+            QQuick3DTextureData *cells = solidCells(k);
+            cells->setSize(QSize(World::Frame::solid, World::Frame::solid));
+            cells->setDepth(World::Frame::solid);
+            cells->setFormat(QQuick3DTextureData::R8);
+            cells->setTextureData(f.solids.at(k).cells);
+        }
+        QQuick3DTextureData *solidBoxes = solids();
+        solidBoxes->setSize(QSize(3, 4));
+        solidBoxes->setFormat(QQuick3DTextureData::RGBA32F);
+        solidBoxes->setTextureData(boxes);
+        frame["solidCount"] = std::min<qsizetype>(4, f.solids.size());
         // The world's own picture as the light all round, for imported
         // models' materials, so they take its colours.
         // A small copy of its own, in the cache: the picture's file is the
@@ -241,6 +260,28 @@ void WorldSource::update() {
     }
     m_frame = frame;
     emit frameChanged();
+}
+
+QQuick3DTextureData *WorldSource::solids() {
+    if (!m_solids) {
+        m_solids = std::make_shared<QQuick3DTextureData>();
+        QQmlEngine::setObjectOwnership(m_solids.get(), QQmlEngine::CppOwnership);
+    }
+    return m_solids.get();
+}
+
+QQuick3DTextureData *WorldSource::solidCells(int i) {
+    std::shared_ptr<QQuick3DTextureData> &cells = m_solidCells[std::clamp(i, 0, 3)];
+    if (!cells) {
+        cells = std::make_shared<QQuick3DTextureData>();
+        // Something to sample before there's a shape: one empty cell.
+        cells->setSize(QSize(1, 1));
+        cells->setDepth(1);
+        cells->setFormat(QQuick3DTextureData::R8);
+        cells->setTextureData(QByteArray(1, '\0'));
+        QQmlEngine::setObjectOwnership(cells.get(), QQmlEngine::CppOwnership);
+    }
+    return cells.get();
 }
 
 QQuick3DTextureData *WorldSource::occluders() {

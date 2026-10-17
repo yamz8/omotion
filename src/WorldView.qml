@@ -16,6 +16,19 @@ Item {
         const list = frame.lights || [];
         return i < list.length ? list[i][key] : Qt.vector3d(0, 0, 0);
     }
+    // Shaped pieces' boxes, and their cells in 3D, for every material.
+    readonly property Texture solidTexture: Texture {
+        textureData: view.source ? view.source.solids() : null
+        minFilter: Texture.Nearest
+        magFilter: Texture.Nearest
+        mipFilter: Texture.None
+    }
+    readonly property list<Texture> cellTextures: [
+        Texture { textureData: view.source ? view.source.solidCells(0) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(1) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(2) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge },
+        Texture { textureData: view.source ? view.source.solidCells(3) : null; tilingModeHorizontal: Texture.ClampToEdge; tilingModeVertical: Texture.ClampToEdge; tilingModeDepth: Texture.ClampToEdge }
+    ]
     // The occluders' data, one texture for every material.
     readonly property Texture occluderTexture: Texture {
         textureData: view.source ? view.source.occluders() : null
@@ -197,6 +210,12 @@ Item {
                         property real occluderCount: view.frame.occluderCount || 0
                         property real ownLayer: holder.modelData.layer
                         property TextureInput occluders: TextureInput { texture: view.occluderTexture }
+                        property real solidCount: view.frame.solidCount || 0
+                        property TextureInput solids: TextureInput { texture: view.solidTexture }
+                        property TextureInput solid0: TextureInput { texture: view.cellTextures[0] }
+                        property TextureInput solid1: TextureInput { texture: view.cellTextures[1] }
+                        property TextureInput solid2: TextureInput { texture: view.cellTextures[2] }
+                        property TextureInput solid3: TextureInput { texture: view.cellTextures[3] }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10
@@ -251,6 +270,12 @@ Item {
                         property real occluderCount: view.frame.occluderCount || 0
                         property real ownLayer: holder.modelData.layer
                         property TextureInput occluders: TextureInput { texture: view.occluderTexture }
+                        property real solidCount: view.frame.solidCount || 0
+                        property TextureInput solids: TextureInput { texture: view.solidTexture }
+                        property TextureInput solid0: TextureInput { texture: view.cellTextures[0] }
+                        property TextureInput solid1: TextureInput { texture: view.cellTextures[1] }
+                        property TextureInput solid2: TextureInput { texture: view.cellTextures[2] }
+                        property TextureInput solid3: TextureInput { texture: view.cellTextures[3] }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
                         property real focus: view.frame.focus || 10

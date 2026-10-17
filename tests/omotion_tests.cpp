@@ -2790,20 +2790,25 @@ private slots:
         const QVector3D eye = World::pictureToWorld(World::info(scene)).map(QVector3D());
         Project::addLight(scene, "lamp", QVector3D(-4, 6, eye.z() - unlit.shadows.first().position.z()), QJsonObject{{"power", 2}, {"reach", 20}});
         const World::Frame lit = World::frame(scene, assets, 0);
-        // A few ellipsoids round its parts, inside its box, together about
-        // as big as it.
-        QVERIFY(lit.occluders.size() >= 2 && lit.occluders.size() <= 4);
+        // By its shape itself: its box where it is, and the cells of a grid
+        // over it its surface passes through, so a line through it is
+        // stopped where the shape is and not past its edges.
+        QVERIFY(lit.occluders.isEmpty());
+        QCOMPARE(lit.solids.size(), 1);
+        const World::Frame::Solid &solid = lit.solids.first();
+        QCOMPARE(solid.box.layer, piece);
         const World::Mesh body = World::mesh(scene, assets, piece);
-        const QVector3D size = body.maximum - body.minimum;
-        double volume = 0;
-        for (const World::Occluder &o : lit.occluders) {
-            QCOMPARE(o.layer, piece);
-            for (int k = 0; k < 3; ++k)
-                QVERIFY(o.centre[k] >= body.minimum[k] - 1e-3 && o.centre[k] <= body.maximum[k] + 1e-3);
-            volume += 4.0 / 3 * M_PI * o.half.x() * o.half.y() * o.half.z();
-        }
-        const double ball = 4.0 / 3 * M_PI * size.x() * size.y() * size.z() / 8;
-        QVERIFY2(volume > ball * .4 && volume < ball * 2.5, qPrintable(QString("%1 %2").arg(volume).arg(ball)));
+        QVERIFY((solid.box.centre - (body.minimum + body.maximum) / 2).length() < .01);
+        constexpr int side = World::Frame::solid;
+        QCOMPARE(solid.cells.size(), side * side * side);
+        int filled = 0;
+        for (const char c : solid.cells)
+            filled += c != 0;
+        // A ball's shell: some of the grid, not all of it; its middle empty
+        // and its corners too.
+        QVERIFY2(filled > side * side * 2 && filled < side * side * side / 2, qPrintable(QString::number(filled)));
+        QCOMPARE(int(solid.cells.at((side / 2 * side + side / 2) * side + side / 2)), 0);
+        QCOMPARE(int(solid.cells.at(0)), 0);
     }
 
     void emittersInAWorldThrowInThreeD() {
