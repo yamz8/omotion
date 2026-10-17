@@ -345,6 +345,33 @@ Rectangle {
                 }
             }
 
+            // A video layer: when it starts, how fast, looping or not.
+            ColumnLayout {
+                visible: backend.selected >= 0 && Object.keys(inspector.v.video || {}).length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var video: inspector.v.video || {}
+                Label { text: "Video, " + (parent.video.count || 0) + " frames"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Starts at s"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.video.start || 0; onCommitted: function (n) { backend.setVideo("start", n) } }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Speed ×"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.video.speed === undefined ? 1 : parent.parent.video.speed; onCommitted: function (n) { backend.setVideo("speed", n) } }
+                }
+                CheckBox {
+                    text: "Loop"
+                    checked: parent.video.loop !== false
+                    onClicked: { backend.setVideo("loop", checked); inspector.done() }
+                }
+            }
+
             // A light: its colour, power and reach.
             ColumnLayout {
                 visible: backend.selected >= 0 && Object.keys(inspector.v.light || {}).length > 0

@@ -79,7 +79,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Key | Does |
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
-| `I` | Add an image as a layer |
+| `I` | Add an image as a layer, or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
 | `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF, PNG frames, or glTF for Blender (`H` there for half size) |
@@ -342,6 +342,10 @@ photo.omotion/
   "speed", "amount"}]` add a motion's change from its first key, from
   `start`; the scene's **`motions`** keep each motion's `keys` (by property,
   times from 0), copied in when it's laid on.
+- A video layer has **`video`**: `{"frames"` (a folder of the project, with
+  `00001.jpg` on), `"count", "fps", "start"` (seconds into the scene),
+  `"speed", "loop"}`; its `source` is its first frame. Cuts and AI select
+  work on that first frame.
 - A layer with **`drawing`** has no `source`: `{"frames": [{"t", "strokes":
   [{"color", "width", "points": [[x, y], ...]}]}]}`, points in the layer's
   pixels; each frame shows from its `t` until the next.

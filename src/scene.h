@@ -257,6 +257,7 @@ private:
 
     QString m_directory;
     QHash<QString, Entry> m_entries;
+    QStringList m_frameOrder;
     QHash<QString, Look> m_looks;
     QStringList m_lookOrder;
     QStringList m_missing;
@@ -312,6 +313,10 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
+// The picture a layer shows at time t: a video layer's frame for then (its
+// "video": frames in a folder of the project, from "start" seconds into
+// the scene at "speed", looping or holding its last), else its source.
+QString sourceAt(const Layer &layer, double t);
 // A drawing layer's strokes (its "drawing" in scene.json), as Blender's
 // Grease Pencil: frames of strokes, each shown from its time until the
 // next; each stroke a colour, a width and points in the layer's pixels.

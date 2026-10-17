@@ -77,6 +77,11 @@ PortalFileFilter imageFilter() {
             {1, QStringLiteral("image/bmp")},
             {1, QStringLiteral("image/gif")},
             {1, QStringLiteral("image/tiff")},
+            // Video clips become layers that play.
+            {1, QStringLiteral("video/mp4")},
+            {1, QStringLiteral("video/webm")},
+            {1, QStringLiteral("video/quicktime")},
+            {1, QStringLiteral("video/x-matroska")},
         },
     };
 }

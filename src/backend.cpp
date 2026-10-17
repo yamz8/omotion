@@ -607,6 +607,16 @@ void Backend::undoStroke() {
     changed();
 }
 
+void Backend::setVideo(const QString &name, const QVariant &value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setVideo(scene, m_selected, name, value, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::addLight() {
     if (!World::info(m_scene).valid)
         return setNotice("Lights light a world: make one first (Shift+D).");
@@ -845,6 +855,7 @@ QVariantMap Backend::values() const {
     map.insert("ownFollow", !std::isnan(layer.follow));
     map.insert("empty", layer.raw.value("empty").toBool());
     map.insert("drawing", layer.raw.contains("drawing"));
+    map.insert("video", layer.raw.value("video").toObject().toVariantMap());
     map.insert("shapeModifiers", layer.raw.value("shape").toObject().value("modifiers").toArray().toVariantList());
     map.insert("shaped", !layer.raw.value("shape").toObject().isEmpty());
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());
@@ -951,7 +962,12 @@ bool Backend::importImage(const QString &path) {
         return open(path);
     Scene scene = m_scene;
     QString error;
-    const int index = Project::importImage(scene, m_directory, localPath(path), &error);
+    // A clip becomes a layer that plays; its frames take a moment to write.
+    if (Project::isVideo(localPath(path)))
+        setBusy("Reading the video's frames…");
+    const int index = Project::isVideo(localPath(path)) ? Project::importVideo(scene, m_directory, localPath(path), &error)
+                                                         : Project::importImage(scene, m_directory, localPath(path), &error);
+    setBusy({});
     if (index < 0) {
         setError(error);
         return false;

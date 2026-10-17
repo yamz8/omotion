@@ -1415,6 +1415,14 @@ AssetCache::Entry *AssetCache::entry(const QString &source) {
     if (!size.isValid())
         return missing();
     m_missing.removeAll(source);
+    // A video's frames come and go: only the last few are kept.
+    static const QRegularExpression frame("/\\d{5}\\.jpg$");
+    if (frame.match(source).hasMatch()) {
+        m_frameOrder.removeAll(source);
+        m_frameOrder.append(source);
+        while (m_frameOrder.size() > 64)
+            m_entries.remove(m_frameOrder.takeFirst());
+    }
     return &*m_entries.insert(source, Entry{QImage(), size, info.lastModified(), {}});
 }
 
@@ -1537,6 +1545,23 @@ void soften(QImage &image, double width) {
             for (int c = 0; c < channels; ++c)
                 blurLine(image.bits() + x * channels + c, image.height(), int(image.bytesPerLine()), radius, scratch);
     }
+}
+
+QString sourceAt(const Layer &layer, double t) {
+    if (layer.raw.isEmpty() || !layer.raw.contains("video"))
+        return layer.source;
+    const QJsonObject video = layer.raw.value("video").toObject();
+    const int count = video.value("count").toInt();
+    const double fps = video.value("fps").toDouble(30);
+    if (count <= 0 || fps <= 0)
+        return layer.source;
+    double frame = (t - video.value("start").toDouble(0)) * video.value("speed").toDouble(1) * fps;
+    qint64 n = qint64(std::floor(frame + 1e-6));
+    if (video.value("loop").toBool(true))
+        n = ((n % count) + count) % count;
+    else
+        n = std::clamp<qint64>(n, 0, count - 1);
+    return QString("%1/%2.jpg").arg(video.value("frames").toString()).arg(n + 1, 5, 10, QChar('0'));
 }
 
 int drawingFrameAt(const Layer &layer, double t) {
@@ -2277,7 +2302,8 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         const double scale = std::max(std::hypot(toOutput.m11(), toOutput.m12()),
                                       std::hypot(toOutput.m21(), toOutput.m22()));
         double factor = 1;
-        QImage image = assets.mip(layer.source, scale, &factor);
+        const QString source = sourceAt(layer, t);
+        QImage image = assets.mip(source, scale, &factor);
         if (image.isNull())
             continue;
 
@@ -2289,7 +2315,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         if (brightness != 0 || contrast != 1 || saturation != 1 || blur > 0 || glowSize > 0) {
             const double canvasPerPixel = scale / factor / std::max(outputScale, 1e-6);
             const AssetCache::Look &look =
-                assets.look(layer.source, factor, brightness, contrast, saturation, blur, glowSize, canvasPerPixel);
+                assets.look(source, factor, brightness, contrast, saturation, blur, glowSize, canvasPerPixel);
             image = look.image;
             glow = look.glow;
             margin = look.margin;
@@ -2528,7 +2554,7 @@ int layerAt(const Scene &scene, AssetCache &assets, double t, const QPointF &poi
             continue;
         // A quarter-size copy is plenty to tell what's under the mouse.
         double factor = 1;
-        const QImage image = assets.mip(layer.source, .25, &factor);
+        const QImage image = assets.mip(sourceAt(layer, t), .25, &factor);
         bool invertible = false;
         const QTransform inverse = layerTransform(scene, assets, i, t).inverted(&invertible);
         if (image.isNull() || !invertible)

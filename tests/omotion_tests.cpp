@@ -2355,6 +2355,37 @@ private slots:
         QCOMPARE(ground.normals.size() / qsizetype(3 * sizeof(float)), ground.vertices.size() / qsizetype(5 * sizeof(float)));
     }
 
+    void videoLayersPlay() {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg isn't installed");
+        QTemporaryDir dir;
+        // Ten frames: red for half a second, then blue.
+        QProcess make;
+        make.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=red:s=64x32:r=10:d=0.5",
+                              "-f", "lavfi", "-i", "color=blue:s=64x32:r=10:d=0.5", "-filter_complex", "[0][1]concat=n=2",
+                              dir.filePath("clip.mp4")});
+        QVERIFY(make.waitForFinished(30000) && make.exitCode() == 0);
+        const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+        Scene scene = Project::load(project, nullptr);
+        scene.fps = 10;
+        AssetCache assets(project);
+        QString error;
+        QVERIFY(Project::isVideo(dir.filePath("clip.mp4")));
+        const int clip = Project::importVideo(scene, project, dir.filePath("clip.mp4"), &error);
+        QVERIFY2(clip >= 0, qPrintable(error));
+        QCOMPARE(scene.layers[clip].raw["video"].toObject()["count"].toInt(), 10);
+        auto colourAt = [&](double t) { return renderFrame(scene, assets, t).pixelColor(100, 50); };
+        QVERIFY(colourAt(.2).red() > 200);
+        QVERIFY(colourAt(.7).blue() > 200);
+        QVERIFY(colourAt(1.2).red() > 200);  // Looping.
+        QVERIFY(Project::setVideo(scene, clip, "loop", false, &error));
+        QVERIFY(colourAt(1.2).blue() > 200);  // Holding its last.
+        QVERIFY(Project::setVideo(scene, clip, "start", .5, &error));
+        QVERIFY(colourAt(.7).red() > 200);
+        QVERIFY(!Project::setVideo(scene, 0, "speed", 2, &error));
+        QCOMPARE(sourceAt(scene.layers[clip], .55), scene.layers[clip].source);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

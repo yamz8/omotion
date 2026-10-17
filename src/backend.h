@@ -296,6 +296,8 @@ public:
     Q_INVOKABLE void strokeTo(double x, double y);
     Q_INVOKABLE void endStroke();
     Q_INVOKABLE void undoStroke();
+    // The selected video layer's start, speed or loop.
+    Q_INVOKABLE void setVideo(const QString &name, const QVariant &value);
     // Lights in a world: a new one in front of the camera; the selected
     // light's settings ("color", "power", "reach"); a piece's material
     // ("shine", "roughness").

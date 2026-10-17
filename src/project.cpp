@@ -2184,4 +2184,69 @@ bool setMaterial(Scene &scene, int index, const QString &name, double value, QSt
     return true;
 }
 
+bool isVideo(const QString &path) {
+    static const QStringList kinds{"mp4", "webm", "mov", "mkv", "m4v", "avi"};
+    return kinds.contains(QFileInfo(path).suffix().toLower());
+}
+
+int importVideo(Scene &scene, const QString &directory, const QString &path, QString *error, int max) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return -1;
+    };
+    const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+    if (ffmpeg.isEmpty())
+        return fail("Video needs ffmpeg to read it. Install it with: omarchy-pkg-add ffmpeg");
+    if (!QFileInfo::exists(path))
+        return fail(QString("There's no %1.").arg(path));
+    const QDir dir(directory);
+    const QFileInfo info(path);
+    // A folder of its own for the frames, never one already there.
+    QString frames = "assets/video-" + info.completeBaseName();
+    for (int n = 2; dir.exists(frames); ++n)
+        frames = QString("assets/video-%1-%2").arg(info.completeBaseName()).arg(n);
+    if (!dir.mkpath(frames))
+        return fail(QString("Couldn't make %1.").arg(frames));
+    QProcess process;
+    process.start(ffmpeg, {"-hide_banner", "-loglevel", "error", "-i", path, "-vf", QString("fps=%1").arg(scene.fps),
+                           "-frames:v", QString::number(max), "-q:v", "3", dir.filePath(frames + "/%05d.jpg")});
+    if (!process.waitForFinished(10 * 60 * 1000) || process.exitCode() != 0)
+        return fail("ffmpeg couldn't read the video: " + QString::fromUtf8(process.readAllStandardError()).trimmed().left(300));
+    const int count = int(QDir(dir.filePath(frames)).entryList({"*.jpg"}, QDir::Files).size());
+    if (count == 0)
+        return fail("The video has no frames ffmpeg could read.");
+    const QString first = frames + "/00001.jpg";
+    const QSize size = QImageReader(dir.filePath(first)).size();
+    const double fit = std::min(1.0, std::min(double(scene.width) / size.width(), double(scene.height) / size.height()));
+    Layer layer = centeredLayer(scene, info.completeBaseName(), first, fit);
+    layer.raw["video"] = QJsonObject{{"frames", frames}, {"count", count}, {"fps", scene.fps}, {"start", 0}, {"loop", true}};
+    scene.layers.append(layer);
+    return int(scene.layers.size()) - 1;
+}
+
+bool setVideo(Scene &scene, int index, const QString &name, const QVariant &value, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size() || !scene.layers.at(index).raw.contains("video"))
+        return fail("Select a video layer.");
+    QJsonObject video = scene.layers.at(index).raw.value("video").toObject();
+    if (name == "loop") {
+        video["loop"] = value.toBool();
+    } else if (name == "start" || name == "speed") {
+        bool ok = false;
+        const double number = value.toDouble(&ok);
+        if (!ok || !std::isfinite(number))
+            return fail(QString("A video's %1 is a number.").arg(name));
+        video[name] = name == "speed" ? std::clamp(number, -16.0, 16.0) : number;
+    } else {
+        return fail("A video has a start, a speed and loop.");
+    }
+    scene.layers[index].raw["video"] = video;
+    return true;
+}
+
 }

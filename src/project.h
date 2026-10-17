@@ -200,6 +200,15 @@ QStringList describeChanges(const Scene &before, const Scene &after);
 // words and the name's start count most.
 QList<int> rankMatches(const QString &query, const QStringList &names);
 
+// A video clip as a layer that plays: its frames, at the scene's rate,
+// written into the project by ffmpeg (as many as max at most), fitted to
+// the canvas, from the start of the scene, looping. Its index, or -1.
+bool isVideo(const QString &path);
+int importVideo(Scene &scene, const QString &directory, const QString &path, QString *error, int max = 3000);
+
+// A video layer's "start" (seconds into the scene), "speed" or "loop".
+bool setVideo(Scene &scene, int layer, const QString &name, const QVariant &value, QString *error);
+
 // Copies an image into the project's assets and adds it as a layer on top.
 int importImage(Scene &scene, const QString &directory, const QString &path, QString *error);
 
