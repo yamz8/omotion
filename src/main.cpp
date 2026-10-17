@@ -162,9 +162,10 @@ const char *Usage = R"(Usage:
                                          world doesn't reach)
   omotion info <project> [--at <seconds>]
                                          The scene as JSON, with each layer's place on the canvas
-  omotion particles <project> <snow|rain|dust|fireflies|leaves|embers> [--<setting> <value>]...
+  omotion particles <project> <snow|rain|dust|fireflies|leaves|embers|smoke|fire> [--<setting> <value>]...
                                          Add a particle layer; settings: count, size, speed,
-                                         direction, spread, sway, twinkle, color, seed
+                                         direction, spread, sway, twinkle, color, seed; smoke and fire:
+                                         size, speed, rate, life, wind, swirl, x, y (or from, at)
   omotion audio <project> <file|--none> [--offset <seconds>] [--volume <0-4>]
                                          The scene's sound, for playing along and video exports
   omotion motion list | save <project> <layer|camera> <name> | apply <project> <layer|camera> <name> [--at <seconds>]

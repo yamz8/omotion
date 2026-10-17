@@ -24,6 +24,7 @@
 #include "gltf.h"
 #include "physics.h"
 #include "cloth.h"
+#include "fluid.h"
 #include "theme.h"
 #include "world.h"
 
@@ -1904,6 +1905,60 @@ private slots:
         QVERIFY(Scene::fromJson(scene.toJson(), &error).layers[1].raw.contains("cloth"));
         QVERIFY(Cloth::set(scene, 1, {}, &error));
         QVERIFY(!scene.layers[1].raw.contains("cloth"));
+    }
+
+    void smokeRisesFromItsSource() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);  // 100×100.
+        scene.duration = 3;
+        QString error;
+        // Not looping, to see it start.
+        const int smoke = Project::addParticles(scene, "smoke", {{"x", 50}, {"y", 90}, {"size", 6}, {"speed", 60}, {"loop", false}}, &error);
+        QVERIFY2(smoke >= 0, qPrintable(error));
+        QRectF covers;
+        const QImage early = Fluid::at(scene, assets, scene.layers[smoke], .1, &covers);
+        const QImage later = Fluid::at(scene, assets, scene.layers[smoke], 1.5, &covers);
+        QVERIFY(!later.isNull());
+        QVERIFY(covers.contains(QRectF(0, 0, 100, 100)));
+        // How high it has got: the highest row with smoke in it.
+        auto top = [&](const QImage &image) {
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (qAlpha(image.pixel(x, y)) > 20)
+                        return y * covers.height() / image.height();
+            return 1e9;
+        };
+        QVERIFY2(top(later) < top(early) - 20, qPrintable(QString("%1 %2").arg(top(later)).arg(top(early))));
+        // The same moment is the same smoke, worked out again or not.
+        QCOMPARE(Fluid::at(scene, assets, scene.layers[smoke], 1.5, &covers), later);
+        // Looping with the scene, its end is its start.
+        scene.layers[smoke].particles["loop"] = true;
+        QCOMPARE(Fluid::at(scene, assets, scene.layers[smoke], 0, &covers), Fluid::at(scene, assets, scene.layers[smoke], 3, &covers));
+        // From a layer, it follows the layer: its fresh smoke is where the
+        // layer is (the square's middle, at 70 by 2.5 s), its trail behind.
+        scene.layers[smoke].particles["from"] = "over";
+        scene.layers[smoke].particles["loop"] = false;
+        scene.layers[smoke].particles.remove("x");
+        scene.layers[smoke].particles.remove("y");
+        scene.layers[1].keys["x"] = {Key{0, 20, "linear"}, Key{3, 80, "linear"}};
+        const QImage following = Fluid::at(scene, assets, scene.layers[smoke], 2.5, &covers);
+        auto thickness = [&](double cx, double cy) {
+            int sum = 0;
+            for (int y = int((cy - 6) / covers.height() * following.height()); y <= int((cy + 6) / covers.height() * following.height()); ++y)
+                for (int x = int((cx - 6) / covers.width() * following.width()); x <= int((cx + 6) / covers.width() * following.width()); ++x)
+                    sum += qAlpha(following.pixel(std::clamp(x, 0, following.width() - 1), std::clamp(y, 0, following.height() - 1)));
+            return sum;
+        };
+        QVERIFY2(thickness(70, 50) > thickness(30, 50) * 2, qPrintable(QString("%1 %2").arg(thickness(70, 50)).arg(thickness(30, 50))));
+        // Fire is warm.
+        const int fire = Project::addParticles(scene, "fire", {{"x", 50}, {"y", 90}}, &error);
+        const QImage flames = Fluid::at(scene, assets, scene.layers[fire], 1, &covers);
+        int warm = 0;
+        for (int y = 0; y < flames.height(); ++y)
+            for (int x = 0; x < flames.width(); ++x)
+                warm += qAlpha(flames.pixel(x, y)) > 40 && qRed(flames.pixel(x, y)) > qBlue(flames.pixel(x, y)) + 30;
+        QVERIFY(warm > 5);
     }
 
     void clipsBlendAndFade() {

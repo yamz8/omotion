@@ -1302,7 +1302,7 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
         return false;
     };
     static const QStringList numbers{"count", "size", "speed", "direction", "spread", "sway", "twinkle", "seed",
-                                     "rate", "life", "inherit", "gravity", "wind", "drag"};
+                                     "rate", "life", "inherit", "gravity", "wind", "drag", "swirl", "x", "y"};
     // An emitter: the layer they come from, and the point on it (its pixels).
     if (name == "from") {
         *json = value.toString();
@@ -1317,6 +1317,10 @@ bool particleSetting(const QString &name, const QVariant &value, QJsonValue *jso
         if (xy.size() != 2)
             return fail("at is a point on the layer they come from: x,y in its pixels.");
         *json = QJsonArray{xy.at(0).toDouble(), xy.at(1).toDouble()};
+        return true;
+    }
+    if (name == "loop") {
+        *json = value.toBool();
         return true;
     }
     if (name == "color") {

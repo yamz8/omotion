@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "cloth.h"
+#include "fluid.h"
 #include "world.h"
 
 #include <QDir>
@@ -59,7 +60,7 @@ const QStringList &Scene::eases() {
 }
 
 const QStringList &Scene::particleKinds() {
-    static const QStringList list{"snow", "rain", "dust", "fireflies", "leaves", "embers"};
+    static const QStringList list{"snow", "rain", "dust", "fireflies", "leaves", "embers", "smoke", "fire"};
     return list;
 }
 
@@ -78,6 +79,13 @@ QJsonObject Scene::particleDefaults(const QString &kind) {
     if (kind == "leaves")
         return {{"kind", kind}, {"count", 28}, {"size", 9}, {"speed", 70}, {"direction", 80}, {"spread", 20},
                 {"sway", 45}, {"twinkle", 0}, {"color", "#e07a2f"}, {"seed", 1}};
+    // Smoke and fire are a fluid (see Fluid): a source that rises.
+    if (kind == "smoke")
+        return {{"kind", kind}, {"size", 30}, {"speed", 80}, {"rate", 1}, {"life", 3}, {"wind", 0}, {"swirl", .5},
+                {"color", "#d8d8e0"}, {"seed", 1}};
+    if (kind == "fire")
+        return {{"kind", kind}, {"size", 24}, {"speed", 140}, {"rate", 1}, {"life", 1.2}, {"wind", 0}, {"swirl", .7},
+                {"color", "#ffa040"}, {"seed", 1}};
     if (kind == "embers")
         return {{"kind", kind}, {"count", 90}, {"size", 2.5}, {"speed", 60}, {"direction", -90}, {"spread", 25},
                 {"sway", 20}, {"twinkle", .6}, {"color", "#ff9a3c"}, {"seed", 1}};
@@ -2305,6 +2313,23 @@ void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, do
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
         settings.insert(it.key(), it.value());
+    if (Fluid::isFluid(settings.value("kind").toString())) {
+        if (!assets)
+            return;
+        Layer fluid = layer;
+        fluid.particles = settings;
+        QRectF covers;
+        const QImage smoke = Fluid::at(scene, *assets, fluid, t, &covers);
+        if (smoke.isNull())
+            return;
+        // Spread smoothly over the canvas from its coarse grid.
+        painter.save();
+        painter.setTransform(canvasToOutput);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(covers, smoke);
+        painter.restore();
+        return;
+    }
     if (!settings.value("from").toString().isEmpty()) {
         if (assets) {
             // On the canvas, wherever the particle layer itself is.

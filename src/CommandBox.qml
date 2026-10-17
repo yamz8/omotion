@@ -18,7 +18,7 @@ Rectangle {
         ["Open an image to animate", "O", () => true, () => backend.openImageDialog()],
         ["Open an animation folder", "Shift+O", () => true, () => backend.openFolderDialog()],
         ["Add an image as a layer", "I", () => win.idle, () => backend.importImageDialog()],
-        ["Add particles: snow, rain, dust, fireflies, leaves, embers", "Shift+I", () => win.idle, () => win.particleMenuVisible = true],
+        ["Add particles: snow, rain, dust, fireflies, leaves, embers, smoke, fire", "Shift+I", () => win.idle, () => win.particleMenuVisible = true],
         ["Add music or sound", "Ctrl+M", () => win.idle, () => backend.importAudioDialog()],
         ["Export a video, GIF or frames", "Ctrl+E", () => win.idle && !backend.exporting, () => win.exportMenuVisible = true],
         ["Clean up unused images", "Ctrl+Shift+K", () => win.idle, () => backend.cleanUp()],

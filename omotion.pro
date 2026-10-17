@@ -15,6 +15,7 @@ HEADERS += \
     src/portalfilepicker.h \
     src/physics.h \
     src/cloth.h \
+    src/fluid.h \
     src/project.h \
     src/scene.h \
     src/sceneview.h \
@@ -35,6 +36,7 @@ SOURCES += \
     src/portalfilepicker.cpp \
     src/physics.cpp \
     src/cloth.cpp \
+    src/fluid.cpp \
     src/project.cpp \
     src/scene.cpp \
     src/sceneview.cpp \

@@ -786,13 +786,21 @@ Rectangle {
                     color: win.text
                     font.bold: true
                 }
-                ParticleRow { name: "count"; label: "Count" }
-                ParticleRow { name: "size"; label: "Size px"; decimals: 1 }
-                ParticleRow { name: "speed"; label: "Speed px/s" }
-                ParticleRow { name: "direction"; label: "Direction°" }
-                ParticleRow { name: "spread"; label: "Spread°" }
-                ParticleRow { name: "sway"; label: "Sway px" }
-                ParticleRow { name: "twinkle"; label: "Twinkle"; decimals: 2 }
+                readonly property bool fluid: inspector.isParticles && (inspector.v.particles.kind === "smoke" || inspector.v.particles.kind === "fire")
+                ParticleRow { visible: !parent.fluid; name: "count"; label: "Count" }
+                ParticleRow { name: "size"; label: parent.fluid ? "Source px" : "Size px"; decimals: 1 }
+                ParticleRow { name: "speed"; label: parent.fluid ? "Rise px/s" : "Speed px/s" }
+                ParticleRow { visible: !parent.fluid; name: "direction"; label: "Direction°" }
+                ParticleRow { visible: !parent.fluid; name: "spread"; label: "Spread°" }
+                ParticleRow { visible: !parent.fluid; name: "sway"; label: "Sway px" }
+                ParticleRow { visible: !parent.fluid; name: "twinkle"; label: "Twinkle"; decimals: 2 }
+                // Smoke and fire: a fluid from a source.
+                ParticleRow { visible: parent.fluid; name: "rate"; label: "Amount"; decimals: 2 }
+                ParticleRow { visible: parent.fluid; name: "life"; label: "Life s"; decimals: 2 }
+                ParticleRow { visible: parent.fluid; name: "wind"; label: "Wind px/s" }
+                ParticleRow { visible: parent.fluid; name: "swirl"; label: "Swirl"; decimals: 2 }
+                ParticleRow { visible: parent.fluid && !inspector.v.particles.from; name: "x"; label: "Source x" }
+                ParticleRow { visible: parent.fluid && !inspector.v.particles.from; name: "y"; label: "Source y" }
                 // An emitter: from a layer, where it goes, rather than all over.
                 RowLayout {
                     Layout.fillWidth: true
@@ -815,7 +823,7 @@ Rectangle {
                     }
                 }
                 ColumnLayout {
-                    visible: inspector.isParticles && !!inspector.v.particles.from
+                    visible: inspector.isParticles && !!inspector.v.particles.from && !parent.fluid
                     Layout.fillWidth: true
                     spacing: 4
                     ParticleRow { name: "rate"; label: "A second" }

@@ -1035,9 +1035,10 @@ ApplicationWindow {
         MouseArea { anchors.fill: parent; onClicked: win.particleMenuVisible = false }
         readonly property var choices: [["1", "Snow", "Drifting down", "snow"], ["2", "Rain", "Slanting streaks", "rain"],
                                         ["3", "Dust", "Motes in the light", "dust"], ["4", "Fireflies", "Glowing, wandering", "fireflies"],
-                                        ["5", "Leaves", "Tumbling down", "leaves"], ["6", "Embers", "Rising sparks", "embers"]]
+                                        ["5", "Leaves", "Tumbling down", "leaves"], ["6", "Embers", "Rising sparks", "embers"],
+                                        ["7", "Smoke", "Rising, curling, drifting (a fluid)", "smoke"], ["8", "Fire", "Flames over smoke (a fluid)", "fire"]]
         Repeater {
-            model: 6
+            model: particleMenu.choices.length
             delegate: Item {
                 required property int index
                 Shortcut {
