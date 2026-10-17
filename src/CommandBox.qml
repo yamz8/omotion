@@ -50,6 +50,7 @@ Rectangle {
         ["Save the animation as a motion", "Ctrl+Shift+S", () => (win.idle && (backend.selected >= 0 || backend.cameraSelected)), () => win.saveMotionVisible = true],
         ["Show the layer's path and ghosts", "L", () => win.idle, () => backend.showMotion = !backend.showMotion],
         ["Graph editor: curves", "Ctrl+Tab", () => win.idle, () => timeline.curves = !timeline.curves],
+        ["Dope sheet: a row a property", "Ctrl+Shift+Tab", () => win.idle, () => { timeline.curves = false; timeline.sheet = !timeline.sheet }],
         ["Pins: bend the layer", "J", () => (win.idle && backend.selected >= 0), () => backend.setTool("pin")],
         ["Cut tool", "C", () => win.idle, () => backend.setTool("cut")],
         ["AI select: click a thing to cut it out", "W", () => win.idle, () => backend.setTool("wand")],

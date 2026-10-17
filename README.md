@@ -122,6 +122,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
 | Modifiers, clips | In the graph editor, a property seen alone can *Cycle* (its keys over and over) or get *Noise* (a smooth wobble: a hand-held camera). In `N`, a saved motion goes on *as a clip*: it adds to the animation from the playhead without touching its keys, and the inspector lists the clips: each adds or replaces, with its influence and its fades in and out, so one motion hands over to the next. `omotion modifier` and `omotion clip` do the same |
+| `Ctrl+Shift+Tab` or `▸` on a track | The dope sheet: the selected layer's (or camera's) row opens into a row for each animated property, its own keys on it; drag one along to retime just that property, right-click takes it away |
 | `Ctrl+Tab` | The graph editor (or Curves on the timeline): the selected layer's or camera's animated properties as curves over the scene, each fitted to the height; drag a key in time and value (Shift: value only), and a picked key's curve by its two handles; click a property to see it alone with its values |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
 | `V` | Select the camera (or its row at the top of the timeline): drag the canvas to pan, wheel to zoom, `[ ]` to turn, `K` to keyframe |

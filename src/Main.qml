@@ -187,6 +187,8 @@ ApplicationWindow {
     // Space plays the film while its panel is open, as it plays the scene otherwise.
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.filmVisible && backend.filmShots.length > 0; onActivated: backend.toggleFilmPlay() }
     Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: timeline.curves = !timeline.curves }
+    // The dope sheet, on the tracks rather than the curves.
+    Shortcut { sequence: "Ctrl+Shift+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: { timeline.curves = false; timeline.sheet = !timeline.sheet } }
     Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
     Shortcut {

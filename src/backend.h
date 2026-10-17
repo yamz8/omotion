@@ -97,6 +97,9 @@ class Backend : public QObject {
     // The graph editor: the selected layer's (or the camera's) animated
     // properties, by name.
     Q_PROPERTY(QStringList curveNames READ curveNames NOTIFY valuesChanged)
+    // The dope sheet: the selected thing's animated properties, each with
+    // its keys' times, for a row each under its track.
+    Q_PROPERTY(QVariantList sheet READ sheet NOTIFY valuesChanged)
     // Saying what you want: an agent (Claude Code, or OMOTION_AGENT) works on
     // the project through scene.json and the CLI while the window follows;
     // then what it changed waits to be kept or taken back.
@@ -220,6 +223,7 @@ public:
     };
     QList<Curve> curves(int samples = 240) const;
     QStringList curveNames() const;
+    QVariantList sheet() const;
     QString filmPath() const;
     QVariantList filmShots() const;
     bool agentAvailable() const { return !agentProgram().isEmpty(); }
@@ -354,6 +358,10 @@ public:
     // (between its neighbours); a drag of them is one undo step, from
     // beginGesture to endGesture.
     Q_INVOKABLE void moveKey(const QString &property, int index, double t, double v);
+    // One property's key, from the dope sheet: moved in time keeping its
+    // value, or taken away.
+    Q_INVOKABLE void retimeKey(const QString &property, int index, double t);
+    Q_INVOKABLE void removeKey(const QString &property, int index);
     // Films: this project added as a shot (the film made if there's none),
     // a shot's transition, length, from or to changed, moved, taken out;
     // and the film exported to the renders folder, with its sound.

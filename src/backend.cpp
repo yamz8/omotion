@@ -346,6 +346,39 @@ QList<Backend::Curve> Backend::curves(int samples) const {
     return list;
 }
 
+QVariantList Backend::sheet() const {
+    QVariantList rows;
+    for (const Curve &curve : curves(0)) {
+        QVariantList times;
+        for (const Key &key : curve.keys)
+            times << key.t;
+        rows << QVariantMap{{"property", curve.property}, {"times", times}};
+    }
+    return rows;
+}
+
+void Backend::retimeKey(const QString &property, int index, double t) {
+    const Layer *layer = m_scene.at(target());
+    if (!layer || index < 0 || index >= layer->keys.value(property).size())
+        return;
+    moveKey(property, index, t, layer->keys.value(property).at(index).v);
+}
+
+void Backend::removeKey(const QString &property, int index) {
+    Layer *layer = m_scene.at(target());
+    if (!layer || index < 0 || index >= layer->keys.value(property).size())
+        return;
+    checkpoint();
+    // The last key going away leaves the property at its value.
+    if (layer->keys.value(property).size() == 1)
+        layer->base.insert(property, layer->keys.value(property).first().v);
+    layer->keys[property].removeAt(index);
+    if (layer->keys.value(property).isEmpty())
+        layer->keys.remove(property);
+    setKeySelection({});
+    changed();
+}
+
 QStringList Backend::curveNames() const {
     QStringList names;
     for (const Curve &curve : curves(2))

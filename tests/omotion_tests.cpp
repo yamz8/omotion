@@ -1847,6 +1847,32 @@ private slots:
         QVERIFY(!gltf.contains("animations"));
     }
 
+    void theDopeSheetMovesOnePropertysKeys() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(writePicture(dir.filePath("a.png"))));
+        backend.select(0);
+        Scene &scene = const_cast<Scene &>(backend.scene());
+        scene.layers[0].keys["x"] = {Key{0, 10}, Key{1, 20}};
+        scene.layers[0].keys["opacity"] = {Key{1, .5}};
+        backend.seek(0);
+        QVariantList sheet = backend.sheet();
+        QCOMPARE(sheet.size(), 2);
+        QCOMPARE(sheet.first().toMap()["property"].toString(), QString("x"));
+        QCOMPARE(sheet.first().toMap()["times"].toList().size(), 2);
+        // x's second key goes later; opacity's stays where it was.
+        backend.retimeKey("x", 1, 2);
+        QCOMPARE(backend.scene().layers[0].keys["x"].at(1).t, 2.0);
+        QCOMPARE(backend.scene().layers[0].keys["x"].at(1).v, 20.0);
+        QCOMPARE(backend.scene().layers[0].keys["opacity"].first().t, 1.0);
+        // Taking opacity's only key away leaves it at that value.
+        backend.removeKey("opacity", 0);
+        QVERIFY(!backend.scene().layers[0].keys.contains("opacity"));
+        QCOMPARE(backend.scene().value(backend.scene().layers[0], "opacity", 0), .5);
+        backend.undo();
+        QVERIFY(backend.scene().layers[0].keys.contains("opacity"));
+    }
+
     void clipsBlendAndFade() {
         QString error;
         Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"duration": 4, "layers": [{"name": "a", "source": "a",

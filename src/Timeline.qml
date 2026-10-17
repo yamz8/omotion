@@ -17,6 +17,8 @@ Rectangle {
     property int renaming: -1
     // The graph editor in place of the tracks: the selected thing's curves.
     property bool curves: false
+    // The dope sheet: the selected row opened into a row a property.
+    property bool sheet: false
 
     function rename(index) { renaming = index; }
     function picked(layer, t) {
@@ -67,7 +69,7 @@ Rectangle {
                 elide: Text.ElideLeft
                 text: timeline.curves
                       ? "drag a key in time and value (Shift: value only), its curve's handles to ease it    click a property to see it alone    Ctrl+Tab keys"
-                      : "drag ◆ to retime    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
+                      : "drag ◆ to retime    ▸ a row a property    , .  frame    < >  keyframe    K key    E ease    ?  all keys"
                 color: win.muted
             }
         }
@@ -281,154 +283,253 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            delegate: Rectangle {
-                id: row
+            delegate: Column {
+                id: rowGroup
                 required property int index
-                readonly property bool isCamera: index === 0
-                readonly property int layerIndex: isCamera ? -2 : timeline.layers.length - index
-                readonly property var entry: isCamera
-                    ? {"name": "Camera", "visible": true, "depth": 0, "parent": "", "keyTimes": backend.sceneInfo.cameraKeys || []}
-                    : (timeline.layers[layerIndex] || {})
-                readonly property bool selected: isCamera ? backend.cameraSelected : backend.selected === layerIndex
                 width: rows.width
-                height: 26
-                color: selected ? "#1e2130" : (index % 2 ? "#121215" : "transparent")
+                Rectangle {
+                    id: row
+                    readonly property int index: rowGroup.index
+                    readonly property bool isCamera: index === 0
+                    readonly property int layerIndex: isCamera ? -2 : timeline.layers.length - index
+                    readonly property var entry: isCamera
+                        ? {"name": "Camera", "visible": true, "depth": 0, "parent": "", "keyTimes": backend.sceneInfo.cameraKeys || []}
+                        : (timeline.layers[layerIndex] || {})
+                    readonly property bool selected: isCamera ? backend.cameraSelected : backend.selected === layerIndex
+                    width: rows.width
+                    height: 26
+                    color: selected ? "#1e2130" : (index % 2 ? "#121215" : "transparent")
 
-                Rectangle { visible: row.selected; width: 3; height: parent.height; color: theme.accent }
+                    Rectangle { visible: row.selected; width: 3; height: parent.height; color: theme.accent }
 
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 0
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 0
 
-                    // Name column.
-                    Item {
-                        Layout.preferredWidth: timeline.nameWidth
-                        Layout.fillHeight: true
+                        // Name column.
+                        Item {
+                            Layout.preferredWidth: timeline.nameWidth
+                            Layout.fillHeight: true
 
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                if (row.isCamera) backend.selectCamera();
-                                else backend.select(row.layerIndex);
-                                timeline.done();
-                            }
-                            onDoubleClicked: if (!row.isCamera) timeline.rename(row.layerIndex)
-                        }
-                        Row {
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: 10
-                            spacing: 6
-                            Label {
-                                text: row.isCamera ? "◎" : row.entry.visible ? "●" : "○"
-                                color: row.entry.visible ? win.text : win.muted
-                                width: 14
-                                MouseArea {
-                                    anchors.fill: parent
-                                    anchors.margins: -4
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: { if (!row.isCamera) backend.toggleVisible(row.layerIndex); timeline.done() }
-                                }
-                            }
-                            Item { width: (row.entry.depth || 0) * 12; height: 1 }
-                            Label {
-                                visible: !!row.entry.parent
-                                text: "↳"
-                                color: win.muted
-                            }
-                            Label {
-                                visible: timeline.renaming !== row.layerIndex
-                                text: row.entry.name || ""
-                                color: row.entry.visible ? (row.selected ? win.text : "#c4c4cc") : win.muted
-                                font.bold: row.selected
-                                elide: Text.ElideRight
-                                width: timeline.nameWidth - 60 - (row.entry.depth || 0) * 12
-                            }
-                            TextField {
-                                id: renameField
-                                visible: timeline.renaming === row.layerIndex
-                                width: timeline.nameWidth - 60
-                                height: 26
-                                topPadding: 2
-                                bottomPadding: 2
-                                font.pixelSize: 13
-                                onVisibleChanged: if (visible) { text = row.entry.name; selectAll(); forceActiveFocus() }
-                                onAccepted: {
-                                    backend.renameLayer(row.layerIndex, text);
-                                    timeline.renaming = -1;
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    if (row.isCamera) backend.selectCamera();
+                                    else backend.select(row.layerIndex);
                                     timeline.done();
                                 }
-                                onActiveFocusChanged: if (!activeFocus && visible) timeline.renaming = -1
+                                onDoubleClicked: if (!row.isCamera) timeline.rename(row.layerIndex)
+                            }
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: 10
+                                spacing: 6
+                                Label {
+                                    text: row.isCamera ? "◎" : row.entry.visible ? "●" : "○"
+                                    color: row.entry.visible ? win.text : win.muted
+                                    width: 14
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { if (!row.isCamera) backend.toggleVisible(row.layerIndex); timeline.done() }
+                                    }
+                                }
+                                // Opens the dope sheet: a row for each property.
+                                Label {
+                                    text: row.selected && timeline.sheet ? "▾" : "▸"
+                                    color: (row.entry.keyTimes || []).length ? win.muted : "transparent"
+                                    width: 10
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -4
+                                        enabled: (row.entry.keyTimes || []).length > 0
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (!row.selected) {
+                                                if (row.isCamera) backend.selectCamera();
+                                                else backend.select(row.layerIndex);
+                                                timeline.sheet = true;
+                                            } else
+                                                timeline.sheet = !timeline.sheet;
+                                            timeline.done();
+                                        }
+                                    }
+                                }
+                                Item { width: (row.entry.depth || 0) * 12; height: 1 }
+                                Label {
+                                    visible: !!row.entry.parent
+                                    text: "↳"
+                                    color: win.muted
+                                }
+                                Label {
+                                    visible: timeline.renaming !== row.layerIndex
+                                    text: row.entry.name || ""
+                                    color: row.entry.visible ? (row.selected ? win.text : "#c4c4cc") : win.muted
+                                    font.bold: row.selected
+                                    elide: Text.ElideRight
+                                    width: timeline.nameWidth - 60 - (row.entry.depth || 0) * 12
+                                }
+                                TextField {
+                                    id: renameField
+                                    visible: timeline.renaming === row.layerIndex
+                                    width: timeline.nameWidth - 60
+                                    height: 26
+                                    topPadding: 2
+                                    bottomPadding: 2
+                                    font.pixelSize: 13
+                                    onVisibleChanged: if (visible) { text = row.entry.name; selectAll(); forceActiveFocus() }
+                                    onAccepted: {
+                                        backend.renameLayer(row.layerIndex, text);
+                                        timeline.renaming = -1;
+                                        timeline.done();
+                                    }
+                                    onActiveFocusChanged: if (!activeFocus && visible) timeline.renaming = -1
+                                }
+                            }
+                        }
+
+                        // Keyframe track.
+                        Item {
+                            id: track
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.rightMargin: 14
+
+                            // Pressing on a keyframe selects and drags it (Shift adds
+                            // to the selection); anywhere else scrubs. This lives on
+                            // the track rather than each diamond, because diamonds
+                            // are rebuilt as keys move, which would end the drag.
+                            MouseArea {
+                                anchors.fill: parent
+                                property bool draggingKeys: false
+                                property real startX: 0
+                                cursorShape: draggingKeys ? Qt.SizeHorCursor : Qt.ArrowCursor
+                                function scrub(x) { backend.seek(Math.max(0, x) / track.width * timeline.duration) }
+                                function keyNear(x) {
+                                    const times = row.entry.keyTimes || [];
+                                    let best = -1, bestDistance = 7;
+                                    for (let i = 0; i < times.length; ++i) {
+                                        const d = Math.abs(times[i] / timeline.duration * track.width - x);
+                                        if (d <= bestDistance) { best = times[i]; bestDistance = d; }
+                                    }
+                                    return best;
+                                }
+                                onPressed: function (mouse) {
+                                    if (backend.playing) backend.togglePlay();
+                                    const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                                    const t = keyNear(mouse.x);
+                                    if (t >= 0) {
+                                        backend.selectKey(row.layerIndex, t, shift);
+                                        startX = mouse.x;
+                                        draggingKeys = true;
+                                        backend.beginKeyDrag();
+                                        return;
+                                    }
+                                    if (!shift) backend.clearKeySelection();
+                                    if (row.isCamera) backend.selectCamera();
+                                    else backend.select(row.layerIndex);
+                                    scrub(mouse.x);
+                                }
+                                onPositionChanged: function (mouse) {
+                                    if (draggingKeys)
+                                        backend.dragKeys((mouse.x - startX) / track.width * timeline.duration);
+                                    else
+                                        scrub(mouse.x);
+                                }
+                                onReleased: {
+                                    if (draggingKeys) backend.endKeyDrag();
+                                    draggingKeys = false;
+                                    timeline.done();
+                                }
+                            }
+                            Repeater {
+                                model: row.entry.keyTimes || []
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property bool picked: timeline.picked(row.layerIndex, modelData)
+                                    width: picked ? 11 : 9
+                                    height: width
+                                    rotation: 45
+                                    x: modelData / timeline.duration * track.width - width / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: picked ? "white" : (row.selected ? theme.accent : "#9a9aa4")
+                                    border.color: picked ? theme.accent : "#0e0e10"
+                                    border.width: picked ? 2 : 1
+                                }
                             }
                         }
                     }
-
-                    // Keyframe track.
-                    Item {
-                        id: track
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.rightMargin: 14
-
-                        // Pressing on a keyframe selects and drags it (Shift adds
-                        // to the selection); anywhere else scrubs. This lives on
-                        // the track rather than each diamond, because diamonds
-                        // are rebuilt as keys move, which would end the drag.
-                        MouseArea {
+                }
+                // The dope sheet's rows: each property's own keys, dragged
+                // along in time on their own; right-click takes one away.
+                Repeater {
+                    model: row.selected && timeline.sheet ? backend.sheet : []
+                    delegate: Rectangle {
+                        id: sheetRow
+                        required property var modelData
+                        width: rows.width
+                        height: 20
+                        color: "#16161a"
+                        RowLayout {
                             anchors.fill: parent
-                            property bool draggingKeys: false
-                            property real startX: 0
-                            cursorShape: draggingKeys ? Qt.SizeHorCursor : Qt.ArrowCursor
-                            function scrub(x) { backend.seek(Math.max(0, x) / track.width * timeline.duration) }
-                            function keyNear(x) {
-                                const times = row.entry.keyTimes || [];
-                                let best = -1, bestDistance = 7;
-                                for (let i = 0; i < times.length; ++i) {
-                                    const d = Math.abs(times[i] / timeline.duration * track.width - x);
-                                    if (d <= bestDistance) { best = times[i]; bestDistance = d; }
+                            spacing: 0
+                            Label {
+                                Layout.preferredWidth: timeline.nameWidth
+                                leftPadding: 46
+                                text: sheetRow.modelData.property
+                                color: win.muted
+                                font.pixelSize: 12
+                            }
+                            Item {
+                                id: sheetTrack
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.rightMargin: 14
+                                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 1; color: "#26262c" }
+                                Repeater {
+                                    model: sheetRow.modelData.times
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: 7
+                                        height: 7
+                                        rotation: 45
+                                        x: modelData / timeline.duration * sheetTrack.width - width / 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: theme.accent
+                                        border.color: "#0e0e10"
+                                    }
                                 }
-                                return best;
-                            }
-                            onPressed: function (mouse) {
-                                if (backend.playing) backend.togglePlay();
-                                const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-                                const t = keyNear(mouse.x);
-                                if (t >= 0) {
-                                    backend.selectKey(row.layerIndex, t, shift);
-                                    startX = mouse.x;
-                                    draggingKeys = true;
-                                    backend.beginKeyDrag();
-                                    return;
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    property int dragging: -1
+                                    function keyNear(x) {
+                                        const times = sheetRow.modelData.times;
+                                        let best = -1, bestDistance = 7;
+                                        for (let i = 0; i < times.length; ++i) {
+                                            const d = Math.abs(times[i] / timeline.duration * sheetTrack.width - x);
+                                            if (d <= bestDistance) { best = i; bestDistance = d; }
+                                        }
+                                        return best;
+                                    }
+                                    function timeAt(x) { return Math.max(0, Math.min(timeline.duration, x / sheetTrack.width * timeline.duration)) }
+                                    onPressed: function (mouse) {
+                                        if (backend.playing) backend.togglePlay();
+                                        const key = keyNear(mouse.x);
+                                        if (mouse.button === Qt.RightButton) {
+                                            if (key >= 0) backend.removeKey(sheetRow.modelData.property, key);
+                                            return;
+                                        }
+                                        dragging = key;
+                                        if (key < 0) backend.seek(timeAt(mouse.x));
+                                    }
+                                    onPositionChanged: function (mouse) {
+                                        if (dragging >= 0) backend.retimeKey(sheetRow.modelData.property, dragging, timeAt(mouse.x));
+                                        else backend.seek(timeAt(mouse.x));
+                                    }
+                                    onReleased: { dragging = -1; timeline.done() }
                                 }
-                                if (!shift) backend.clearKeySelection();
-                                if (row.isCamera) backend.selectCamera();
-                                else backend.select(row.layerIndex);
-                                scrub(mouse.x);
-                            }
-                            onPositionChanged: function (mouse) {
-                                if (draggingKeys)
-                                    backend.dragKeys((mouse.x - startX) / track.width * timeline.duration);
-                                else
-                                    scrub(mouse.x);
-                            }
-                            onReleased: {
-                                if (draggingKeys) backend.endKeyDrag();
-                                draggingKeys = false;
-                                timeline.done();
-                            }
-                        }
-                        Repeater {
-                            model: row.entry.keyTimes || []
-                            delegate: Rectangle {
-                                required property var modelData
-                                readonly property bool picked: timeline.picked(row.layerIndex, modelData)
-                                width: picked ? 11 : 9
-                                height: width
-                                rotation: 45
-                                x: modelData / timeline.duration * track.width - width / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: picked ? "white" : (row.selected ? theme.accent : "#9a9aa4")
-                                border.color: picked ? theme.accent : "#0e0e10"
-                                border.width: picked ? 2 : 1
                             }
                         }
                     }

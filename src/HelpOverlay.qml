@@ -38,6 +38,7 @@ Rectangle {
                      ["K", "Keyframe everything at the playhead"], ["Drag ◆", "Retime keyframes (Shift+click picks more)"],
                      ["X", "Remove the picked keyframes, or those at the playhead"],
                      ["E", "Change their easing"],
+                     ["Ctrl+Shift+Tab", "Dope sheet (or ▸ on a track): a row a property; drag its keys alone, right-click takes one away"],
                      ["Ctrl+Tab", "Graph editor: the properties as curves; drag a key in time and value (Shift: value only), click a property to see it alone"], ["Ctrl+C Ctrl+V", "Copy them, paste at the playhead on any layer"]]],
         ["World", [["Shift+D", "Make the picture a 3D world (the AI reads its distances, lens and ground)"],
                    ["S", "Give the selected piece a 3D shape"],
