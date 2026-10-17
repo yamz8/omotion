@@ -29,6 +29,10 @@ public:
     int frameCount() const { return int(std::lround(duration() * m_fps)); }
     // The film's frame at a time, at a size.
     QImage frame(double t, const QSize &size);
+    // Lays the shots' sound under a video already written: each shot's
+    // track, its stretch of it, where the shot is in the film. True with
+    // nothing to do when no shot has sound.
+    bool addSound(const QString &video, QString *error) const;
 
 private:
     struct Shot {

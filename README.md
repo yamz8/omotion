@@ -174,7 +174,8 @@ again over `length`). The film is the first shot's size unless it says
 `width` and `height`; other shapes are fitted in with bars. Render it with
 `omotion film film.json film.mp4` (or a folder for frames, `--scale 0.5`
 for half size), or look at a moment with `--frame <seconds> frame.png`.
-Sound isn't carried over yet.
+Each shot's sound (its stretch of its track, at its volume) plays where
+the shot is, mixed into MP4 and WebM.
 
 ## Saying what you want
 

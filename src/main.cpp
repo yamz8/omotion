@@ -1153,7 +1153,12 @@ int main(int argc, char *argv[]) {
         QSize size(int(std::lround(film.size().width() * scale)), int(std::lround(film.size().height() * scale)));
         size = QSize(std::max(2, size.width() - size.width() % 2), std::max(2, size.height() - size.height() % 2));
         const Exporter::Source source = [&film](int frame, const QSize &at) { return film.frame(frame / film.fps(), at); };
-        if (!Exporter::runFrames(source, film.frameCount(), film.fps(), size, QFileInfo(args.at(3)).absoluteFilePath(), &error))
+        const QString output = QFileInfo(args.at(3)).absoluteFilePath();
+        if (!Exporter::runFrames(source, film.frameCount(), film.fps(), size, output, &error))
+            return filmFail(error);
+        // MP4 and WebM carry the shots' sound; GIFs and frames don't.
+        const QString format = Exporter::formatFor(output);
+        if ((format == "mp4" || format == "webm") && !film.addSound(output, &error))
             return filmFail(error);
         QTextStream(stdout) << QFileInfo(args.at(3)).absoluteFilePath() << "\n";
         return 0;

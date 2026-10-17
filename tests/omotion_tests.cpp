@@ -2214,6 +2214,29 @@ private slots:
         const Exporter::Source source = [&film](int frame, const QSize &at) { return film.frame(frame / film.fps(), at); };
         QVERIFY2(Exporter::runFrames(source, film.frameCount(), film.fps(), size, dir.filePath("frames/"), &error), qPrintable(error));
         QVERIFY(QFile::exists(dir.filePath("frames/0045.png")));
+        // The second shot's sound plays where it is in the film.
+        if (!QStandardPaths::findExecutable("ffmpeg").isEmpty()) {
+            QProcess tone;
+            tone.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", dir.filePath("tone.wav")});
+            QVERIFY(tone.waitForFinished(30000) && tone.exitCode() == 0);
+            Scene withSound = Project::load(dir.filePath(green), nullptr);
+            QVERIFY(Project::setAudio(withSound, dir.filePath(green), dir.filePath("tone.wav"), &error));
+            Project::save(dir.filePath(green), withSound, nullptr);
+            QVERIFY(film.load(dir.filePath("film.json"), &error));
+            QVERIFY2(Exporter::runFrames(source, film.frameCount(), film.fps(), size, dir.filePath("film.mp4"), &error), qPrintable(error));
+            QVERIFY2(film.addSound(dir.filePath("film.mp4"), &error), qPrintable(error));
+            auto loudness = [&](double from) {
+                QProcess probe;
+                probe.start("ffmpeg", {"-hide_banner", "-ss", QString::number(from), "-t", "0.5", "-i", dir.filePath("film.mp4"),
+                                       "-af", "volumedetect", "-vn", "-f", "null", "-"});
+                probe.waitForFinished(30000);
+                const QString log = QString::fromUtf8(probe.readAllStandardError());
+                const int at = int(log.indexOf("mean_volume: "));
+                return at < 0 ? -200.0 : log.mid(at + 13).section(' ', 0, 0).toDouble();
+            };
+            QVERIFY(loudness(.2) < -60);   // The red shot has none.
+            QVERIFY(loudness(2.5) > -40);  // The green one's tone.
+        }
         // Broken films say why.
         writeText(dir.filePath("bad.json"), R"({"shots": [{"project": "red.omotion", "transition": "spin"}]})");
         QVERIFY(!film.load(dir.filePath("bad.json"), &error));

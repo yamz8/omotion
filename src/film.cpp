@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QProcess>
+#include <QStandardPaths>
 #include <cmath>
 
 #include "project.h"
@@ -118,4 +120,54 @@ QImage Film::frame(double t, const QSize &size) {
     painter.setOpacity(light);
     painter.drawImage(0, 0, image);
     return black;
+}
+
+bool Film::addSound(const QString &video, QString *error) const {
+    QStringList inputs, chains, labels;
+    for (const auto &shot : m_shots) {
+        const QJsonObject audio = shot->scene.raw.value("audio").toObject();
+        const QString source = audio.value("source").toString();
+        if (source.isEmpty())
+            continue;
+        const QString file = QDir(shot->path).absoluteFilePath(source);
+        if (!QFileInfo::exists(file))
+            continue;
+        const double offset = std::max(0.0, audio.value("offset").toDouble());
+        const int n = int(inputs.size()) / 2 + 1;
+        inputs << "-i" << file;
+        // Its stretch of the track, louder or softer, from where the shot
+        // starts in the film.
+        const qint64 delay = qint64(std::lround(std::max(0.0, shot->start) * 1000));
+        chains << QString("[%1:a]atrim=start=%2:end=%3,asetpts=PTS-STARTPTS,volume=%4,adelay=%5:all=1[a%1]")
+                      .arg(n)
+                      .arg(offset + shot->from)
+                      .arg(offset + shot->to)
+                      .arg(std::clamp(audio.value("volume").toDouble(1), 0.0, 4.0))
+                      .arg(delay);
+        labels << QString("[a%1]").arg(n);
+    }
+    if (inputs.isEmpty())
+        return true;
+    const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+    if (ffmpeg.isEmpty()) {
+        if (error)
+            *error = "ffmpeg isn't installed.";
+        return false;
+    }
+    const QFileInfo target(video);
+    const QString partial = target.absoluteDir().filePath("." + target.completeBaseName() + ".sound." + target.suffix());
+    const QString graph = chains.join(';') + ";" + labels.join("") + QString("amix=inputs=%1:normalize=0,apad,aresample=async=1[sound]").arg(labels.size());
+    QStringList args{"-hide_banner", "-loglevel", "error", "-y", "-i", video};
+    args << inputs << "-filter_complex" << graph << "-map" << "0:v" << "-map" << "[sound]" << "-c:v" << "copy"
+         << "-c:a" << (target.suffix().toLower() == "webm" ? "libopus" : "aac") << "-t" << QString::number(duration()) << partial;
+    QProcess process;
+    process.start(ffmpeg, args);
+    if (!process.waitForFinished(10 * 60 * 1000) || process.exitCode() != 0) {
+        QFile::remove(partial);
+        if (error)
+            *error = "ffmpeg couldn't add the sound: " + QString::fromUtf8(process.readAllStandardError()).trimmed().left(300);
+        return false;
+    }
+    QFile::remove(video);
+    return QFile::rename(partial, video);
 }
