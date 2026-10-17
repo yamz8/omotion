@@ -133,6 +133,7 @@ QVariantMap Backend::sceneInfo() const {
             {"vanishX", m_scene.vanishPoint().x()},
             {"vanishY", m_scene.vanishPoint().y()},
             {"distance", m_scene.focalDistance()},
+            {"look", m_scene.raw.value("look").toObject().toVariantMap()},
             {"cameraKeys", [this] {
                  QVariantList times;
                  for (double t : m_scene.keyTimes(Scene::CameraIndex))
@@ -589,6 +590,16 @@ void Backend::finishPath(bool turn) {
     setTool("move");
     changed();
     setNotice("It follows the path from here to the end; its rig in the inspector takes it away.");
+}
+
+void Backend::setLook(const QString &name, double value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setLook(scene, name, value, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
 }
 
 void Backend::setWorldValue(const QString &name, const QVariant &value) {

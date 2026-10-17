@@ -845,6 +845,35 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 14; Layout.bottomMargin: 6; height: 1; color: win.line }
 
+            // The look over the whole frame, as a film's grade.
+            Label { text: "Look"; color: win.text; font.bold: true }
+            Repeater {
+                model: [["exposure", "Exposure", 2, 0], ["contrast", "Contrast", 2, 1], ["saturation", "Saturation", 2, 1],
+                        ["temperature", "Warmth", 2, 0], ["tint", "Tint", 2, 0], ["vignette", "Vignette", 2, 0],
+                        ["bloom", "Bloom", 2, 0], ["bloomThreshold", "Bloom from", 2, .75],
+                        ["focus", backend.world.active ? "Focus m" : "Focus z", 1, 0], ["aperture", "Aperture", 1, 0]]
+                delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: modelData[1]; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField {
+                        Layout.fillWidth: true
+                        decimals: modelData[2]
+                        value: (backend.sceneInfo.look || {})[modelData[0]] !== undefined ? backend.sceneInfo.look[modelData[0]] : modelData[3]
+                        onCommitted: function (n) { backend.setLook(modelData[0], n) }
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: win.muted
+                font.pixelSize: 12
+                text: "Exposure in stops; warmth and tint from -1 to 1; bloom makes what's brighter than \"Bloom from\" glow. An aperture blurs what's away from the focus" + (backend.world.active ? " (meters from the camera)." : " (a layer's Depth z).")
+            }
+            Rectangle { Layout.fillWidth: true; Layout.topMargin: 10; Layout.bottomMargin: 4; height: 1; color: win.line }
+
             Label { text: "Scene"; color: win.text; font.bold: true }
             SceneRow { name: "width"; label: "Width"; decimals: 0 }
             SceneRow { name: "height"; label: "Height"; decimals: 0 }

@@ -2124,6 +2124,55 @@ private slots:
         QCOMPARE(value.toArray().at(1).toDouble(), 30.0);
     }
 
+    void theLookGradesTheFrame() {
+        QImage grey(100, 100, QImage::Format_ARGB32_Premultiplied);
+        grey.fill(QColor(100, 100, 100));
+        QImage frame = grey;
+        applyLook(frame, {{"exposure", 1}});
+        QCOMPARE(frame.pixelColor(50, 50).red(), 200);
+        frame = grey;
+        frame.setPixelColor(10, 10, QColor(200, 50, 50));
+        applyLook(frame, {{"saturation", 0}});
+        QCOMPARE(frame.pixelColor(10, 10).red(), frame.pixelColor(10, 10).blue());
+        frame = grey;
+        applyLook(frame, {{"temperature", 1}});
+        QVERIFY(frame.pixelColor(50, 50).red() > frame.pixelColor(50, 50).blue());
+        frame = grey;
+        applyLook(frame, {{"vignette", 1}});
+        QVERIFY(frame.pixelColor(0, 0).red() < 40);
+        QCOMPARE(frame.pixelColor(50, 50).red(), 100);
+        // Bloom: light spills from what's bright onto what's next to it.
+        frame = grey;
+        for (int y = 40; y < 60; ++y)
+            for (int x = 40; x < 60; ++x)
+                frame.setPixelColor(x, y, Qt::white);
+        applyLook(frame, {{"bloom", 1}});
+        QVERIFY(frame.pixelColor(64, 50).red() > 110);
+        QCOMPARE(frame.pixelColor(5, 5).red(), 100);
+
+        // Set through the scene: neutral settings go away.
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        QString error;
+        QVERIFY(Project::setLook(scene, "exposure", 9, &error));
+        QCOMPARE(scene.raw["look"].toObject()["exposure"].toDouble(), 5.0);
+        QVERIFY(Project::setLook(scene, "exposure", 0, &error));
+        QVERIFY(!scene.raw.contains("look"));
+        QVERIFY(!Project::setLook(scene, "sparkle", 1, &error));
+        // Depth of field: a layer set back from the focus blurs, one at it
+        // stays sharp.
+        const QImage sharp = renderFrame(scene, assets, 0);
+        QVERIFY(Project::setLook(scene, "aperture", 5, &error));
+        QVERIFY(Project::setLook(scene, "focus", 0, &error));
+        QCOMPARE(renderFrame(scene, assets, 0), sharp);
+        scene.layers[1].base["z"] = 300;
+        const QImage back = renderFrame(scene, assets, 0);
+        scene.raw["look"] = QJsonObject{};
+        const QImage backSharp = renderFrame(scene, assets, 0);
+        QVERIFY(differences(back, backSharp) > 20);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

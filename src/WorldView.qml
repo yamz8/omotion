@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick3D
+import QtQuick3D.Helpers
 import Omotion
 
 // A scene's world in 3D: each world layer's mesh with its picture on it, put
@@ -13,10 +14,16 @@ Item {
     View3D {
         anchors.fill: parent
         camera: camera
-        environment: SceneEnvironment {
+        environment: ExtendedSceneEnvironment {
             backgroundMode: SceneEnvironment.Transparent
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.High
+            // The scene's look's depth of field: sharp about its focus,
+            // blurring away from it by its aperture.
+            depthOfFieldEnabled: (view.frame.aperture || 0) > 0 && !view.frame.viewPosition
+            depthOfFieldFocusDistance: view.frame.focus || 10
+            depthOfFieldFocusRange: Math.max(.3, (view.frame.focus || 10) / Math.max(1, view.frame.aperture || 1))
+            depthOfFieldBlurAmount: Math.min(12, (view.frame.aperture || 0) * 2)
         }
 
         PerspectiveCamera {

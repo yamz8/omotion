@@ -2022,4 +2022,37 @@ bool removeClip(Scene &scene, int index, int clip) {
     return true;
 }
 
+const QStringList &lookSettings() {
+    static const QStringList list{"exposure", "contrast", "saturation", "temperature", "tint", "vignette", "bloom",
+                                  "bloomThreshold", "focus", "aperture"};
+    return list;
+}
+
+bool setLook(Scene &scene, const QString &name, double value, QString *error) {
+    if (!lookSettings().contains(name) || !std::isfinite(value)) {
+        if (error)
+            *error = QString("The look has %1.").arg(lookSettings().join(", "));
+        return false;
+    }
+    static const QHash<QString, QPair<double, double>> ranges{
+        {"exposure", {-5, 5}}, {"contrast", {0, 3}}, {"saturation", {0, 3}}, {"temperature", {-1, 1}}, {"tint", {-1, 1}},
+        {"vignette", {0, 1}},  {"bloom", {0, 1}},    {"bloomThreshold", {0, .99}}, {"focus", {-1e5, 1e5}}, {"aperture", {0, 100}}};
+    const auto [low, high] = ranges.value(name);
+    QJsonObject look = scene.raw.value("look").toObject();
+    const double neutral = name == "contrast" || name == "saturation" ? 1 : name == "bloomThreshold" ? .75 : 0;
+    const double v = std::clamp(value, low, high);
+    if (v == neutral && name != "focus")
+        look.remove(name);
+    else
+        look[name] = v;
+    // Focus alone does nothing: it goes with an aperture.
+    if (look.size() == 1 && look.contains("focus"))
+        look.remove("focus");
+    if (look.isEmpty())
+        scene.raw.remove("look");
+    else
+        scene.raw["look"] = look;
+    return true;
+}
+
 }

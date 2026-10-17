@@ -59,4 +59,12 @@ private:
 
     QPointer<Backend> m_backend;
     QColor m_accent = QColor("#FFD60A");
+    // With a look, the canvas shows the frame as it's exported: made on the
+    // window's thread (the world needs it) whenever something changes, and
+    // drawn from there.
+    bool looked() const;
+    void scheduleLook();
+    void makeLook();
+    QImage m_lookFrame;
+    bool m_lookPending = false;
 };

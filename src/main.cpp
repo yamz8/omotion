@@ -90,6 +90,10 @@ const char *Usage = R"(Usage:
   omotion clip <project> <layer|camera> --none
                                          Lay a saved motion on as a clip (it adds to the animation,
                                          keys untouched), or take the clips away
+  omotion look <project> [--<setting> <value>]... | --none
+                                         The scene's look: exposure (stops), contrast, saturation,
+                                         temperature, tint, vignette, bloom, bloomThreshold, and
+                                         depth of field: focus (z, or meters in a world), aperture
   omotion body <project> <layer> [--mass <kg>] [--bounce <0-1>] [--friction <0-1>] [--fixed]
   omotion body <project> <layer> --none
                                          Make a layer a rigid body (or a fixed one, that others hit),
@@ -482,6 +486,26 @@ int command(const QStringList &args) {
         if (!Project::save(directory, edited, &error))
             return fail(error);
         QTextStream(stdout) << "Done.\n";
+        return 0;
+    }
+
+    if (args.at(1) == "look") {
+        Scene edited = scene;
+        if (args.size() == 4 && args.at(3) == "--none") {
+            edited.raw.remove("look");
+        } else {
+            for (int i = 3; i < args.size(); i += 2) {
+                bool ok = false;
+                const double value = i + 1 < args.size() ? args.at(i + 1).toDouble(&ok) : 0;
+                if (!args.at(i).startsWith("--") || !ok)
+                    return fail(QString("look takes --setting value pairs; %1 isn't one.").arg(args.at(i)));
+                if (!Project::setLook(edited, args.at(i).mid(2), value, &error))
+                    return fail(error);
+            }
+        }
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << QJsonDocument(edited.raw.value("look").toObject()).toJson(QJsonDocument::Compact) << "\n";
         return 0;
     }
 
@@ -927,7 +951,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

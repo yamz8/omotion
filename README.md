@@ -94,6 +94,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `S` | Give the selected piece of the world a 3D shape |
 | Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click a piece of a world | Pick it where it is in 3D: a box shows round it, arrows drag it along x (red), y (green) and z (blue), and three rings turn it: about y (yaw), x (pitch) and z (roll). Ctrl while dragging snaps to 10 cm and 15° |
+| Look | In the inspector with nothing selected: the scene's grade (exposure, contrast, saturation, warmth, tint), a vignette, bloom (what's brighter than a level glows), and depth of field (a focus and an aperture; in a world, the focus is meters from the camera). The canvas then shows the frame as it's exported. `omotion look` does the same |
 | Emitters | A particle layer's *From* (in the inspector) makes it come from a layer: a wheel throwing dust, a chimney's embers. So many a second, each living a while, carrying on with some of the layer's speed, under gravity and wind. `omotion particles <project> dust --from car --rate 60` does the same |
 | Physics | In the inspector: make a layer a rigid *Body* (or a *Fixed* one that others land on, with how much it bounces), then *Simulate from the playhead*: the bodies fall, land on the ground (a world's, or the canvas's bottom), bounce and knock into each other, baked into keys. `omotion body` and `omotion simulate` do the same |
 | Ctrl+click | Add a layer to the selection, or take it out (also in the outliner): they move together, by the arrows, rings and G in a world, by dragging on a flat canvas |
@@ -317,6 +318,11 @@ photo.omotion/
   "speed", "amount"}]` add a motion's change from its first key, from
   `start`; the scene's **`motions`** keep each motion's `keys` (by property,
   times from 0), copied in when it's laid on.
+- **`look`**: the scene's grade over every frame: `exposure` (stops),
+  `contrast`, `saturation`, `temperature` and `tint` (-1 to 1), `vignette`
+  and `bloom` (0 to 1), `bloomThreshold` (0.75), and depth of field: `focus`
+  (a layer's z on a flat scene, meters from the camera in a world) and
+  `aperture` (on a flat scene, pixels of blur a hundred z from the focus).
 - A particle layer with **`from`** in its `particles` is an emitter: from
   that layer's `at` point (its pixels; its pivot when left out), `rate` a
   second, each living `life` seconds, with `inherit` of the layer's speed,

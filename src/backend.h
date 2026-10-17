@@ -321,6 +321,8 @@ public:
     Q_INVOKABLE QVariantList rankCommands(const QString &query, const QStringList &names) const;
     // Redoes every step that's out of date, in order, in the background.
     Q_INVOKABLE void redoStale();
+    // A setting of the scene's look (see Project::lookSettings).
+    Q_INVOKABLE void setLook(const QString &name, double value);
     // A world setting: hazeColor, hazeDensity, grain, shutter (degrees) or
     // dust (a colour).
     Q_INVOKABLE void setWorldValue(const QString &name, const QVariant &value);

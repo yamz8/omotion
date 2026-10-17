@@ -87,6 +87,10 @@ void WorldSource::update() {
         frame["cameraPosition"] = QVariant::fromValue(f.cameraPosition);
         frame["cameraRotation"] = QVariant::fromValue(f.cameraRotation);
         frame["fov"] = f.fov;
+        // Depth of field, through the 3D view's own: its focus in meters.
+        const QJsonObject look = m_scene.raw.value("look").toObject();
+        frame["aperture"] = look.value("aperture").toDouble(0);
+        frame["focus"] = look.value("focus").toDouble(10);
         if (m_free) {
             frame["viewPosition"] = QVariant::fromValue(m_view.position);
             frame["viewRotation"] = QVariant::fromValue(m_view.rotation);

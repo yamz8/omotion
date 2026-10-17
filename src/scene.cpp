@@ -1538,6 +1538,84 @@ void soften(QImage &image, double width) {
     }
 }
 
+void applyLook(QImage &frame, const QJsonObject &look) {
+    if (look.isEmpty() || frame.isNull())
+        return;
+    const double exposure = std::pow(2.0, look.value("exposure").toDouble(0));
+    const double contrast = look.value("contrast").toDouble(1), saturation = look.value("saturation").toDouble(1);
+    const double temperature = std::clamp(look.value("temperature").toDouble(0), -1.0, 1.0);
+    const double tint = std::clamp(look.value("tint").toDouble(0), -1.0, 1.0);
+    const double vignette = std::clamp(look.value("vignette").toDouble(0), 0.0, 1.0);
+    const double bloom = std::clamp(look.value("bloom").toDouble(0), 0.0, 1.0);
+    const double threshold = std::clamp(look.value("bloomThreshold").toDouble(.75), 0.0, .99);
+    if (frame.format() != QImage::Format_ARGB32_Premultiplied)
+        frame = frame.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+
+    // Bloom first, from the frame as it is: its bright parts, small and
+    // softened, laid back over it as light (screen).
+    QImage glow;
+    if (bloom > 0) {
+        const QSize small = (frame.size() / 4).expandedTo(QSize(1, 1));
+        glow = frame.scaled(small, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        for (int y = 0; y < glow.height(); ++y) {
+            QRgb *line = reinterpret_cast<QRgb *>(glow.scanLine(y));
+            for (int x = 0; x < glow.width(); ++x) {
+                const QRgb p = line[x];
+                const double lum = (.2126 * qRed(p) + .7152 * qGreen(p) + .0722 * qBlue(p)) / 255;
+                const double k = std::clamp((lum - threshold) / (1 - threshold), 0.0, 1.0);
+                line[x] = qRgba(int(qRed(p) * k), int(qGreen(p) * k), int(qBlue(p) * k), int(qAlpha(p) * k));
+            }
+        }
+        soften(glow, std::max(2.0, small.width() * .04));
+        glow = glow.scaled(frame.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    // Each channel's grade as a table: exposure, warmth and tint, contrast.
+    const double gains[3] = {1 + .12 * temperature - .04 * tint, 1 + .08 * tint, 1 - .12 * temperature - .04 * tint};
+    uchar table[3][256];
+    for (int c = 0; c < 3; ++c)
+        for (int v = 0; v < 256; ++v) {
+            double x = v / 255.0 * exposure * gains[c];
+            x = (x - .5) * contrast + .5;
+            table[c][v] = uchar(std::clamp(int(std::lround(x * 255)), 0, 255));
+        }
+    const double cx = frame.width() / 2.0, cy = frame.height() / 2.0, reach = std::hypot(cx, cy);
+    for (int y = 0; y < frame.height(); ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(frame.scanLine(y));
+        const QRgb *light = glow.isNull() ? nullptr : reinterpret_cast<const QRgb *>(glow.constScanLine(y));
+        for (int x = 0; x < frame.width(); ++x) {
+            const QRgb p = line[x];
+            const int a = qAlpha(p);
+            if (a == 0 && !light)
+                continue;
+            // Graded as colours, not as premultiplied ones.
+            auto un = [a](int v) { return a ? std::min(255, v * 255 / a) : 0; };
+            double r = table[0][un(qRed(p))], g = table[1][un(qGreen(p))], b = table[2][un(qBlue(p))];
+            if (saturation != 1) {
+                const double lum = .2126 * r + .7152 * g + .0722 * b;
+                r = lum + (r - lum) * saturation, g = lum + (g - lum) * saturation, b = lum + (b - lum) * saturation;
+            }
+            if (vignette > 0) {
+                const double d = std::hypot(x - cx, y - cy) / reach;
+                const double s = std::clamp((d - .45) / .7, 0.0, 1.0);
+                const double dark = 1 - vignette * s * s * (3 - 2 * s);
+                r *= dark, g *= dark, b *= dark;
+            }
+            int na = a;
+            if (light) {
+                const QRgb l = light[x];
+                const double k = bloom * 1.5;
+                r = 255 - (255 - r) * (1 - std::min(1.0, qRed(l) * k / 255));
+                g = 255 - (255 - g) * (1 - std::min(1.0, qGreen(l) * k / 255));
+                b = 255 - (255 - b) * (1 - std::min(1.0, qBlue(l) * k / 255));
+                na = std::max(a, std::min(255, int(qAlpha(l) * k)));
+            }
+            auto pre = [na](double v) { return std::clamp(int(std::lround(v * na / 255)), 0, na); };
+            line[x] = qRgba(pre(r), pre(g), pre(b), na);
+        }
+    }
+}
+
 const AssetCache::Look &AssetCache::look(const QString &source, double factor, double brightness, double contrast,
                                          double saturation, double blur, double glow, double canvasPerPixel) {
     // Pixel sizes are bucketed, so a slow zoom doesn't redo the work every frame.
@@ -2073,6 +2151,18 @@ WorldDrawer worldDrawer;
 
 void setWorldRenderer(WorldDrawer drawer) { worldDrawer = std::move(drawer); }
 
+namespace {
+// Depth of field on a flat scene: out of focus, a layer blurs by how far it
+// is set back from the focus (its z), aperture pixels for each hundred.
+double defocus(const Scene &scene, int index, double t) {
+    const QJsonObject look = scene.raw.value("look").toObject();
+    const double aperture = look.value("aperture").toDouble(0);
+    if (aperture <= 0 || World::info(scene).valid)
+        return 0;
+    return aperture * std::abs(depthOf(scene, index, t) - look.value("focus").toDouble(0)) / 100;
+}
+}
+
 void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld, int first,
                  int end) {
     painter.save();
@@ -2138,7 +2228,7 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         QImage glow;
         int margin = 0;
         const double brightness = scene.value(layer, "brightness", t), contrast = scene.value(layer, "contrast", t),
-                     saturation = scene.value(layer, "saturation", t), blur = std::max(0.0, scene.value(layer, "blur", t)),
+                     saturation = scene.value(layer, "saturation", t), blur = std::max(0.0, scene.value(layer, "blur", t)) + defocus(scene, i, t),
                      glowSize = std::max(0.0, scene.value(layer, "glow", t));
         if (brightness != 0 || contrast != 1 || saturation != 1 || blur > 0 || glowSize > 0) {
             const double canvasPerPixel = scale / factor / std::max(outputScale, 1e-6);
@@ -2348,6 +2438,8 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
         renderScene(painter, scene, assets, t, !world.isNull());
     }
     painter.end();
+    // The scene's look over everything.
+    applyLook(frame, scene.raw.value("look").toObject());
     // Film grain over a world's frame, the painting and what moves in it
     // alike, so the two share one surface. Seeded by the frame's time, so a
     // frame always comes out the same.

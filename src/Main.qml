@@ -340,7 +340,8 @@ ApplicationWindow {
                 // A world, in 3D, exactly where the canvas is; the canvas
                 // draws everything else over it.
                 Rectangle {
-                    visible: backend.hasProject && backend.world.active
+                    // With a look, the canvas draws the world itself, as exported.
+                    visible: backend.hasProject && backend.world.active && (backend.freeView || Object.keys(backend.sceneInfo.look || {}).length === 0)
                     // The free view fills the whole area.
                     x: backend.freeView ? 0 : view.canvasRect.x
                     y: backend.freeView ? 0 : view.canvasRect.y

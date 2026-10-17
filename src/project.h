@@ -167,6 +167,12 @@ bool addClip(Scene &scene, int layer, const QString &motion, double start, int r
              QString *error);
 bool removeClip(Scene &scene, int layer, int clip);
 
+// A setting of the scene's look (see applyLook, and focus and aperture for
+// depth of field): checked and set; 0 for a setting that's neutral when
+// the default, which takes it out.
+bool setLook(Scene &scene, const QString &name, double value, QString *error);
+const QStringList &lookSettings();
+
 // What changed between two versions of a scene, in a few words a line:
 // layers added and taken away, and for each layer (and the camera, the
 // world and the scene) which properties and keys changed.

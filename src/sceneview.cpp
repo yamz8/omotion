@@ -1,6 +1,8 @@
 #include "sceneview.h"
 
 #include <QPainter>
+#include <QQuickWindow>
+#include <QTimer>
 #include <QPainterPath>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -19,9 +21,11 @@ SceneView::SceneView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     auto resized = [this] {
         if (m_backend)
             m_backend->setViewportSize(width(), height());
+        scheduleLook();
         update();
         emit zoomChanged();
     };
+    connect(this, &SceneView::zoomChanged, this, &SceneView::scheduleLook);
     connect(this, &QQuickItem::widthChanged, this, resized);
     connect(this, &QQuickItem::heightChanged, this, resized);
 }
@@ -33,7 +37,10 @@ void SceneView::setBackend(Backend *backend) {
         disconnect(m_backend, nullptr, this, nullptr);
     m_backend = backend;
     if (m_backend) {
-        auto repaint = [this] { update(); };
+        auto repaint = [this] {
+            scheduleLook();
+            update();
+        };
         connect(m_backend, &Backend::sceneChanged, this, repaint);
         connect(m_backend, &Backend::sceneChanged, this, &SceneView::zoomChanged);
         connect(m_backend, &Backend::timeChanged, this, repaint);
@@ -118,6 +125,35 @@ QRectF SceneView::canvasRect() const {
         return {};
     const Scene &scene = m_backend->scene();
     return viewTransform().mapRect(QRectF(0, 0, scene.width, scene.height));
+}
+
+bool SceneView::looked() const {
+    return m_backend && m_backend->hasProject() && !m_backend->freeView() && !m_backend->scene().raw.value("look").toObject().isEmpty();
+}
+
+void SceneView::scheduleLook() {
+    if (!looked()) {
+        m_lookFrame = QImage();
+        return;
+    }
+    if (m_lookPending)
+        return;
+    m_lookPending = true;
+    QTimer::singleShot(0, this, &SceneView::makeLook);
+}
+
+void SceneView::makeLook() {
+    m_lookPending = false;
+    if (!looked())
+        return;
+    const Scene &scene = m_backend->scene();
+    // As many pixels as the canvas takes on screen, at most its own.
+    const double ratio = window() ? window()->effectiveDevicePixelRatio() : 1;
+    const QSizeF shown = canvasRect().size() * ratio;
+    const double k = std::min(1.0, std::min(shown.width() / scene.width, shown.height() / scene.height));
+    const QSize size(std::max(2, int(scene.width * k)), std::max(2, int(scene.height * k)));
+    m_lookFrame = renderFrame(scene, m_backend->assets(), m_backend->time(), size);
+    update();
 }
 
 QPointF SceneView::toScene(double x, double y) const { return viewTransform().inverted().map(QPointF(x, y)); }
@@ -247,11 +283,16 @@ void SceneView::paint(QPainter *painter) {
                         selected < scene.layers.size() && scene.layers.at(selected).particles.isEmpty();
     const double now = m_backend->time();
 
-    // A world is shown in 3D underneath; the rest is drawn over it.
-    painter->save();
-    painter->setTransform(view, true);
-    renderScene(*painter, scene, m_backend->assets(), now, m_backend->world()->active());
-    painter->restore();
+    // A world is shown in 3D underneath; the rest is drawn over it. With a
+    // look, the frame as it's exported, look and all.
+    if (looked() && !m_lookFrame.isNull()) {
+        painter->drawImage(canvas, m_lookFrame);
+    } else {
+        painter->save();
+        painter->setTransform(view, true);
+        renderScene(*painter, scene, m_backend->assets(), now, m_backend->world()->active());
+        painter->restore();
+    }
 
     // Onion skin: the layer faintly where it was and where it's going, at the
     // keyframes either side (or a quarter second, between keys).

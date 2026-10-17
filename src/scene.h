@@ -312,6 +312,12 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
+// The scene's look (its "look" in scene.json), over a finished frame:
+// exposure (stops), contrast, saturation, temperature and tint (-1 to 1,
+// warmer and greener), a vignette (0 to 1), and bloom: the brightest parts
+// (over bloomThreshold, 0 to 1) glowing out by bloom (0 to 1). Nothing to
+// do without one.
+void applyLook(QImage &frame, const QJsonObject &look);
 // Softens an Alpha8 or 32-bit image in place, spreading edges about width
 // pixels: three box blurs, which come close to a Gaussian.
 void soften(QImage &image, double width);
