@@ -26,6 +26,11 @@ float throughCells(sampler3D cells, int i, vec3 p, vec3 light)
     if (sizeOf.w == ownLayer)
         return 1.0;
     vec3 size = max(sizeOf.xyz, vec3(0.001));
+    // Far from the line, it can't be in the way: no need to look closer.
+    vec3 along = light - p;
+    float t = clamp(dot(middle - p, along) / max(dot(along, along), 0.000001), 0.0, 1.0);
+    if (length(p + along * t - middle) > length(size))
+        return 1.0;
     vec4 q = texelFetch(solids, ivec2(2, i), 0);
     vec3 a = turnBack(q, p - middle) / size;
     vec3 b = turnBack(q, light - middle) / size;
@@ -38,9 +43,13 @@ float throughCells(sampler3D cells, int i, vec3 p, vec3 light)
     if (enter >= leave)
         return 1.0;
     float lit = 1.0;
+    // A step a cell or so: as many as the line crosses (a side is 32).
+    int steps = int(clamp(length(d * (leave - enter)) * 18.0, 4.0, 48.0));
     for (int k = 0; k < 48; ++k) {
-        float t = mix(enter, leave, (float(k) + 0.5) / 48.0);
-        vec3 at = (a + d * t) * 0.5 + 0.5;
+        if (k >= steps)
+            break;
+        float s = mix(enter, leave, (float(k) + 0.5) / float(steps));
+        vec3 at = (a + d * s) * 0.5 + 0.5;
         lit *= 1.0 - 0.35 * smoothstep(0.3, 0.7, texture(cells, at).r);
         if (lit < 0.1)
             break;
@@ -98,7 +107,11 @@ vec3 oneLight(vec3 albedo, vec3 n, vec3 p, vec3 eye, vec3 at, vec3 colour, float
     float diffuse = max(dot(n, l), 0.0);
     vec3 r = reflect(-l, n);
     float highlight = shine * pow(max(dot(r, normalize(eye)), 0.0), mix(80.0, 6.0, roughness)) * step(0.0, diffuse);
-    return (albedo * diffuse + vec3(highlight)) * colour * fall * shadowed(p, at);
+    vec3 added = (albedo * diffuse + vec3(highlight)) * colour * fall;
+    // Where it adds next to nothing, what's in its way doesn't matter.
+    if (max(added.r, max(added.g, added.b)) < 0.002)
+        return added;
+    return added * shadowed(p, at);
 }
 
 vec3 lights(vec3 albedo, vec3 n, vec3 p, vec3 eye)
