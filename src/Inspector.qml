@@ -372,6 +372,43 @@ Rectangle {
                 }
             }
 
+            // Billowing, as smoke, cloud or water: a slow warp.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !inspector.isParticles && !!inspector.v.source
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var warp: inspector.v.warp || {}
+                Label { text: "Billow"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Amount px"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.warp.amount || 0; onCommitted: function (n) { backend.setWarp("amount", n) } }
+                }
+                RowLayout {
+                    visible: (parent.warp.amount || 0) > 0
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Size px"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.warp.scale || 80; onCommitted: function (n) { backend.setWarp("scale", n) } }
+                }
+                RowLayout {
+                    visible: (parent.warp.amount || 0) > 0
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Speed"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.warp.speed === undefined ? .3 : parent.parent.warp.speed; onCommitted: function (n) { backend.setWarp("speed", n) } }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "Smoke, cloud, dust or water moving: its picture pushed about by slow noise, looping with the scene. Cut the part that moves out first."
+                }
+            }
+
             // An imported model's size.
             RowLayout {
                 visible: backend.selected >= 0 && !!(inspector.v.model || {}).file

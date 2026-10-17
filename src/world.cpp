@@ -1054,6 +1054,16 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         const QJsonObject material = layer.raw.value("material").toObject();
         place.shine = float(std::clamp(material.value("shine").toDouble(0), 0.0, 1.0));
         place.roughness = float(std::clamp(material.value("roughness").toDouble(.5), 0.0, 1.0));
+        const QJsonObject warp = layer.raw.value("warp").toObject();
+        const QSizeF own = assets.size(layer.source);
+        if (warp.value("amount").toDouble() > 0 && !own.isEmpty()) {
+            // As the flat drawing does: in the picture's pixels, looping.
+            const double scale = std::max(1.0, warp.value("scale").toDouble(80)), speed = warp.value("speed").toDouble(.3);
+            const double turnAround = 2 * M_PI * t / std::max(.01, scene.duration), radius = speed * std::max(.01, scene.duration) / (2 * M_PI);
+            place.warpAmount = float(warp.value("amount").toDouble() / own.width());
+            place.warpScale = QVector2D(float(own.width() / scale), float(own.height() / scale));
+            place.warpDrift = QVector2D(float(std::cos(turnAround) * radius), float(std::sin(turnAround) * radius));
+        }
         place.opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
         // Sizes in a world come from distances: a layer's 2D scale (how its
         // picture fits the canvas, or a flat animation) doesn't apply.

@@ -2517,6 +2517,30 @@ private slots:
         QVERIFY2(film.load(backend.filmPath(), &error), qPrintable(error));
     }
 
+    void layersBillowAndLoop() {
+        // Stripes, pushed about: changed, changing over time, and the same
+        // at the scene's end as at its start.
+        QImage stripes(120, 80, QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < 80; ++y)
+            for (int x = 0; x < 120; ++x)
+                stripes.setPixelColor(x, y, (x / 10) % 2 ? Qt::white : Qt::black);
+        const QJsonObject warp{{"amount", 6}, {"scale", 30}, {"speed", .5}};
+        const QImage a = warped(stripes, warp, 0, 1, 4), b = warped(stripes, warp, 1, 1, 4), c = warped(stripes, warp, 4, 1, 4);
+        QVERIFY(differences(a, stripes) > 200);
+        QVERIFY(differences(a, b) > 100);
+        QVERIFY(differences(a, c) < 5);
+        QCOMPARE(warped(stripes, {{"amount", 0}}, 1, 1, 4), stripes);
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        QString error;
+        QVERIFY(Project::setWarp(scene, 1, "amount", 5, &error));
+        QVERIFY(scene.layers[1].raw.contains("warp"));
+        QVERIFY(Project::setWarp(scene, 1, "amount", 0, &error));
+        QVERIFY(!scene.layers[1].raw.contains("warp"));
+        QVERIFY(!Project::setWarp(scene, 1, "wobble", 1, &error));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

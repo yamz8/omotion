@@ -194,6 +194,9 @@ Item {
                         sourceBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.One
                         destinationBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.OneMinusSrcAlpha
                         property real fade: holder.place.opacity === undefined ? 1 : holder.place.opacity
+                        property real warpAmount: holder.place.warpAmount || 0
+                        property vector2d warpScale: holder.place.warpScale || Qt.vector2d(1, 1)
+                        property vector2d warpDrift: holder.place.warpDrift || Qt.vector2d(0, 0)
                         // Its material, and the lights (four at most).
                         property real shine: holder.place.shine || 0
                         property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness

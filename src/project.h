@@ -213,6 +213,10 @@ int importVideo(Scene &scene, const QString &directory, const QString &path, QSt
 bool isModel(const QString &path);
 int importModel(Scene &scene, const QString &directory, const QString &path, const QVector3D &at, double size, QString *error);
 
+// A layer's warp (see warped): "amount" (0 takes it away), "scale",
+// "speed" or "seed".
+bool setWarp(Scene &scene, int layer, const QString &name, double value, QString *error);
+
 // A video layer's "start" (seconds into the scene), "speed" or "loop".
 bool setVideo(Scene &scene, int layer, const QString &name, const QVariant &value, QString *error);
 

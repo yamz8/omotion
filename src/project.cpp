@@ -2452,4 +2452,19 @@ int importModel(Scene &scene, const QString &directory, const QString &path, con
     return int(scene.layers.size()) - 1;
 }
 
+bool setWarp(Scene &scene, int index, const QString &name, double value, QString *error) {
+    if (index < 0 || index >= scene.layers.size() || !QStringList{"amount", "scale", "speed", "seed"}.contains(name) || !std::isfinite(value)) {
+        if (error)
+            *error = "A warp has an amount, a scale, a speed and a seed.";
+        return false;
+    }
+    QJsonObject warp = scene.layers.at(index).raw.value("warp").toObject();
+    warp[name] = name == "seed" ? double(std::lround(value)) : std::max(0.0, value);
+    if (name == "amount" && value <= 0)
+        scene.layers[index].raw.remove("warp");
+    else
+        scene.layers[index].raw["warp"] = warp;
+    return true;
+}
+
 }

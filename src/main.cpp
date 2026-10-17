@@ -72,6 +72,9 @@ const char *Usage = R"(Usage:
                                          horizon is, down the picture, for which way is level
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
+  omotion warp <project> <layer> [--amount <px>] [--scale <px>] [--speed <n>] [--seed <n>]
+                                         Make a layer billow, as smoke, cloud or water: its picture
+                                         pushed about by slow noise, looping; --amount 0 stops it
   omotion video <project> <clip> [--start <s>] [--speed <x>] [--hold]
                                          Add a video clip as a layer that plays (its frames written
                                          into the project), from start seconds, at a speed, looping
@@ -695,6 +698,24 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "warp") {
+        if (args.size() < 4)
+            return fail("warp takes a project and a layer.");
+        Scene edited = scene;
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        if (args.size() == 4 && !Project::setWarp(edited, layer, "amount", 6, &error))
+            return fail(error);
+        for (int i = 4; i + 1 < args.size(); i += 2)
+            if (!args.at(i).startsWith("--") || !Project::setWarp(edited, layer, args.at(i).mid(2), args.at(i + 1).toDouble(), &error))
+                return fail(error.isEmpty() ? QString("warp doesn't know %1.").arg(args.at(i)) : error);
+        if (!Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << "Done.\n";
+        return 0;
+    }
+
     if (args.at(1) == "video") {
         if (args.size() < 4)
             return fail("video takes a project and a clip.");
@@ -1087,7 +1108,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "model") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "warp") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "model") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

@@ -19,6 +19,7 @@
 #include <QQuaternion>
 #include <QSize>
 #include <QString>
+#include <QVector2D>
 #include <QVector3D>
 
 #include "scene.h"
@@ -121,6 +122,11 @@ struct Placement {
     // on its point (in its units, before scale).
     QString model;
     QVector3D offset;
+    // Billowing (its "warp"): how far its picture is pushed, as a share of
+    // it, the noise's size as a share too, and where the noise has drifted.
+    float warpAmount = 0;
+    QVector2D warpScale;
+    QVector2D warpDrift;
     // Its material, under the lights: how much it shines, how rough.
     float shine = 0;
     float roughness = .5f;

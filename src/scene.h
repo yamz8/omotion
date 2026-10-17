@@ -313,6 +313,11 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});
+// A layer's picture billowing (its "warp": amount and scale in canvas
+// pixels, speed, seed): each pixel pushed about by smooth noise that drifts
+// over time, for smoke, cloud, dust or water. factor is the picture's
+// pixels per canvas pixel.
+QImage warped(const QImage &image, const QJsonObject &warp, double t, double factor, double duration);
 // The picture a layer shows at time t: a video layer's frame for then (its
 // "video": frames in a folder of the project, from "start" seconds into
 // the scene at "speed", looping or holding its last), else its source.

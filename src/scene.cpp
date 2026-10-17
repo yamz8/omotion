@@ -1547,6 +1547,75 @@ void soften(QImage &image, double width) {
     }
 }
 
+namespace {
+// Smooth noise in three dimensions (two of space, one of time), -1 to 1.
+double noise3(double x, double y, double z, quint32 seed) {
+    auto hash = [seed](qint64 i, qint64 j, qint64 k) {
+        quint32 h = quint32(i) * 73856093u ^ quint32(j) * 19349663u ^ quint32(k) * 83492791u ^ seed * 2654435761u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return ((h ^ (h >> 16)) & 0xffff) / 32767.5 - 1;
+    };
+    const qint64 i = qint64(std::floor(x)), j = qint64(std::floor(y)), k = qint64(std::floor(z));
+    auto ease = [](double f) { return f * f * (3 - 2 * f); };
+    const double u = ease(x - i), v = ease(y - j), w = ease(z - k);
+    auto lerp = [](double a, double b, double f) { return a + (b - a) * f; };
+    return lerp(lerp(lerp(hash(i, j, k), hash(i + 1, j, k), u), lerp(hash(i, j + 1, k), hash(i + 1, j + 1, k), u), v),
+                lerp(lerp(hash(i, j, k + 1), hash(i + 1, j, k + 1), u), lerp(hash(i, j + 1, k + 1), hash(i + 1, j + 1, k + 1), u), v), w);
+}
+}
+
+QImage warped(const QImage &image, const QJsonObject &warp, double t, double factor, double duration) {
+    const double amount = warp.value("amount").toDouble(6) * factor, scale = std::max(1.0, warp.value("scale").toDouble(80) * factor);
+    if (amount <= 0 || image.isNull())
+        return image;
+    const double speed = warp.value("speed").toDouble(.3);
+    const quint32 seed = quint32(warp.value("seed").toInt(1));
+    // Time goes round a circle, so the scene loops.
+    const double turn = 2 * M_PI * t / std::max(.01, duration);
+    const double radius = speed * std::max(.01, duration) / (2 * M_PI);
+    const double tx = std::cos(turn) * radius, ty = std::sin(turn) * radius;
+    const QImage source = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const int w = source.width(), h = source.height();
+    // The push, worked out every few pixels and blended between.
+    constexpr int cell = 6;
+    const int gw = w / cell + 2, gh = h / cell + 2;
+    std::vector<QPointF> push(size_t(gw) * gh);
+    for (int gy = 0; gy < gh; ++gy)
+        for (int gx = 0; gx < gw; ++gx) {
+            const double x = gx * cell / scale, y = gy * cell / scale;
+            push[size_t(gy) * gw + gx] = QPointF(noise3(x + tx, y + ty, tx - ty, seed) + .5 * noise3(2 * x - ty, 2 * y + tx, 3.1, seed + 7),
+                                                 noise3(x + 17.3 - ty, y + 4.1 + tx, 9.2 + tx, seed) + .5 * noise3(2 * x + tx, 2 * y - ty, 5.7, seed + 11)) *
+                                         (amount / 1.5);
+        }
+    QImage out(source.size(), QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < h; ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+        const int gy = y / cell;
+        const double fy = double(y % cell) / cell;
+        for (int x = 0; x < w; ++x) {
+            const int gx = x / cell;
+            const double fx = double(x % cell) / cell;
+            const QPointF a = push[size_t(gy) * gw + gx], b = push[size_t(gy) * gw + gx + 1], c = push[size_t(gy + 1) * gw + gx],
+                          d = push[size_t(gy + 1) * gw + gx + 1];
+            const QPointF p = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+            // Sampled between pixels from where it was pushed from.
+            const double sx = std::clamp(x + p.x(), 0.0, w - 1.001), sy = std::clamp(y + p.y(), 0.0, h - 1.001);
+            const int ix = int(sx), iy = int(sy);
+            const double ux = sx - ix, uy = sy - iy;
+            const QRgb *r0 = reinterpret_cast<const QRgb *>(source.constScanLine(iy));
+            const QRgb *r1 = reinterpret_cast<const QRgb *>(source.constScanLine(std::min(iy + 1, h - 1)));
+            const int x1 = std::min(ix + 1, w - 1);
+            auto mix = [&](int shift) {
+                const double top = ((r0[ix] >> shift) & 0xff) * (1 - ux) + ((r0[x1] >> shift) & 0xff) * ux;
+                const double bottom = ((r1[ix] >> shift) & 0xff) * (1 - ux) + ((r1[x1] >> shift) & 0xff) * ux;
+                return int(std::lround(top * (1 - uy) + bottom * uy));
+            };
+            line[x] = qRgba(mix(16), mix(8), mix(0), mix(24));
+        }
+    }
+    return out;
+}
+
 QString sourceAt(const Layer &layer, double t) {
     if (layer.raw.isEmpty() || !layer.raw.contains("video"))
         return layer.source;
@@ -2306,6 +2375,8 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         QImage image = assets.mip(source, scale, &factor);
         if (image.isNull())
             continue;
+        // Billowing, as smoke or water does, before its look.
+        const bool billows = !layer.raw.isEmpty() && layer.raw.contains("warp");
 
         QImage glow;
         int margin = 0;
@@ -2320,6 +2391,12 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
             glow = look.glow;
             margin = look.margin;
             factor = look.factor;
+        }
+        if (billows) {
+            const QJsonObject warp = layer.raw.value("warp").toObject();
+            image = warped(image, warp, t, factor, scene.duration);
+            if (!glow.isNull())
+                glow = warped(glow, warp, t, factor, scene.duration);
         }
 
         painter.setOpacity(opacity);

@@ -760,6 +760,16 @@ void Backend::trackAt(double x, double y) {
     setNotice(QString("%1 follows it. Parent a layer to it (or link to it) to stick it to the footage.").arg(m_scene.layers.at(follower).name));
 }
 
+void Backend::setWarp(const QString &name, double value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setWarp(scene, m_selected, name, value, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::setVideo(const QString &name, const QVariant &value) {
     Scene scene = m_scene;
     QString error;
@@ -1020,6 +1030,7 @@ QVariantMap Backend::values() const {
     map.insert("empty", layer.raw.value("empty").toBool());
     map.insert("drawing", layer.raw.contains("drawing"));
     map.insert("video", layer.raw.value("video").toObject().toVariantMap());
+    map.insert("warp", layer.raw.value("warp").toObject().toVariantMap());
     map.insert("shapeModifiers", layer.raw.value("shape").toObject().value("modifiers").toArray().toVariantList());
     map.insert("shaped", !layer.raw.value("shape").toObject().isEmpty());
     map.insert("modifiers", layer.raw.value("modifiers").toObject().toVariantMap());

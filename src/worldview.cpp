@@ -113,7 +113,10 @@ void WorldSource::update() {
                                                                      {"opacity", place.opacity},
                                                                      {"visible", place.visible},
                                                                      {"shine", place.shine},
-                                                                     {"roughness", place.roughness}});
+                                                                     {"roughness", place.roughness},
+                                                                     {"warpAmount", place.warpAmount},
+                                                                     {"warpScale", QVariant::fromValue(place.warpScale)},
+                                                                     {"warpDrift", QVariant::fromValue(place.warpDrift)}});
         for (const World::Placement &model : f.models)
             places.insert(QString::number(model.layer), QVariantMap{{"position", QVariant::fromValue(model.position)},
                                                                      {"rotation", QVariant::fromValue(model.rotation)},
