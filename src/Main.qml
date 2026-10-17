@@ -184,6 +184,8 @@ ApplicationWindow {
     Shortcut { sequences: ["F3", "Ctrl+K"]; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !backend.agentBusy && !commandBox.visible; onActivated: commandBox.open() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.agentReview && backend.tool === "move" && !commandBox.visible; onActivated: backend.keepAgent() }
     Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !commandBox.visible; onActivated: win.filmVisible = !win.filmVisible }
+    // Space plays the film while its panel is open, as it plays the scene otherwise.
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.filmVisible && backend.filmShots.length > 0; onActivated: backend.toggleFilmPlay() }
     Shortcut { sequence: "Ctrl+Tab"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: timeline.curves = !timeline.curves }
     Shortcut { sequence: "`"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.handle < 0; onActivated: backend.toggleFreeView() }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: win.ready && backend.freeView && backend.tool === "move"; onActivated: backend.frameSelected() }
@@ -1150,6 +1152,7 @@ ApplicationWindow {
         anchors.fill: parent
         visible: win.filmVisible
         color: "#b0000000"
+        onVisibleChanged: visible ? backend.showFilmAt(backend.filmTime) : backend.stopFilmPreview()
         MouseArea { anchors.fill: parent; onClicked: win.filmVisible = false }
         Rectangle {
             anchors.centerIn: parent
@@ -1165,6 +1168,57 @@ ApplicationWindow {
                 anchors.margins: 20
                 spacing: 6
                 Label { text: "Film"; font.pixelSize: 20; font.bold: true; color: win.text }
+                // The film as it will export, played here.
+                Rectangle {
+                    visible: backend.filmShots.length > 0
+                    Layout.fillWidth: true
+                    // Short enough that the shots below still fit the window.
+                    Layout.preferredHeight: Math.min(width * 9 / 16, win.height * .3)
+                    color: "black"
+                    radius: 4
+                    Image {
+                        anchors.fill: parent
+                        fillMode: Image.PreserveAspectFit
+                        cache: false
+                        source: backend.filmPicture > 0 ? "image://film/" + backend.filmPicture : ""
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        visible: backend.filmPicture === 0
+                        text: "Drawing the film…"
+                        color: win.muted
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: backend.toggleFilmPlay() }
+                }
+                RowLayout {
+                    visible: backend.filmShots.length > 0
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ToolButton {
+                        text: backend.filmPlaying ? "❚❚" : "▶"
+                        onClicked: backend.toggleFilmPlay()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Play or pause the film (Space)"
+                    }
+                    Slider {
+                        id: filmScrub
+                        Layout.fillWidth: true
+                        from: 0
+                        to: Math.max(.01, backend.filmDuration)
+                        value: backend.filmTime
+                        onMoved: { backend.stopFilmPreview(); backend.showFilmAt(value) }
+                    }
+                    Label {
+                        text: backend.filmTime.toFixed(1) + " / " + backend.filmDuration.toFixed(1) + " s"
+                        color: win.muted
+                        font.pixelSize: 12
+                    }
+                }
+                Connections {
+                    target: backend
+                    // Shots changed while it's open: shown again as they are now.
+                    function onFilmChanged() { if (win.filmVisible && !backend.filmPlaying) backend.showFilmAt(backend.filmTime) }
+                }
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
@@ -1223,7 +1277,7 @@ ApplicationWindow {
                         onClicked: { win.filmVisible = false; backend.exportFilm() }
                     }
                 }
-                Label { text: "Ctrl+Shift+F or Esc closes   ·   omotion film renders it from the command line"; color: win.muted }
+                Label { text: "Space plays   ·   Ctrl+Shift+F or Esc closes   ·   omotion film renders it from the command line"; color: win.muted }
             }
         }
     }

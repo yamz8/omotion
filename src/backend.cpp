@@ -53,6 +53,17 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     });
 
     // Saves are batched, so a drag writes the file a few times, not per pixel.
+    // A film plays as fast as its frames draw, keeping to the clock.
+    m_filmTimer.setInterval(15);
+    connect(&m_filmTimer, &QTimer::timeout, this, [this] {
+        if (!m_preview)
+            return stopFilmPreview();
+        m_filmTime = std::min(m_preview->duration(), m_filmFrom + m_filmClock.elapsed() / 1000.0);
+        if (m_filmTime >= m_preview->duration())
+            m_filmTimer.stop();
+        emit filmPreviewChanged();
+        drawFilm(m_filmTime);
+    });
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(250);
     connect(&m_saveTimer, &QTimer::timeout, this, &Backend::save);
@@ -564,6 +575,79 @@ void Backend::exportFilm() {
         return setError(m_exporter.error());
     m_exportProgress = 0;
     emit exportChanged();
+}
+
+bool Backend::previewFilm() {
+    if (!hasProject())
+        return false;
+    flush();
+    QFile file(filmPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QString from = QString::fromUtf8(file.readAll());
+    const QDir here = QFileInfo(filmPath()).absoluteDir();
+    for (const QJsonValue &shot : readFilm().value("shots").toArray())
+        from += "|" + QString::number(QFileInfo(here.filePath(shot.toObject().value("project").toString() + "/scene.json")).lastModified().toMSecsSinceEpoch());
+    if (m_preview && from == m_previewMadeFrom)
+        return true;
+    auto film = std::make_shared<Film>();
+    QString error;
+    if (!film->load(filmPath(), &error)) {
+        setError(error);
+        return false;
+    }
+    m_preview = film;
+    m_previewMadeFrom = from;
+    return true;
+}
+
+double Backend::filmDuration() const { return m_preview ? m_preview->duration() : 0; }
+
+void Backend::drawFilm(double t) {
+    // A frame a turn of the event loop, on this thread, as exports draw: a
+    // world's 3D can't be drawn from another. Asked again while one waits,
+    // only the latest is drawn.
+    m_filmWanted = t;
+    if (m_filmDrawing)
+        return;
+    m_filmDrawing = true;
+    QTimer::singleShot(0, this, [this] {
+        m_filmDrawing = false;
+        if (!m_preview || m_filmWanted < 0)
+            return;
+        const double at = m_filmWanted;
+        m_filmWanted = -1;
+        m_filmPicture = m_preview->frame(at, m_preview->size().scaled(QSize(640, 640), Qt::KeepAspectRatio));
+        ++m_filmPictures;
+        emit filmPreviewChanged();
+    });
+}
+
+void Backend::showFilmAt(double t) {
+    if (!previewFilm())
+        return;
+    m_filmTime = std::clamp(t, 0.0, m_preview->duration());
+    emit filmPreviewChanged();
+    drawFilm(m_filmTime);
+}
+
+void Backend::toggleFilmPlay() {
+    if (m_filmTimer.isActive())
+        return stopFilmPreview();
+    if (!previewFilm())
+        return;
+    // From the start again when it had played to the end.
+    if (m_filmTime >= m_preview->duration() - 1e-3)
+        m_filmTime = 0;
+    m_filmFrom = m_filmTime;
+    m_filmClock.start();
+    m_filmTimer.start();
+    emit filmPreviewChanged();
+}
+
+void Backend::stopFilmPreview() {
+    m_filmTimer.stop();
+    emit filmPreviewChanged();
 }
 
 QString Backend::agentProgram() {

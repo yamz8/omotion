@@ -2565,6 +2565,20 @@ private slots:
         Film film;
         QString error;
         QVERIFY2(film.load(backend.filmPath(), &error), qPrintable(error));
+
+        // Shown in its panel: a picture drawn away from the window, and
+        // played against the clock.
+        backend.addToFilm();
+        backend.showFilmAt(.1);
+        QTRY_VERIFY(backend.filmPictureCount() > 0);
+        QVERIFY(!backend.filmPicture().isNull());
+        QVERIFY(backend.filmPicture().width() <= 640);
+        QCOMPARE(backend.filmDuration(), film.duration() * 2);
+        backend.toggleFilmPlay();
+        QVERIFY(backend.filmPlaying());
+        QTRY_VERIFY(backend.filmTime() > .3);
+        backend.stopFilmPreview();
+        QVERIFY(!backend.filmPlaying());
     }
 
     void layersBillowAndLoop() {

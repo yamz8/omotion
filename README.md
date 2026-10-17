@@ -140,6 +140,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `Shift+P` | Path: click points (or drag) for the selected layer to follow from the playhead to the end, `Enter`; `Shift+Enter` turns it with the way |
 | `Shift+T` | Track: click a point with some detail on the selected video layer; it's followed frame by frame from the playhead to the end, and an empty keyed to it, to parent things to so they stick to the footage. `omotion track` does the same (`--onto` keys a layer you have) |
 | `Shift+A` | Add an empty: a cross, a point for rigs to aim at |
+| `Ctrl+Shift+F` | Film: the shots beside this project, played in the panel (`Space` plays, the slider scrubs), their transitions, their order, and export |
 | `Shift+B` | Draw, as Grease Pencil does: drag to draw strokes on the selected drawing layer (or a new one), the wheel sizes the pen, right-click takes back a stroke. What's drawn at a frame shows until the next drawing, so moving the playhead and drawing again animates it frame by frame; the drawing before shows faintly. The layer moves, turns and follows like any |
 | Rig | In the inspector: *Reach with* a child makes a two-bone arm (IK) that bends to reach for a new empty; *Look at* turns the layer toward another; *Roll on* makes a wheel turn as the body it's on goes. `omotion rig` does the same |
 | `B` | Blend the layer: normal, add, screen, multiply, overlay, lighten, darken |
@@ -177,9 +178,10 @@ again over `length`). The film is the first shot's size unless it says
 for half size), or look at a moment with `--frame <seconds> frame.png`.
 Each shot's sound (its stretch of its track, at its volume) plays where
 the shot is, mixed into MP4 and WebM. In the window, `Ctrl+Shift+F` shows
-the film beside the open project (`film.json` in the folder of projects):
-add this project as a shot, pick each shot's transition and its length,
-reorder them, and export the film into `renders/film.mp4`.
+the film beside the open project (`film.json` in the folder of projects),
+playing as it will export: add this project as a shot, pick each shot's
+transition and its length, reorder them, and export the film into
+`renders/film.mp4`.
 
 ## Saying what you want
 

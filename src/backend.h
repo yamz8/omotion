@@ -109,6 +109,12 @@ class Backend : public QObject {
     // project, from, to, transition, length, and whether it's this one.
     Q_PROPERTY(QString filmPath READ filmPath NOTIFY filmChanged)
     Q_PROPERTY(QVariantList filmShots READ filmShots NOTIFY filmChanged)
+    // The film played in its panel: where, how long, whether it plays, and
+    // a count that goes up with each new picture (image://film/<count>).
+    Q_PROPERTY(double filmTime READ filmTime NOTIFY filmPreviewChanged)
+    Q_PROPERTY(double filmDuration READ filmDuration NOTIFY filmPreviewChanged)
+    Q_PROPERTY(bool filmPlaying READ filmPlaying NOTIFY filmPreviewChanged)
+    Q_PROPERTY(int filmPicture READ filmPictureCount NOTIFY filmPreviewChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -355,6 +361,15 @@ public:
     Q_INVOKABLE void moveShot(int shot, int direction);
     Q_INVOKABLE void removeShot(int shot);
     Q_INVOKABLE void exportFilm();
+    // The film's frame at a time, drawn small for its panel; play and stop.
+    Q_INVOKABLE void showFilmAt(double t);
+    Q_INVOKABLE void toggleFilmPlay();
+    Q_INVOKABLE void stopFilmPreview();
+    double filmTime() const { return m_filmTime; }
+    double filmDuration() const;
+    bool filmPlaying() const { return m_filmTimer.isActive(); }
+    int filmPictureCount() const { return m_filmPictures; }
+    QImage filmPicture() const { return m_filmPicture; }
     // Hands words to the agent, with what's selected and the playhead;
     // stopping it puts everything back. Its changes are one undo step, kept
     // or taken back when it's done.
@@ -525,6 +540,7 @@ signals:
     void viewChanged();
     void agentChanged();
     void filmChanged();
+    void filmPreviewChanged();
 
 private:
     void setError(const QString &error);
@@ -649,6 +665,20 @@ private:
     QJsonObject readFilm() const;
     bool writeFilm(const QJsonObject &film);
     std::shared_ptr<class Film> m_film;
+    // The film as previewed, and what it was loaded from (the film file and
+    // when each shot was saved), to load it again when either changes.
+    std::shared_ptr<class Film> m_preview;
+    QString m_previewMadeFrom;
+    bool previewFilm();
+    void drawFilm(double t);
+    QImage m_filmPicture;
+    int m_filmPictures = 0;
+    double m_filmTime = 0;
+    bool m_filmDrawing = false;
+    double m_filmWanted = -1;
+    QTimer m_filmTimer;
+    QElapsedTimer m_filmClock;
+    double m_filmFrom = 0;
     QString m_filmOutput;
     QProcess *m_agent = nullptr;
     Scene m_agentBefore;

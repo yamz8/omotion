@@ -86,13 +86,13 @@ transitions and sound; drawing frame by frame; shape modifiers; lights and
 materials; video layers and tracking; imported models; billowing layers.
 
 Done since: bodies tumble (spin from knocks and the ground, rest on a
-side); models in glTF exports and in physics.
+side); models in glTF exports and in physics; films previewed in the
+window.
 
 Still to do there: a dope sheet with a row a property; NLA clips that
 blend and fade; collisions with shapes rather than boxes; 3D particles
 beyond dust; cloth and real fluids; light probes and shadows from added
-lights; video tracking with several points (to solve a camera); films
-previewed in the window.
+lights; video tracking with several points (to solve a camera).
 
 ## Realism (folded into the world)
 

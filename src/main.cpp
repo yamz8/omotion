@@ -10,6 +10,7 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickImageProvider>
 #include <QQuickStyle>
 #include <QTextStream>
 #include <QUrl>
@@ -1108,6 +1109,23 @@ int command(const QStringList &args) {
 
 }
 
+namespace {
+// The film's latest picture, for its panel: image://film/<count>.
+class FilmPictures : public QQuickImageProvider {
+public:
+    explicit FilmPictures(Backend *backend) : QQuickImageProvider(QQuickImageProvider::Image), m_backend(backend) {}
+    QImage requestImage(const QString &, QSize *size, const QSize &) override {
+        const QImage picture = m_backend->filmPicture();
+        if (size)
+            *size = picture.size();
+        return picture;
+    }
+
+private:
+    Backend *m_backend;
+};
+}
+
 int main(int argc, char *argv[]) {
     const bool headless = argc > 1 && (!std::strcmp(argv[1], "render") || !std::strcmp(argv[1], "frame") ||
                                        !std::strcmp(argv[1], "cut") || !std::strcmp(argv[1], "split") || !std::strcmp(argv[1], "clean") ||
@@ -1214,6 +1232,7 @@ int main(int argc, char *argv[]) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.addImageProvider("film", new FilmPictures(&backend));
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
