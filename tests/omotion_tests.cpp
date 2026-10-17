@@ -2432,6 +2432,45 @@ private slots:
         QVERIFY(Project::track(scene, assets, 0, QPointF(37, 47), 0, 1, &error) < 0);
     }
 
+    void modelsStandInTheWorld() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        // A box 2 units across and 4 tall, standing on its origin.
+        writeText(dir.filePath("box.obj"), "v -1 0 -1\nv 1 0 -1\nv 1 0 1\nv -1 0 1\nv -1 4 -1\nv 1 4 -1\nv 1 4 1\nv -1 4 1\n"
+                                           "f 1 2 3 4\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n");
+        QVector3D low, high;
+        QVERIFY(World::modelBounds(dir.filePath("box.obj"), &low, &high));
+        QCOMPARE(high - low, QVector3D(2, 4, 2));
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        QVERIFY(Project::isModel(dir.filePath("box.obj")));
+        const int box = Project::importModel(scene, project, dir.filePath("box.obj"), QVector3D(0, 0, 6), 2, &error);
+        QVERIFY2(box >= 0, qPrintable(error));
+        QVERIFY(QFile::exists(QDir(project).filePath(scene.layers[box].raw["model"].toObject()["file"].toString())));
+        // 2 m tall, its bottom's middle on its point, 6 m ahead.
+        QList<QVector3D> corners;
+        QVector3D pivot;
+        QVERIFY(World::box(scene, assets, box, 0, &corners, &pivot));
+        QVector3D a = corners.first(), b = corners.first();
+        for (const QVector3D &c : corners)
+            for (int k = 0; k < 3; ++k)
+                a[k] = std::min(a[k], c[k]), b[k] = std::max(b[k], c[k]);
+        QVERIFY(std::abs((b - a).y() - 2) < 1e-4);
+        const QVector3D eye = World::pictureToWorld(World::info(scene)).map(QVector3D());
+        QVERIFY(std::abs(a.y() - eye.y()) < 1e-4);
+        QVERIFY(std::abs((a + b).z() / 2 - (eye.z() - 6)) < 1e-4);
+        // Picked where it stands, in front of the picture.
+        const World::View shot = World::cameraView(World::frame(scene, assets, 0));
+        QPointF at;
+        QVERIFY(World::project(shot, QSizeF(400, 200), (a + b) / 2, &at));
+        QCOMPARE(World::pick(scene, assets, 0, shot, QSizeF(400, 200), at), box);
+        // It goes through scene.json, and is a model in the outliner.
+        QVERIFY(Scene::fromJson(scene.toJson(), &error).layers.size() == scene.layers.size());
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(!Project::isModel(dir.filePath("box.png")));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

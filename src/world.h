@@ -117,6 +117,10 @@ struct Placement {
     float scale = 1;
     float opacity = 1;
     bool visible = true;
+    // An imported model's file, and where its own origin goes so it stands
+    // on its point (in its units, before scale).
+    QString model;
+    QVector3D offset;
     // Its material, under the lights: how much it shines, how rough.
     float shine = 0;
     float roughness = .5f;
@@ -153,6 +157,12 @@ struct Light {
     float reach = 10;  // Meters, where it's down to a half.
 };
 QList<int> lightLayers(const Scene &scene);
+// Imported 3D models (a layer's "model": its file, and how tall it is in
+// meters, "size"): standing at their world properties' point from the
+// picture's camera, turned by yaw, pitch and roll, as bright as their
+// opacity; and the box a model file's points fill, in its own units.
+QList<int> modelLayers(const Scene &scene);
+bool modelBounds(const QString &path, QVector3D *low, QVector3D *high);
 QVector3D lightPosition(const Scene &scene, int index, double t);
 struct Frame {
     double time = 0;
@@ -166,6 +176,8 @@ struct Frame {
     QQuaternion cameraRotation;
     double fov = 40;  // Vertical, in degrees.
     QList<Placement> layers;
+    // Imported models where they are.
+    QList<Placement> models;
 };
 Frame frame(const Scene &scene, AssetCache &assets, double t);
 // A way of looking at the world: the shot's camera, or the window's free

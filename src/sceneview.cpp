@@ -368,7 +368,8 @@ void SceneView::paint(QPainter *painter) {
     painter->drawRect(canvas);
 
     // A world's pieces are outlined where they are in 3D, with handles.
-    const bool inWorld = m_backend->world()->active() && (World::layers(scene).contains(selected) || World::lightLayers(scene).contains(selected));
+    const bool inWorld = m_backend->world()->active() && (World::layers(scene).contains(selected) || World::lightLayers(scene).contains(selected) ||
+                                                          World::modelLayers(scene).contains(selected));
     if (inWorld || (m_backend->world()->active() && !World::lightLayers(scene).isEmpty()))
         paintGizmo(painter);
     if (!inWorld && selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&

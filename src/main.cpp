@@ -79,6 +79,9 @@ const char *Usage = R"(Usage:
   omotion track <project> <video-layer> <x,y> [--from <s>] [--to <s>] [--onto <layer>]
                                          Follow the point of a video under x,y (canvas pixels) frame
                                          by frame, and key a layer (or a new empty) to follow it
+  omotion model <project> <file> <right,up,ahead> [--size <meters>]
+                                         Import a 3D model (glTF, GLB or OBJ) into a world, standing
+                                         there, that tall at its longest
   omotion light <project> <name> <right,up,ahead> [--color <c>] [--power <n>] [--reach <m>]
   omotion light <project> <name> [--color <c>] [--power <n>] [--reach <m>]
                                          Add a light to a world (meters from the picture's camera),
@@ -648,6 +651,23 @@ int command(const QStringList &args) {
         return 0;
     }
 
+    if (args.at(1) == "model") {
+        if (args.size() < 5)
+            return fail("model takes a project, a file and right,up,ahead.");
+        if (!World::info(scene).valid)
+            return fail("A 3D model goes into a world: make one first (omotion world).");
+        const QStringList at = args.at(4).split(',');
+        if (at.size() != 3)
+            return fail("Where it stands: right,up,ahead in meters.");
+        const double size = args.size() >= 7 && args.at(5) == "--size" ? args.at(6).toDouble() : 1;
+        Scene edited = scene;
+        const int layer = Project::importModel(edited, directory, args.at(3), QVector3D(at.at(0).toFloat(), at.at(1).toFloat(), at.at(2).toFloat()), size, &error);
+        if (layer < 0 || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << edited.layers.at(layer).name << "\n";
+        return 0;
+    }
+
     if (args.at(1) == "track") {
         if (args.size() < 5)
             return fail("track takes a project, a video layer and x,y.");
@@ -1067,7 +1087,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "rig") || !std::strcmp(argv[1], "modifier") || !std::strcmp(argv[1], "body") || !std::strcmp(argv[1], "look") || !std::strcmp(argv[1], "mesh") || !std::strcmp(argv[1], "light") || !std::strcmp(argv[1], "video") || !std::strcmp(argv[1], "track") || !std::strcmp(argv[1], "model") || !std::strcmp(argv[1], "material") || !std::strcmp(argv[1], "film") || !std::strcmp(argv[1], "simulate") || !std::strcmp(argv[1], "clip") || !std::strcmp(argv[1], "empty") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

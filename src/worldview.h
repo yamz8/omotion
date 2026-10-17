@@ -24,6 +24,8 @@ class WorldSource : public QObject {
     Q_PROPERTY(QVariantList layers READ layers NOTIFY changed)
     // The camera and every layer's place at the current time.
     Q_PROPERTY(QVariantMap frame READ frame NOTIFY frameChanged)
+    // Imported models: their layer and file, changing only with the scene.
+    Q_PROPERTY(QVariantList models READ models NOTIFY changed)
     // Bumped when meshes need building again.
     Q_PROPERTY(int revision READ revision NOTIFY changed)
 
@@ -38,6 +40,7 @@ public:
 
     bool active() const { return m_info.valid; }
     QVariantList layers() const { return m_layers; }
+    QVariantList models() const { return m_models; }
     QVariantMap frame() const { return m_frame; }
     int revision() const { return m_revision; }
     const World::Mesh &mesh(int layer);
@@ -56,6 +59,7 @@ private:
     std::unique_ptr<AssetCache> m_assets = std::make_unique<AssetCache>();
     World::Info m_info;
     QVariantList m_layers;
+    QVariantList m_models;
     QVariantMap m_frame;
     QHash<int, World::Mesh> m_meshes;
     QByteArray m_dustVertices;

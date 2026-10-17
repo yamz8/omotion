@@ -307,6 +307,8 @@ public:
     Q_INVOKABLE void addLight();
     Q_INVOKABLE void setLightValue(const QString &name, const QVariant &value);
     Q_INVOKABLE void setMaterial(const QString &name, double value);
+    // How tall the selected imported model is, in meters, at its longest.
+    Q_INVOKABLE void setModelSize(double meters);
     // The selected piece's shape's modifiers (World::setShapeModifier).
     Q_INVOKABLE void setShapeModifier(const QString &type, int amount);
     // Rigs the selected layer (see Project::rig: "ik", "lookAt", "wheel"),

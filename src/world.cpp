@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <functional>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -983,6 +984,30 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
 
     frame.time = t;
     frame.haze = world.haze;
+    for (const int index : modelLayers(scene)) {
+        const Layer &layer = scene.layers.at(index);
+        const QJsonObject model = layer.raw.value("model").toObject();
+        QVector3D low, high;
+        const QString file = QDir(assets.directory()).filePath(model.value("file").toString());
+        if (!modelBounds(file, &low, &high))
+            continue;
+        Placement place;
+        place.layer = index;
+        place.model = file;
+        place.visible = layer.visible;
+        place.opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
+        // Standing on its point: the middle of its bottom there, as tall as
+        // its size says.
+        const float tallest = std::max({high.x() - low.x(), high.y() - low.y(), high.z() - low.z(), 1e-6f});
+        place.scale = float(std::max(.001, model.value("size").toDouble(1))) / tallest;
+        place.offset = -QVector3D((low.x() + high.x()) / 2, low.y(), (low.z() + high.z()) / 2);
+        place.rotation = turn(scene.value(layer, "yaw", t), scene.value(layer, "pitch", t), scene.value(layer, "roll", t));
+        place.position = lightPosition(scene, index, t);
+        const QJsonObject material = layer.raw.value("material").toObject();
+        place.shine = float(std::clamp(material.value("shine").toDouble(0), 0.0, 1.0));
+        place.roughness = float(std::clamp(material.value("roughness").toDouble(.5), 0.0, 1.0));
+        frame.models << place;
+    }
     for (const int index : lightLayers(scene)) {
         const Layer &layer = scene.layers.at(index);
         if (!layer.visible)
@@ -1110,6 +1135,101 @@ QList<int> lightLayers(const Scene &scene) {
     return list;
 }
 
+QList<int> modelLayers(const Scene &scene) {
+    QList<int> list;
+    for (int i = 0; i < scene.layers.size(); ++i)
+        if (scene.layers.at(i).raw.contains("model"))
+            list << i;
+    return list;
+}
+
+bool modelBounds(const QString &path, QVector3D *low, QVector3D *high) {
+    static QHash<QString, QPair<QVector3D, QVector3D>> cache;
+    const QString key = path + "|" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    {
+        QMutexLocker lock(&cacheLock);
+        if (cache.contains(key)) {
+            *low = cache.value(key).first;
+            *high = cache.value(key).second;
+            return true;
+        }
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QVector3D a(1e30f, 1e30f, 1e30f), b(-1e30f, -1e30f, -1e30f);
+    auto grow = [&](const QVector3D &p) {
+        for (int k = 0; k < 3; ++k)
+            a[k] = std::min(a[k], p[k]), b[k] = std::max(b[k], p[k]);
+    };
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == "obj") {
+        while (!file.atEnd()) {
+            const QByteArray line = file.readLine().trimmed();
+            if (!line.startsWith("v "))
+                continue;
+            const QList<QByteArray> parts = line.simplified().split(' ');
+            if (parts.size() >= 4)
+                grow(QVector3D(parts.at(1).toFloat(), parts.at(2).toFloat(), parts.at(3).toFloat()));
+        }
+    } else {
+        // glTF: each mesh's position box, through the nodes above it.
+        QByteArray text = file.readAll();
+        if (suffix == "glb") {
+            if (text.size() < 20 || !text.startsWith("glTF"))
+                return false;
+            const quint32 length = *reinterpret_cast<const quint32 *>(text.constData() + 12);
+            text = text.mid(20, length);
+        }
+        const QJsonObject gltf = QJsonDocument::fromJson(text).object();
+        const QJsonArray nodes = gltf.value("nodes").toArray(), meshes = gltf.value("meshes").toArray(),
+                         accessors = gltf.value("accessors").toArray();
+        std::function<void(int, const QMatrix4x4 &)> visit = [&](int index, const QMatrix4x4 &above) {
+            const QJsonObject node = nodes.at(index).toObject();
+            QMatrix4x4 local;
+            const QJsonArray m = node.value("matrix").toArray();
+            if (m.size() == 16) {
+                float values[16];
+                for (int k = 0; k < 16; ++k)
+                    values[k] = float(m.at(k).toDouble());
+                local = QMatrix4x4(values).transposed();  // glTF's are column by column.
+            } else {
+                const QJsonArray tr = node.value("translation").toArray(), r = node.value("rotation").toArray(), sc = node.value("scale").toArray();
+                if (tr.size() == 3)
+                    local.translate(float(tr.at(0).toDouble()), float(tr.at(1).toDouble()), float(tr.at(2).toDouble()));
+                if (r.size() == 4)
+                    local.rotate(QQuaternion(float(r.at(3).toDouble()), float(r.at(0).toDouble()), float(r.at(1).toDouble()), float(r.at(2).toDouble())));
+                if (sc.size() == 3)
+                    local.scale(float(sc.at(0).toDouble()), float(sc.at(1).toDouble()), float(sc.at(2).toDouble()));
+            }
+            const QMatrix4x4 world = above * local;
+            if (node.contains("mesh"))
+                for (const QJsonValue &primitive : meshes.at(node.value("mesh").toInt()).toObject().value("primitives").toArray()) {
+                    const QJsonObject accessor = accessors.at(primitive.toObject().value("attributes").toObject().value("POSITION").toInt(-1)).toObject();
+                    const QJsonArray mn = accessor.value("min").toArray(), mx = accessor.value("max").toArray();
+                    if (mn.size() != 3 || mx.size() != 3)
+                        continue;
+                    for (int c = 0; c < 8; ++c)
+                        grow(world.map(QVector3D(float((c & 1 ? mx : mn).at(0).toDouble()), float((c & 2 ? mx : mn).at(1).toDouble()),
+                                                 float((c & 4 ? mx : mn).at(2).toDouble()))));
+                }
+            for (const QJsonValue &child : node.value("children").toArray())
+                visit(child.toInt(), world);
+        };
+        const QJsonArray scenes = gltf.value("scenes").toArray();
+        const QJsonArray roots = scenes.at(gltf.value("scene").toInt(0)).toObject().value("nodes").toArray();
+        for (const QJsonValue &root : roots)
+            visit(root.toInt(), QMatrix4x4());
+    }
+    if (a.x() > b.x())
+        return false;
+    *low = a;
+    *high = b;
+    QMutexLocker lock(&cacheLock);
+    cache.insert(key, qMakePair(a, b));
+    return true;
+}
+
 QVector3D lightPosition(const Scene &scene, int index, double t) {
     const Layer &layer = scene.layers.at(index);
     return pictureToWorld(info(scene)).map(QVector3D(0, 0, 0)) +
@@ -1162,6 +1282,32 @@ int pick(const Scene &scene, AssetCache &assets, double t, const View &view, con
     const Frame now = frame(scene, assets, t);
     int found = -1;
     float nearest = std::numeric_limits<float>::max();
+    // Models by their boxes: the ray brought into a model's own units.
+    for (const Placement &model : now.models) {
+        QVector3D low, high;
+        if (!model.visible || model.opacity <= 0 || !modelBounds(model.model, &low, &high))
+            continue;
+        const QQuaternion back = model.rotation.inverted();
+        const QVector3D o = back.rotatedVector(origin - model.position) / model.scale - model.offset;
+        const QVector3D d = back.rotatedVector(direction) / model.scale;
+        float enter = -1e30f, leave = 1e30f;
+        bool miss = false;
+        for (int k = 0; k < 3 && !miss; ++k) {
+            if (std::abs(d[k]) < 1e-12f) {
+                miss = o[k] < low[k] || o[k] > high[k];
+                continue;
+            }
+            float a = (low[k] - o[k]) / d[k], b = (high[k] - o[k]) / d[k];
+            if (a > b)
+                std::swap(a, b);
+            enter = std::max(enter, a), leave = std::min(leave, b);
+        }
+        if (miss || enter > leave || leave < 0)
+            continue;
+        const float distance = std::max(0.f, enter);
+        if (distance < nearest)
+            nearest = distance, found = model.layer;
+    }
     for (const Placement &place : now.layers) {
         if (!place.visible || place.opacity <= 0)
             continue;
@@ -1206,6 +1352,20 @@ int pick(const Scene &scene, AssetCache &assets, double t, const View &view, con
 
 bool box(const Scene &scene, AssetCache &assets, int index, double t, QList<QVector3D> *corners, QVector3D *pivot) {
     const Frame now = frame(scene, assets, t);
+    for (const Placement &model : now.models) {
+        if (model.layer != index)
+            continue;
+        QVector3D low, high;
+        if (!modelBounds(model.model, &low, &high))
+            return false;
+        corners->clear();
+        for (int k = 0; k < 8; ++k) {
+            const QVector3D own(k & 1 ? high.x() : low.x(), k & 2 ? high.y() : low.y(), k & 4 ? high.z() : low.z());
+            corners->append(model.position + model.rotation.rotatedVector((own + model.offset) * model.scale));
+        }
+        *pivot = model.position;
+        return true;
+    }
     for (const Placement &place : now.layers) {
         if (place.layer != index)
             continue;

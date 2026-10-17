@@ -372,6 +372,15 @@ Rectangle {
                 }
             }
 
+            // An imported model's size.
+            RowLayout {
+                visible: backend.selected >= 0 && Object.keys(inspector.v.model || {}).length > 0
+                Layout.fillWidth: true
+                spacing: 8
+                Label { text: "Size m"; color: win.text; Layout.preferredWidth: 90 }
+                NumberField { Layout.fillWidth: true; value: (inspector.v.model || {}).size || 1; onCommitted: function (n) { backend.setModelSize(n) } }
+            }
+
             // A light: its colour, power and reach.
             ColumnLayout {
                 visible: backend.selected >= 0 && Object.keys(inspector.v.light || {}).length > 0

@@ -79,7 +79,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Key | Does |
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
-| `I` | Add an image as a layer, or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
+| `I` | Add an image as a layer, a 3D model (glTF, GLB, OBJ, FBX and more) into a world, standing in front of the camera (moved and turned by its handles, its size in the inspector; `omotion model`), or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
 | `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF, PNG frames, or glTF for Blender (`H` there for half size) |
@@ -350,6 +350,10 @@ photo.omotion/
 - A layer with **`drawing`** has no `source`: `{"frames": [{"t", "strokes":
   [{"color", "width", "points": [[x, y], ...]}]}]}`, points in the layer's
   pixels; each frame shows from its `t` until the next.
+- A layer with **`model`** (no `source`) is an imported 3D model in a world:
+  `{"file", "size"}` (meters at its longest), standing at its `worldX`,
+  `worldY` and `worldZ` from the picture's camera, turned by `yaw`, `pitch`
+  and `roll`. Loading them needs `assimp`, which omotion's package brings.
 - A layer with **`light`** (no `source`) lights a world: `{"color", "power",
   "reach"}` (meters, where it's half as bright), placed by its `worldX`,
   `worldY` and `worldZ` from the picture's camera, dimmed by its opacity. A

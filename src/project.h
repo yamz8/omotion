@@ -206,6 +206,13 @@ QList<int> rankMatches(const QString &query, const QStringList &names);
 bool isVideo(const QString &path);
 int importVideo(Scene &scene, const QString &directory, const QString &path, QString *error, int max = 3000);
 
+// A 3D model (glTF, GLB or OBJ) into a world, as Blender imports them:
+// copied into the project (with the files a glTF or OBJ names), standing at
+// a point in meters (right, up, ahead of the picture's camera), size meters
+// at its longest. Its index, or -1.
+bool isModel(const QString &path);
+int importModel(Scene &scene, const QString &directory, const QString &path, const QVector3D &at, double size, QString *error);
+
 // A video layer's "start" (seconds into the scene), "speed" or "loop".
 bool setVideo(Scene &scene, int layer, const QString &name, const QVariant &value, QString *error);
 

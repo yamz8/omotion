@@ -15,6 +15,7 @@
 #include <QStandardPaths>
 #include <QSaveFile>
 #include <QSet>
+#include <QUrl>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -2387,6 +2388,68 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
         follower.keys[property] = keys;
     }
     return target;
+}
+
+bool isModel(const QString &path) {
+    static const QStringList kinds{"glb", "gltf", "obj"};
+    return kinds.contains(QFileInfo(path).suffix().toLower());
+}
+
+int importModel(Scene &scene, const QString &directory, const QString &path, const QVector3D &at, double size, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return -1;
+    };
+    if (!isModel(path) || !QFileInfo::exists(path))
+        return fail(QString("%1 isn't a model omotion reads (glTF, GLB or OBJ).").arg(path));
+    const QDir dir(directory), from = QFileInfo(path).absoluteDir();
+    const QString stem = QFileInfo(path).completeBaseName();
+    QString folder = "assets/model-" + stem;
+    for (int n = 2; dir.exists(folder); ++n)
+        folder = QString("assets/model-%1-%2").arg(stem).arg(n);
+    dir.mkpath(folder);
+    // The file, and what it names beside it: a glTF's buffers and images,
+    // an OBJ's materials and their pictures.
+    QStringList files{QFileInfo(path).fileName()};
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        const QByteArray bytes = file.readAll();
+        const QString suffix = QFileInfo(path).suffix().toLower();
+        if (suffix == "gltf") {
+            const QJsonObject gltf = QJsonDocument::fromJson(bytes).object();
+            for (const QString &list : {"buffers", "images"})
+                for (const QJsonValue &item : gltf.value(list).toArray()) {
+                    const QString uri = item.toObject().value("uri").toString();
+                    if (!uri.isEmpty() && !uri.startsWith("data:"))
+                        files << QUrl::fromPercentEncoding(uri.toUtf8());
+                }
+        } else if (suffix == "obj") {
+            for (const QByteArray &line : bytes.split('\n'))
+                if (line.trimmed().startsWith("mtllib ")) {
+                    const QString library = QString::fromUtf8(line.trimmed().mid(7)).trimmed();
+                    files << library;
+                    QFile mtl(from.filePath(library));
+                    if (mtl.open(QIODevice::ReadOnly))
+                        for (const QByteArray &m : mtl.readAll().split('\n'))
+                            if (m.trimmed().startsWith("map_"))
+                                files << QString::fromUtf8(m.trimmed().split(' ').last());
+                }
+        }
+    }
+    for (const QString &name : files) {
+        dir.mkpath(QFileInfo(dir.filePath(folder + "/" + name)).absolutePath());
+        if (!QFile::copy(from.filePath(name), dir.filePath(folder + "/" + name)) && name == files.first())
+            return fail(QString("Couldn't copy %1 into the project.").arg(path));
+    }
+    Layer layer;
+    layer.name = scene.uniqueName(stem);
+    layer.base["worldX"] = at.x();
+    layer.base["worldY"] = at.y();
+    layer.base["worldZ"] = at.z();
+    layer.raw["model"] = QJsonObject{{"file", folder + "/" + files.first()}, {"size", size > 0 ? size : 1}};
+    scene.layers.append(layer);
+    return int(scene.layers.size()) - 1;
 }
 
 }

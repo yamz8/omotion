@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick3D
 import QtQuick3D.Helpers
+import QtQuick3D.AssetUtils
 import Omotion
 
 // A scene's world in 3D: each world layer's mesh with its picture on it, put
@@ -45,6 +46,47 @@ Item {
             fieldOfViewOrientation: PerspectiveCamera.Vertical
             clipNear: 0.05
             clipFar: 5000
+        }
+
+        // Imported models wear their own materials, which want light: a
+        // soft sun from the picture's sky, and the scene's lights.
+        DirectionalLight {
+            visible: (view.source ? view.source.models.length : 0) > 0
+            eulerRotation: Qt.vector3d(-55, -30, 0)
+            brightness: 0.9
+            ambientColor: Qt.rgba(0.45, 0.42, 0.45, 1)
+        }
+        Repeater3D {
+            model: view.source && view.source.models.length > 0 ? (view.frame.lights || []) : []
+            delegate: PointLight {
+                required property var modelData
+                position: modelData.position
+                // Its colour times its power, as a brightness and a hue.
+                readonly property real power: Math.max(modelData.colour.x, modelData.colour.y, modelData.colour.z)
+                color: power > 0 ? Qt.rgba(modelData.colour.x / power, modelData.colour.y / power, modelData.colour.z / power, 1) : "black"
+                brightness: power
+                quadraticFade: 1 / Math.max(0.01, modelData.reach * modelData.reach)
+                linearFade: 0
+                constantFade: 1
+            }
+        }
+        Repeater3D {
+            model: view.source ? view.source.models : []
+            delegate: Node {
+                id: placed
+                required property var modelData
+                readonly property var place: (view.frame.places || {})[String(modelData.layer)] || ({})
+                readonly property real size: place.scale === undefined ? 1 : place.scale
+                position: place.position || Qt.vector3d(0, 0, 0)
+                rotation: place.rotation || Qt.quaternion(1, 0, 0, 0)
+                scale: Qt.vector3d(size, size, size)
+                visible: place.visible !== false && (place.opacity === undefined || place.opacity > 0)
+                opacity: place.opacity === undefined ? 1 : place.opacity
+                RuntimeLoader {
+                    source: placed.modelData.source
+                    position: placed.place.offset || Qt.vector3d(0, 0, 0)
+                }
+            }
         }
 
         // Shadows on the ground, under the layers (drawn before them).

@@ -180,6 +180,9 @@ QVariantList Backend::outliner() const {
         if (layer.raw.value("empty").toBool()) {
             kind = "empty";
             detail = "empty";
+        } else if (layer.raw.contains("model")) {
+            kind = "model";
+            detail = "3D model";
         } else if (layer.raw.contains("light")) {
             kind = "light";
             detail = "light";
@@ -651,6 +654,16 @@ void Backend::addLight() {
     setNotice("A light: move it with its arrows (or G), set its colour, power and reach in the inspector; its opacity dims it, and keys.");
 }
 
+void Backend::setModelSize(double meters) {
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("model") || !(meters > 0))
+        return;
+    checkpoint();
+    QJsonObject model = m_scene.layers.at(m_selected).raw.value("model").toObject();
+    model["size"] = meters;
+    m_scene.layers[m_selected].raw["model"] = model;
+    changed();
+}
+
 void Backend::setLightValue(const QString &name, const QVariant &value) {
     Scene scene = m_scene;
     QString error;
@@ -852,7 +865,8 @@ QVariantMap Backend::values() const {
     }
     map.insert("animated", animated);
     map.insert("links", linkTexts(layer));
-    map.insert("inWorld", World::layers(m_scene).contains(m_selected) || layer.raw.contains("light"));
+    map.insert("inWorld", World::layers(m_scene).contains(m_selected) || layer.raw.contains("light") || layer.raw.contains("model"));
+    map.insert("model", layer.raw.value("model").toObject().toVariantMap());
     map.insert("light", layer.raw.value("light").toObject().toVariantMap());
     map.insert("material", layer.raw.value("material").toObject().toVariantMap());
     map.insert("follow", followOf(m_scene, m_selected));
@@ -981,6 +995,28 @@ bool Backend::importImage(const QString &path) {
         return open(path);
     Scene scene = m_scene;
     QString error;
+    // A 3D model goes into the world, in front of the camera.
+    if (Project::isModel(localPath(path))) {
+        if (!World::info(m_scene).valid)
+            return setError("A 3D model goes into a world: make one first (Shift+D)."), false;
+        const World::Frame now = World::frame(m_scene, m_assets, m_time);
+        const QVector3D origin = World::pictureToWorld(World::info(m_scene)).map(QVector3D(0, 0, 0));
+        QVector3D ahead = now.cameraRotation.rotatedVector(QVector3D(0, 0, -1));
+        ahead.setY(0);
+        QVector3D at = now.cameraPosition + ahead.normalized() * 5 - origin;
+        const double ground = World::groundAt(m_scene, m_assets, (origin + at).x(), (origin + at).z());
+        at.setY(std::isnan(ground) ? 0.f : float(ground - origin.y()));
+        const int index = Project::importModel(scene, m_directory, localPath(path), QVector3D(at.x(), at.y(), -at.z()), 1.5, &error);
+        if (index < 0)
+            return setError(error), false;
+        checkpoint();
+        m_scene = scene;
+        changed();
+        rearmWatcher();
+        select(index);
+        setNotice("Added " + m_scene.layers.at(index).name + ": move it with its arrows or G, turn it with its rings; its size in the inspector.");
+        return true;
+    }
     // A clip becomes a layer that plays; its frames take a moment to write.
     if (Project::isVideo(localPath(path)))
         setBusy("Reading the video's frames…");
@@ -2838,7 +2874,7 @@ QList<int> Backend::handleTargets() const {
     list << main;
     if (main != Scene::CameraIndex)
         for (const int i : m_also)
-            if (World::layers(m_scene).contains(i) || World::lightLayers(m_scene).contains(i))
+            if (World::layers(m_scene).contains(i) || World::lightLayers(m_scene).contains(i) || World::modelLayers(m_scene).contains(i))
                 list << i;
     return list;
 }
@@ -2848,7 +2884,10 @@ int Backend::handleTarget() const {
         return -1;
     if (m_cameraSelected)
         return m_freeView ? Scene::CameraIndex : -1;
-    return World::layers(m_scene).contains(m_selected) || World::lightLayers(m_scene).contains(m_selected) ? m_selected : -1;
+    return World::layers(m_scene).contains(m_selected) || World::lightLayers(m_scene).contains(m_selected) ||
+                   World::modelLayers(m_scene).contains(m_selected)
+               ? m_selected
+               : -1;
 }
 
 Backend::Gizmo Backend::gizmo() const {

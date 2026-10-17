@@ -46,12 +46,19 @@ void WorldSource::setScene(const Scene &scene, const QString &directory) {
                                     QFileInfo(path).lastModified().toMSecsSinceEpoch(), layer.raw.value("shape")});
         }
     key["layers"] = parts;
+    QVariantList models;
+    if (m_info.valid)
+        for (const int index : World::modelLayers(scene))
+            models.append(QVariantMap{{"layer", index},
+                                      {"source", QUrl::fromLocalFile(QDir(directory).filePath(
+                                                     scene.layers.at(index).raw.value("model").toObject().value("file").toString()))}});
     const QByteArray meshKey = QJsonDocument(key).toJson(QJsonDocument::Compact);
-    const bool rebuilt = meshKey != m_meshKey || layers != m_layers;
+    const bool rebuilt = meshKey != m_meshKey || layers != m_layers || models != m_models;
     if (rebuilt) {
         m_meshKey = meshKey;
         m_meshes.clear();
         m_layers = layers;
+        m_models = models;
         ++m_revision;
         emit changed();
     }
@@ -107,6 +114,13 @@ void WorldSource::update() {
                                                                      {"visible", place.visible},
                                                                      {"shine", place.shine},
                                                                      {"roughness", place.roughness}});
+        for (const World::Placement &model : f.models)
+            places.insert(QString::number(model.layer), QVariantMap{{"position", QVariant::fromValue(model.position)},
+                                                                     {"rotation", QVariant::fromValue(model.rotation)},
+                                                                     {"scale", model.scale},
+                                                                     {"offset", QVariant::fromValue(model.offset)},
+                                                                     {"opacity", model.opacity},
+                                                                     {"visible", model.visible}});
         frame["places"] = places;
         // Up to four lights, for the shaders.
         QVariantList lights;

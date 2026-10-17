@@ -82,6 +82,10 @@ PortalFileFilter imageFilter() {
             {1, QStringLiteral("video/webm")},
             {1, QStringLiteral("video/quicktime")},
             {1, QStringLiteral("video/x-matroska")},
+            // And 3D models, for a world.
+            {1, QStringLiteral("model/gltf-binary")},
+            {1, QStringLiteral("model/gltf+json")},
+            {0, QStringLiteral("*.obj")},
         },
     };
 }

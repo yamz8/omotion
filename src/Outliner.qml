@@ -17,7 +17,7 @@ Rectangle {
 
     // A mark for each kind of thing, so the tree reads at a glance.
     function mark(kind) {
-        return {"camera": "◎", "world": "◍", "picture": "▦", "piece": "▱", "shape": "▲", "particles": "✦", "image": "▭", "empty": "✛", "drawing": "✎", "light": "☀"}[kind] || "·";
+        return {"camera": "◎", "world": "◍", "picture": "▦", "piece": "▱", "shape": "▲", "particles": "✦", "image": "▭", "empty": "✛", "drawing": "✎", "light": "☀", "model": "⬢"}[kind] || "·";
     }
 
     ColumnLayout {
