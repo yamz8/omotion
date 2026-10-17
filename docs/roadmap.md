@@ -89,7 +89,7 @@ Done since: bodies tumble (turned boxes meeting the ground and each
 other with their corners: they rock, roll over, slide off slopes and rest on
 a face; with their own outlines and shapes, so round things roll); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
-property; several tracked points solving the footage's move (in its
+property (its drag fixed, found by the window's mouse test); several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
 video's frame under the playhead; shadows from added lights (casters as a few ellipsoids each,
 in the shaders); the picture as a light probe for models; the camera solved in depth

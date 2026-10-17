@@ -36,6 +36,7 @@ Rectangle {
 
         ListView {
             id: list
+            objectName: "outlinerList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

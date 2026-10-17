@@ -90,6 +90,7 @@ Rectangle {
             }
             Item {
                 id: ruler
+                objectName: "ruler"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.rightMargin: 14
@@ -392,6 +393,7 @@ Rectangle {
                         // Keyframe track.
                         Item {
                             id: track
+                            objectName: "track"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.rightMargin: 14
@@ -462,76 +464,94 @@ Rectangle {
                     }
                 }
                 // The dope sheet's rows: each property's own keys, dragged
-                // along in time on their own; right-click takes one away.
-                Repeater {
-                    model: row.selected && timeline.sheet ? backend.sheet : []
-                    delegate: Rectangle {
-                        id: sheetRow
-                        required property var modelData
-                        width: rows.width
-                        height: 20
-                        color: "#16161a"
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 0
-                            Label {
-                                Layout.preferredWidth: timeline.nameWidth
-                                leftPadding: 46
-                                text: sheetRow.modelData.property
-                                color: win.muted
-                                font.pixelSize: 12
-                            }
-                            Item {
-                                id: sheetTrack
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                Layout.rightMargin: 14
-                                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 1; color: "#26262c" }
-                                Repeater {
-                                    model: sheetRow.modelData.times
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        width: 7
-                                        height: 7
-                                        rotation: 45
-                                        x: modelData / timeline.duration * sheetTrack.width - width / 2
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: theme.accent
-                                        border.color: "#0e0e10"
-                                    }
-                                }
-                                MouseArea {
+                // along in time on their own; right-click takes one away. The
+                // mouse is caught over all of them at once, not on each row,
+                // because the rows are made again as their keys move, which
+                // would end the drag.
+                Item {
+                    id: sheetBlock
+                    readonly property var sheet: row.selected && timeline.sheet ? backend.sheet : []
+                    width: rows.width
+                    height: sheet.length * 20
+                    visible: sheet.length > 0
+                    Column {
+                        Repeater {
+                            model: sheetBlock.sheet
+                            delegate: Rectangle {
+                                id: sheetRow
+                                required property var modelData
+                                width: rows.width
+                                height: 20
+                                color: "#16161a"
+                                RowLayout {
                                     anchors.fill: parent
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    property int dragging: -1
-                                    function keyNear(x) {
-                                        const times = sheetRow.modelData.times;
-                                        let best = -1, bestDistance = 7;
-                                        for (let i = 0; i < times.length; ++i) {
-                                            const d = Math.abs(times[i] / timeline.duration * sheetTrack.width - x);
-                                            if (d <= bestDistance) { best = i; bestDistance = d; }
+                                    spacing: 0
+                                    Label {
+                                        Layout.preferredWidth: timeline.nameWidth
+                                        leftPadding: 46
+                                        text: sheetRow.modelData.property
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                    }
+                                    Item {
+                                        id: sheetTrack
+                                        objectName: "sheetTrack"
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.rightMargin: 14
+                                        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 1; color: "#26262c" }
+                                        Repeater {
+                                            model: sheetRow.modelData.times
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                width: 7
+                                                height: 7
+                                                rotation: 45
+                                                x: modelData / timeline.duration * sheetTrack.width - width / 2
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                color: theme.accent
+                                                border.color: "#0e0e10"
+                                            }
                                         }
-                                        return best;
                                     }
-                                    function timeAt(x) { return Math.max(0, Math.min(timeline.duration, x / sheetTrack.width * timeline.duration)) }
-                                    onPressed: function (mouse) {
-                                        if (backend.playing) backend.togglePlay();
-                                        const key = keyNear(mouse.x);
-                                        if (mouse.button === Qt.RightButton) {
-                                            if (key >= 0) backend.removeKey(sheetRow.modelData.property, key);
-                                            return;
-                                        }
-                                        dragging = key;
-                                        if (key < 0) backend.seek(timeAt(mouse.x));
-                                    }
-                                    onPositionChanged: function (mouse) {
-                                        if (dragging >= 0) backend.retimeKey(sheetRow.modelData.property, dragging, timeAt(mouse.x));
-                                        else backend.seek(timeAt(mouse.x));
-                                    }
-                                    onReleased: { dragging = -1; timeline.done() }
                                 }
                             }
                         }
+                    }
+                    MouseArea {
+                        x: timeline.nameWidth
+                        width: parent.width - timeline.nameWidth - 14
+                        height: parent.height
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        property string dragging: ""
+                        property int key: -1
+                        function keyNear(times, x) {
+                            let best = -1, bestDistance = 7;
+                            for (let i = 0; i < times.length; ++i) {
+                                const d = Math.abs(times[i] / timeline.duration * width - x);
+                                if (d <= bestDistance) { best = i; bestDistance = d; }
+                            }
+                            return best;
+                        }
+                        function timeAt(x) { return Math.max(0, Math.min(timeline.duration, x / width * timeline.duration)) }
+                        onPressed: function (mouse) {
+                            if (backend.playing) backend.togglePlay();
+                            const line = sheetBlock.sheet[Math.floor(mouse.y / 20)];
+                            if (!line) return;
+                            const near = keyNear(line.times, mouse.x);
+                            if (mouse.button === Qt.RightButton) {
+                                if (near >= 0) backend.removeKey(line.property, near);
+                                return;
+                            }
+                            dragging = near >= 0 ? line.property : "";
+                            key = near;
+                            if (near < 0) backend.seek(timeAt(mouse.x));
+                        }
+                        onPositionChanged: function (mouse) {
+                            if (dragging !== "") backend.retimeKey(dragging, key, timeAt(mouse.x));
+                            else backend.seek(timeAt(mouse.x));
+                        }
+                        onReleased: { dragging = ""; key = -1; timeline.done() }
                     }
                 }
             }

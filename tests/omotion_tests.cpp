@@ -11,6 +11,10 @@
 #include <QLineF>
 #include <QPainter>
 #include <QTemporaryDir>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QtTest>
 
 #include "ai.h"
@@ -28,6 +32,9 @@
 #include "liquid.h"
 #include "theme.h"
 #include "world.h"
+#include "worldview.h"
+#include "sceneview.h"
+#include "graphview.h"
 
 namespace {
 
@@ -2008,6 +2015,169 @@ private slots:
         }
         QVERIFY2(inside < held.size() / 50 + 1, qPrintable(QString("%1 of %2").arg(inside).arg(held.size())));
         QVERIFY(on > 0);
+    }
+
+    // The window itself, as one uses it: Main.qml with the backend behind
+    // it, pressed, dragged and clicked with the mouse.
+    void theWindowAnswersTheMouse() {
+        QTemporaryDir dir;
+        // A picture with a square on it, as a layer to pick and drag.
+        const QString project = Project::open(writePicture(dir.filePath("p.png"), {400, 200}), nullptr);
+        {
+            QImage square(60, 60, QImage::Format_ARGB32);
+            square.fill(QColor(220, 40, 40));
+            square.save(dir.filePath("square.png"));
+            Scene scene = Project::load(project, nullptr);
+            QString error;
+            QVERIFY2(Project::importImage(scene, project, dir.filePath("square.png"), &error) >= 0, qPrintable(error));
+            QVERIFY(Project::save(project, scene, &error));
+        }
+        static bool registered = false;
+        if (!registered) {
+            qmlRegisterType<SceneView>("Omotion", 1, 0, "SceneView");
+            qmlRegisterType<GraphView>("Omotion", 1, 0, "GraphView");
+            registerWorld();
+            registered = true;
+        }
+        Theme theme;
+        Backend backend;
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("theme", &theme);
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QVERIFY(backend.open(project));
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(200);
+        // Items by the tree they're drawn in.
+        std::function<QQuickItem *(QQuickItem *, const std::function<bool(QQuickItem *)> &)> find =
+            [&](QQuickItem *item, const std::function<bool(QQuickItem *)> &wanted) -> QQuickItem * {
+            if (wanted(item))
+                return item;
+            for (QQuickItem *child : item->childItems())
+                if (QQuickItem *found = find(child, wanted))
+                    return found;
+            return nullptr;
+        };
+        auto named = [&](const QString &name) { return find(window->contentItem(), [&](QQuickItem *i) { return i->objectName() == name; }); };
+        auto *view = qobject_cast<SceneView *>(find(window->contentItem(), [](QQuickItem *i) { return qobject_cast<SceneView *>(i) != nullptr; }));
+        QVERIFY(view);
+        // Canvas pixels to the window's.
+        auto at = [&](const QPointF &canvas) { return view->mapToScene(view->canvasRect().topLeft() + canvas * view->zoom()).toPoint(); };
+        // Back again, as the canvas itself reads it.
+        QVERIFY(QLineF(view->toScene(view->canvasRect().center().x(), view->canvasRect().center().y()), QPointF(200, 100)).length() < 1);
+        const int square = int(backend.scene().layers.size()) - 1;
+        const QPointF middle = layerTransform(backend.scene(), backend.assets(), square, 0).map(QPointF(30, 30));
+
+        // A click on the square picks it.
+        backend.select(0);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at(middle));
+        QTRY_COMPARE(backend.selected(), square);
+
+        // Dragging it moves it as far as the mouse went, in the canvas.
+        const double before = backend.scene().value(backend.scene().layers.at(square), "x", backend.time());
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, at(middle));
+        for (int k = 1; k <= 8; ++k)
+            QTest::mouseMove(window, at(middle + QPointF(5 * k, 0)));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, at(middle + QPointF(40, 0)));
+        const double after = backend.scene().value(backend.scene().layers.at(square), "x", backend.time());
+        QVERIFY2(std::abs(after - before - 40) < 3, qPrintable(QString("%1 → %2").arg(before).arg(after)));
+        // And one undo puts it back.
+        backend.undo();
+        QCOMPARE(backend.scene().value(backend.scene().layers.at(square), "x", backend.time()), before);
+
+        // With the cut tool, each click is a point of the shape.
+        backend.select(0);
+        backend.setTool("cut");
+        for (const QPointF &p : {QPointF(20, 20), QPointF(120, 20), QPointF(70, 90)})
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, at(p));
+        QTRY_COMPARE(backend.cutPoints().size(), 3);
+        backend.setTool("move");
+
+        // The ruler scrubs: halfway along is halfway through.
+        QQuickItem *ruler = named("ruler");
+        QVERIFY(ruler);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                          ruler->mapToScene(QPointF(ruler->width() / 2, ruler->height() / 2)).toPoint());
+        QTRY_VERIFY(std::abs(backend.time() - backend.scene().duration / 2) < backend.scene().duration * .05);
+
+        // The outliner: a click on a row selects its layer.
+        QQuickItem *list = named("outlinerList");
+        QVERIFY(list);
+        QQuickItem *row = nullptr;
+        const QString name = backend.scene().layers.at(0).name;
+        for (QQuickItem *item : list->property("contentItem").value<QQuickItem *>()->childItems())
+            if (item->property("modelData").toMap().value("name").toString() == name)
+                row = item;
+        QVERIFY(row);
+        backend.select(square);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QTRY_COMPARE(backend.selected(), 0);
+
+        // A keyframe's diamond dragged along its track retimes it.
+        // Keys at 0 and 1 s, as K makes them; the last keys x and y at 1 s.
+        backend.select(square);
+        backend.seek(0);
+        backend.keyAll();
+        backend.seek(1);
+        backend.keyAll();
+        backend.seek(0);
+        const QStringList keyedAtOne = [&] {
+            QStringList list;
+            for (auto it = backend.scene().layers[square].keys.begin(); it != backend.scene().layers[square].keys.end(); ++it)
+                list << it.key();
+            return list;
+        }();
+        QVERIFY(keyedAtOne.contains("x") && keyedAtOne.contains("y"));
+        QTest::qWait(100);
+        auto rowTrack = [&](const QString &name) {
+            return find(window->contentItem(), [&](QQuickItem *i) {
+                if (i->objectName() != name || !i->isVisible())
+                    return false;
+                for (QQuickItem *up = i->parentItem(); up; up = up->parentItem())
+                    if (up->property("layerIndex").isValid())
+                        return up->property("layerIndex").toInt() == square;
+                return false;
+            });
+        };
+        QQuickItem *track = rowTrack("track");
+        QVERIFY(track);
+        const double duration = backend.scene().duration;
+        auto onTrack = [&](QQuickItem *item, double t) { return item->mapToScene(QPointF(t / duration * item->width(), item->height() / 2)).toPoint(); };
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onTrack(track, 1));
+        for (int k = 1; k <= 5; ++k)
+            QTest::mouseMove(window, onTrack(track, 1 + .1 * k));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, onTrack(track, 1.5));
+        QTRY_VERIFY(std::abs(backend.scene().layers[square].keys["x"].last().t - 1.5) < .05);
+        QVERIFY(std::abs(backend.scene().layers[square].keys["y"].last().t - 1.5) < .05);
+        // In the dope sheet, just one property's: y's key goes back to 1.
+        QQuickItem *timeline = find(window->contentItem(), [](QQuickItem *i) { return i->property("sheet").isValid() && i->property("curves").isValid(); });
+        QVERIFY(timeline);
+        timeline->setProperty("sheet", true);
+        QTest::qWait(100);
+        QQuickItem *rows = nullptr;
+        for (int tries = 0; tries < 20 && !rows; ++tries, QTest::qWait(20)) {
+            QQuickItem *sheet = find(window->contentItem(), [&](QQuickItem *i) {
+                return i->objectName() == "sheetTrack" && i->isVisible() &&
+                       i->parentItem() && i->parentItem()->parentItem() &&
+                       i->parentItem()->parentItem()->property("modelData").toMap().value("property").toString() == "y";
+            });
+            rows = sheet;
+        }
+        QVERIFY(rows);
+        // Where to press and go, worked out first: the rows are made again
+        // as the key moves.
+        QList<QPoint> way;
+        for (int k = 0; k <= 5; ++k)
+            way << onTrack(rows, 1.5 - .1 * k);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, way.first());
+        for (int k = 1; k <= 5; ++k)
+            QTest::mouseMove(window, way.at(k));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, way.last());
+        QTRY_VERIFY(std::abs(backend.scene().layers[square].keys["y"].last().t - 1) < .05);
+        QVERIFY(std::abs(backend.scene().layers[square].keys["x"].last().t - 1.5) < .05);
     }
 
     void clipsBlendAndFade() {
