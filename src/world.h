@@ -173,6 +173,12 @@ QList<int> lightLayers(const Scene &scene);
 // opacity; and the box a model file's points fill, in its own units.
 QList<int> modelLayers(const Scene &scene);
 bool modelBounds(const QString &path, QVector3D *low, QVector3D *high);
+// Working out a model's shape for its shadows can take a while. The window
+// does it away from its own thread, ahead of time (prepareModels), and
+// says so: frames then use only the shapes ready, a model casting its
+// rounded box meanwhile. Elsewhere, frames work them out as they go.
+void prepareModels(const Scene &scene, AssetCache &assets);
+void setModelsPreparedAhead(bool ahead);
 QVector3D lightPosition(const Scene &scene, int index, double t);
 // Smoke, fire or water from a piece of the world, drawn among the pieces
 // so nearer ones hide it. Smoke and fire are worked out in a box of air by

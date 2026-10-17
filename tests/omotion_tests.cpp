@@ -3282,6 +3282,22 @@ private slots:
         }
         QVERIFY(casting.contains(box));
         QVERIFY(casting.contains(again));
+        // Where they're worked out ahead (the window), a frame uses only
+        // what's ready: a model new to it casts its rounded box until then.
+        writeText(dir.filePath("fresh.obj"), "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 3 4\nf 1 2 4\n");
+        const int fresh = Project::importModel(scene, project, dir.filePath("fresh.obj"), QVector3D(2, 0, 7), 1, &error);
+        World::setModelsPreparedAhead(true);
+        auto castsByShape = [&](int layer) {
+            for (const World::Frame::Solid &solid : World::frame(scene, assets, 0).solids)
+                if (solid.box.layer == layer)
+                    return true;
+            return false;
+        };
+        QVERIFY(!castsByShape(fresh));
+        World::prepareModels(scene, assets);
+        QVERIFY(castsByShape(fresh));
+        World::setModelsPreparedAhead(false);
+
         // A broken OBJ (corners naming no point) casts by the faces it
         // has, without reading past its points.
         writeText(dir.filePath("broken.obj"), "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 0\nf -1 -2 -9\nf x 2 3\nf 1 2 3\nf 1 3 4\n");

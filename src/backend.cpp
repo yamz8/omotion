@@ -40,7 +40,25 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     m_playTimer.setInterval(16);
     connect(&m_playTimer, &QTimer::timeout, this, &Backend::tick);
     // The 3D view follows the scene and the playhead.
-    connect(this, &Backend::sceneChanged, this, [this] { m_world.setScene(m_scene, m_directory); });
+    connect(this, &Backend::sceneChanged, this, [this] {
+        m_world.setScene(m_scene, m_directory);
+        // Models' shapes, for their shadows, worked out away from the
+        // window; it's drawn again with them when they're ready.
+        if (!World::modelLayers(m_scene).isEmpty() && World::info(m_scene).valid) {
+            World::setModelsPreparedAhead(true);
+            const Scene scene = m_scene;
+            const QString directory = m_directory;
+            auto *watcher = new QFutureWatcher<void>(this);
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher] {
+                watcher->deleteLater();
+                m_world.refresh();
+            });
+            watcher->setFuture(QtConcurrent::run([scene, directory] {
+                AssetCache assets(directory);
+                World::prepareModels(scene, assets);
+            }));
+        }
+    });
     connect(this, &Backend::timeChanged, this, [this] { m_world.setTime(m_time); });
     // Another project, maybe another film beside it.
     connect(this, &Backend::projectChanged, this, &Backend::filmChanged);
@@ -133,6 +151,8 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
 }
 
 Backend::~Backend() {
+    // Frames made after it (exports, tests) work models' shapes out again.
+    World::setModelsPreparedAhead(false);
     // The AI's job uses this backend's cache; let it finish first.
     m_job.waitForFinished();
     m_peaksJob.waitForFinished();
@@ -3606,6 +3626,8 @@ void Backend::exportAs(const QString &format, double scale) {
         }));
         return;
     }
+    // An export draws every frame whole: models' shapes first.
+    World::prepareModels(m_scene, m_assets);
     if (!m_exporter.start(m_scene, m_directory, output, scale))
         return setError(m_exporter.error());
     m_exportProgress = 0;

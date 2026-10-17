@@ -35,6 +35,8 @@ public:
 
     void setScene(const Scene &scene, const QString &directory);
     void setTime(double t);
+    // The frame again, as something it uses has become ready.
+    void refresh() { update(); }
     // The window's free view, shown instead of the shot's camera; off for
     // exports.
     void setView(bool free, const World::View &view = {});

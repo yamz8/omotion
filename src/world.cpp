@@ -4,6 +4,7 @@
 #include "liquid.h"
 
 #include <QCryptographicHash>
+#include <atomic>
 #include <QUrl>
 #include <QDateTime>
 #include <functional>
@@ -1050,7 +1051,11 @@ QByteArray cellsOf(const Mesh &shape) {
     return cells;
 }
 
-QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D &high) {
+std::atomic<bool> preparedAhead{false};
+
+// A model's cells: worked out now when wait (or when nothing prepares them
+// ahead); otherwise only those ready, empty meanwhile.
+QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D &high, bool wait) {
     // One a file, kept with what it was made from (when the file was saved,
     // and the box), so a new save replaces it rather than piling up.
     struct Made {
@@ -1067,6 +1072,8 @@ QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D
         if (it != cache.constEnd() && it->saved == saved && it->low == low && it->high == high)
             return it->cells;
     }
+    if (!wait)
+        return {};
     const QByteArray cells = cellsOfTriangles(ModelFile::triangles(path), low, high);
     QMutexLocker locked(&lock);
     cache.insert(path, Made{saved, low, high, cells});
@@ -1460,7 +1467,7 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
                 solid.box.centre = model.position + model.rotation.rotatedVector(((low + high) / 2 + model.offset) * model.scale);
                 solid.box.half = (high - low) / 2 * model.scale;
                 solid.box.rotation = model.rotation;
-                solid.cells = modelCells(model.model, low, high);
+                solid.cells = modelCells(model.model, low, high, !preparedAhead);
                 if (solid.cells.count('\0') < solid.cells.size()) {
                     frame.solids << solid;
                     continue;
@@ -1625,6 +1632,17 @@ QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
         list << sheet;
     }
     return list;
+}
+
+void setModelsPreparedAhead(bool ahead) { preparedAhead = ahead; }
+
+void prepareModels(const Scene &scene, AssetCache &assets) {
+    for (const int index : modelLayers(scene)) {
+        const QString file = QDir(assets.directory()).filePath(scene.layers.at(index).raw.value("model").toObject().value("file").toString());
+        QVector3D low, high;
+        if (modelBounds(file, &low, &high))
+            modelCells(file, low, high, true);
+    }
 }
 
 QList<int> lightLayers(const Scene &scene) {
