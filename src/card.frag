@@ -59,11 +59,18 @@ void MAIN()
                          noise3(vec3(at + vec2(17.3, 4.1) + warpDrift.yx, 9.2 + warpDrift.x)));
         uv += push * warpAmount * vec2(1.0, -warpScale.x / max(warpScale.y, 0.0001));
     }
-    vec4 seen = texture(picture, uv);
+    // Out of focus, it wears a blurrier copy of its picture: the farther
+    // from the focus, the more.
+    float defocus = aperture > 0.0 ? clamp(aperture * abs(length(toEye) - focus) / max(focus, 0.1), 0.0, 6.0) : 0.0;
+    vec4 seen = texture(picture, uv, defocus);
     float alpha = seen.a * fade;
-    vec3 n = length(surface) > 0.001 ? normalize(surface) : normalize(cross(dFdx(worldPos), dFdy(worldPos)));
-    if (dot(n, toEye) < 0.0)
-        n = -n;
-    vec3 colour = seen.rgb + lights(seen.rgb, n, worldPos, toEye);
+    vec3 colour = seen.rgb;
+    // Only with lights about: most worlds have none.
+    if (lightCount > 0.5) {
+        vec3 n = length(surface) > 0.001 ? normalize(surface) : normalize(cross(dFdx(worldPos), dFdy(worldPos)));
+        if (dot(n, toEye) < 0.0)
+            n = -n;
+        colour += lights(seen.rgb, n, worldPos, toEye);
+    }
     FRAGCOLOR = vec4(mix(colour, hazeColour.rgb, haze) * alpha, alpha);
 }

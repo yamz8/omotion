@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick3D
-import QtQuick3D.Helpers
 import QtQuick3D.AssetUtils
 import Omotion
 
@@ -25,16 +24,10 @@ Item {
     View3D {
         anchors.fill: parent
         camera: camera
-        environment: ExtendedSceneEnvironment {
+        environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Transparent
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.High
-            // The scene's look's depth of field: sharp about its focus,
-            // blurring away from it by its aperture.
-            depthOfFieldEnabled: (view.frame.aperture || 0) > 0 && !view.frame.viewPosition
-            depthOfFieldFocusDistance: view.frame.focus || 10
-            depthOfFieldFocusRange: Math.max(.3, (view.frame.focus || 10) / Math.max(1, view.frame.aperture || 1))
-            depthOfFieldBlurAmount: Math.min(12, (view.frame.aperture || 0) * 2)
         }
 
         PerspectiveCamera {
@@ -155,6 +148,11 @@ Item {
                         // Its material, and the lights (four at most).
                         property real shine: holder.place.shine || 0
                         property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
+                        property real lightCount: (view.frame.lights || []).length
+                        // Depth of field (not in the free view): how far is sharp, how much
+                        // the rest blurs.
+                        property real focus: view.frame.focus || 10
+                        property real aperture: view.frame.viewPosition ? 0 : (view.frame.aperture || 0)
                         property vector3d lightAt0: view.light(0, "position")
                         property vector3d lightColour0: view.light(0, "colour")
                         property real lightReach0: view.reach(0)
@@ -200,6 +198,11 @@ Item {
                         // Its material, and the lights (four at most).
                         property real shine: holder.place.shine || 0
                         property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
+                        property real lightCount: (view.frame.lights || []).length
+                        // Depth of field (not in the free view): how far is sharp, how much
+                        // the rest blurs.
+                        property real focus: view.frame.focus || 10
+                        property real aperture: view.frame.viewPosition ? 0 : (view.frame.aperture || 0)
                         property vector3d lightAt0: view.light(0, "position")
                         property vector3d lightColour0: view.light(0, "colour")
                         property real lightReach0: view.reach(0)

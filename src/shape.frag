@@ -34,7 +34,8 @@ vec3 lights(vec3 albedo, vec3 n, vec3 p, vec3 eye)
 // own far side.
 void MAIN()
 {
-    vec4 seen = texture(picture, pictureUv);
+    float defocus = aperture > 0.0 ? clamp(aperture * abs(length(toEye) - focus) / max(focus, 0.1), 0.0, 6.0) : 0.0;
+    vec4 seen = texture(picture, pictureUv, defocus);
     float alpha = mix(own.a, seen.a, worn);
     if (alpha < 0.5)
         discard;
@@ -42,10 +43,12 @@ void MAIN()
     float facing = abs(dot(normalize(facingNormal), normalize(toEye)));
     float rim = pow(1.0 - facing, 3.0) * (1.0 - worn);
     colour = mix(colour, wrap.rgb, clamp(rim * 0.8, 0.0, 1.0));
-    vec3 n = normalize(facingNormal);
-    if (dot(n, toEye) < 0.0)
-        n = -n;
-    colour += lights(colour, n, worldPos, toEye);
+    if (lightCount > 0.5) {
+        vec3 n = normalize(facingNormal);
+        if (dot(n, toEye) < 0.0)
+            n = -n;
+        colour += lights(colour, n, worldPos, toEye);
+    }
     colour = mix(colour, hazeColour.rgb, haze);
     FRAGCOLOR = vec4(colour, 1.0);
 }
