@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <algorithm>
+#include <optional>
 #include <QDir>
 #include <cstdio>
 #include <QElapsedTimer>
@@ -92,7 +93,11 @@ const World::Mesh &WorldSource::mesh(int layer) {
 void WorldSource::update() {
     QVariantMap frame;
     if (m_info.valid) {
+        std::optional<World::ReadyOnly> readyOnly;
+        if (m_live)
+            readyOnly.emplace();
         const World::Frame f = World::frame(m_scene, *m_assets, m_time);
+        readyOnly.reset();
         frame["cameraPosition"] = QVariant::fromValue(f.cameraPosition);
         frame["cameraRotation"] = QVariant::fromValue(f.cameraRotation);
         frame["fov"] = f.fov;

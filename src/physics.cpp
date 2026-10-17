@@ -656,7 +656,9 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
         for (const QString &p : properties) {
             QList<Key> keys;
             for (const Key &key : layer.keys.value(p))
-                if (key.t < from - 1e-9 || key.t > from + (frames - 1) * dt + 1e-9)
+                // Keys inside the stretch asked for go, even past its last
+                // whole frame.
+                if (key.t < from - 1e-9 || key.t > to + 1e-9)
                     keys << key;
             for (int f = 0; f < frames; ++f)
                 keys << Key{from + f * dt, std::round(values.value(p).at(f) * 1e4) / 1e4, "linear"};

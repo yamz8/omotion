@@ -631,7 +631,9 @@ Mesh mesh(const Scene &scene, AssetCache &assets, int index) {
         if (cache.contains(key))
             return cache.value(key);
     }
-    const Mesh made = buildMesh(scene, assets, index);
+    Mesh made = buildMesh(scene, assets, index);
+    static std::atomic<quint64> made_{0};
+    made.id = ++made_;
     QMutexLocker lock(&cacheLock);
     if (cache.size() > 32)
         cache.clear();
@@ -989,32 +991,33 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
 }
 
 namespace {
-// What's worked out from a shape, kept for the last few shapes: each with
-// the vertices it came from (shared, not copied), so the same shape is
-// found by its data without hashing it every frame, and a reshaped one
-// pushes the oldest out rather than piling up.
+// What's worked out from a shape, kept by its mesh's id for the shapes
+// used most lately (sixty-four), so the same shape is found without looking
+// through its data, and a reshaped one pushes out the longest unused.
 template <typename T>
 class ShapeCache {
 public:
-    bool find(const QByteArray &vertices, T *out) {
+    bool find(quint64 id, T *out) {
         QMutexLocker locked(&m_lock);
-        for (const auto &entry : m_entries)
-            if ((entry.first.constData() == vertices.constData() && entry.first.size() == vertices.size()) || entry.first == vertices) {
-                *out = entry.second;
+        for (int i = 0; i < m_entries.size(); ++i)
+            if (m_entries.at(i).first == id) {
+                *out = m_entries.at(i).second;
+                // Most recently used first, so what's in use stays.
+                m_entries.move(i, 0);
                 return true;
             }
         return false;
     }
-    void keep(const QByteArray &vertices, const T &value) {
+    void keep(quint64 id, const T &value) {
         QMutexLocker locked(&m_lock);
-        m_entries.prepend({vertices, value});
-        while (m_entries.size() > 16)
+        m_entries.prepend({id, value});
+        while (m_entries.size() > 64)
             m_entries.removeLast();
     }
 
 private:
     QMutex m_lock;
-    QList<QPair<QByteArray, T>> m_entries;
+    QList<QPair<quint64, T>> m_entries;
 };
 }
 
@@ -1062,7 +1065,7 @@ QByteArray cellsOfTriangles(const QList<QVector3D> &corners, const QVector3D &lo
 QByteArray cellsOf(const Mesh &shape) {
     static ShapeCache<QByteArray> cache;
     QByteArray found;
-    if (cache.find(shape.vertices, &found))
+    if (cache.find(shape.id, &found))
         return found;
     const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
     const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
@@ -1072,11 +1075,11 @@ QByteArray cellsOf(const Mesh &shape) {
         corners << QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]);
     }
     const QByteArray cells = cellsOfTriangles(corners, shape.minimum, shape.maximum);
-    cache.keep(shape.vertices, cells);
+    cache.keep(shape.id, cells);
     return cells;
 }
 
-std::atomic<bool> preparedAhead{false};
+thread_local bool readyOnly = false;
 
 // A model's cells: worked out now when wait (or when nothing prepares them
 // ahead); otherwise only those ready, empty meanwhile.
@@ -1118,7 +1121,7 @@ namespace {
 QList<Occluder> partsOf(const Mesh &shape) {
     static ShapeCache<QList<Occluder>> cache;
     QList<Occluder> found;
-    if (cache.find(shape.vertices, &found))
+    if (cache.find(shape.id, &found))
         return found;
     const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
     const qsizetype count = shape.vertices.size() / qsizetype(shape.stride * sizeof(float));
@@ -1208,7 +1211,7 @@ QList<Occluder> partsOf(const Mesh &shape) {
         part.rotation = QQuaternion::fromAxes(axes[0], axes[1], axes[2]);
         parts << part;
     }
-    cache.keep(shape.vertices, parts);
+    cache.keep(shape.id, parts);
     return parts;
 }
 }
@@ -1487,7 +1490,7 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
                 solid.box.centre = model.position + model.rotation.rotatedVector(((low + high) / 2 + model.offset) * model.scale);
                 solid.box.half = (high - low) / 2 * model.scale;
                 solid.box.rotation = model.rotation;
-                solid.cells = modelCells(model.model, low, high, !preparedAhead);
+                solid.cells = modelCells(model.model, low, high, !readyOnly);
                 if (solid.cells.count('\0') < solid.cells.size()) {
                     frame.solids << solid;
                     continue;
@@ -1654,7 +1657,18 @@ QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
     return list;
 }
 
-void setModelsPreparedAhead(bool ahead) { preparedAhead = ahead; }
+ReadyOnly::ReadyOnly() : m_was(readyOnly) { readyOnly = true; }
+ReadyOnly::~ReadyOnly() { readyOnly = m_was; }
+
+bool modelsReady(const Scene &scene, AssetCache &assets) {
+    for (const int index : modelLayers(scene)) {
+        const QString file = QDir(assets.directory()).filePath(scene.layers.at(index).raw.value("model").toObject().value("file").toString());
+        QVector3D low, high;
+        if (modelBounds(file, &low, &high) && modelCells(file, low, high, false).isEmpty())
+            return false;
+    }
+    return true;
+}
 
 void prepareModels(const Scene &scene, AssetCache &assets) {
     for (const int index : modelLayers(scene)) {

@@ -2968,17 +2968,20 @@ int importModel(Scene &scene, const QString &directory, const QString &path, con
         }
     }
     const QString inside = QDir::cleanPath(dir.filePath(folder));
+    const QString source = QDir::cleanPath(from.absolutePath());
     for (const QString &name : files) {
-        // Only what lies inside its own folder: a name reaching out of it
-        // ("../..") would copy, and make folders, outside the project.
+        // Only what lies beside it, in its own folder or below: a name
+        // reaching out ("../..") or from elsewhere ("/home/…") would copy
+        // a file from outside, or into folders outside the project.
         const QString to = QDir::cleanPath(dir.filePath(folder + "/" + name));
-        if (!to.startsWith(inside + "/")) {
+        const QString what = QDir::cleanPath(from.absoluteFilePath(name));
+        if (QDir::isAbsolutePath(name) || !to.startsWith(inside + "/") || !what.startsWith(source + "/")) {
             if (name == files.first())
                 return fail(QString("Couldn't copy %1 into the project.").arg(path));
             continue;
         }
         dir.mkpath(QFileInfo(to).absolutePath());
-        if (!QFile::copy(from.filePath(name), to) && name == files.first())
+        if (!QFile::copy(what, to) && name == files.first())
             return fail(QString("Couldn't copy %1 into the project.").arg(path));
     }
     Layer layer;

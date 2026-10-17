@@ -113,7 +113,9 @@ bool read(const Gltf &file, int index, int width, QList<double> *out) {
     const qsizetype start = view.value("byteOffset").toInteger() + a.value("byteOffset").toInteger();
     const qsizetype count = a.value("count").toInteger();
     // Nothing outside its buffer, either way, whatever the file says.
-    if (start < 0 || stride < size * width || count <= 0 || count > buffer.size() || start + (count - 1) * stride + size * width > buffer.size())
+    // Each part checked against the buffer first, so their sum can't wrap.
+    if (start < 0 || start > buffer.size() || stride < size * width || stride > buffer.size() || count <= 0 || count > buffer.size() ||
+        start + (count - 1) * stride + size * width > buffer.size())
         return false;
     for (qsizetype i = 0; i < count; ++i)
         for (int k = 0; k < width; ++k) {

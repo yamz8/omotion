@@ -2703,6 +2703,8 @@ QList<double> layerState(const Scene &scene, AssetCache &assets, int index, doub
     QList<double> state{m.m11(), m.m12(), m.m13(), m.m21(), m.m22(), m.m23(), m.m31(), m.m32(), m.m33()};
     for (const QString &property : Scene::propertiesOf(layer))
         state << scene.value(layer, property, t);
+    // How out of focus it is, as the camera's focus changes.
+    state << defocus(scene, index, t);
     // What changes in its picture rather than its place: a video's frame, a
     // drawing's, and cloth and billowing, which move all the time.
     if (!layer.raw.isEmpty()) {
@@ -2814,10 +2816,11 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
         // in every moment: they're drawn once, and only from the first one
         // that moves up is drawn for each moment.
         const int first = firstMoving(scene, assets, times);
+        // What holds still is drawn once, at the frame's own time.
         if (first < 0) {
-            renderScene(painter, scene, assets, times.first());
+            renderScene(painter, scene, assets, t);
         } else {
-            renderScene(painter, scene, assets, times.first(), false, 0, first);
+            renderScene(painter, scene, assets, t, false, 0, first);
             // From the bottom layer up, each moment has the background too,
             // so it's drawn whole.
             bool plain = first > 0;

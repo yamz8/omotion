@@ -86,6 +86,9 @@ QMatrix4x4 pictureToWorld(const Info &info);
 // point pushed out to its distance. Vertices are x, y, z, u, v floats;
 // indices are 32-bit triangles.
 struct Mesh {
+    // Which mesh it is: the same mesh (as kept) has the same id, a remade
+    // one another, so what's worked out from it can be kept by it.
+    quint64 id = 0;
     // x, y, z, u, v; a shape adds its own colour (r, g, b, a) and how much
     // of the picture it wears (1 where the picture saw it, 0 where not).
     QByteArray vertices;
@@ -174,11 +177,21 @@ QList<int> lightLayers(const Scene &scene);
 QList<int> modelLayers(const Scene &scene);
 bool modelBounds(const QString &path, QVector3D *low, QVector3D *high);
 // Working out a model's shape for its shadows can take a while. The window
-// does it away from its own thread, ahead of time (prepareModels), and
-// says so: frames then use only the shapes ready, a model casting its
-// rounded box meanwhile. Elsewhere, frames work them out as they go.
+// does it away from its own thread, ahead of time (prepareModels), and its
+// own view draws while ReadyOnly: frames then use only the shapes ready, a
+// model casting its rounded box meanwhile. Every other frame (exports,
+// films, renders) works them out as it goes.
 void prepareModels(const Scene &scene, AssetCache &assets);
-void setModelsPreparedAhead(bool ahead);
+// Whether the scene's models' shapes are all worked out.
+bool modelsReady(const Scene &scene, AssetCache &assets);
+class ReadyOnly {
+public:
+    ReadyOnly();
+    ~ReadyOnly();
+
+private:
+    bool m_was;
+};
 QVector3D lightPosition(const Scene &scene, int index, double t);
 // Smoke, fire or water from a piece of the world, drawn among the pieces
 // so nearer ones hide it. Smoke and fire are worked out in a box of air by

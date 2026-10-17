@@ -611,6 +611,13 @@ private:
     QString m_tool = "move";
     QList<QPointF> m_cut;
     bool m_tracking = false;  // Following points in a video, or solving.
+    void runTracking(const QString &busy, const std::function<int(Scene &, AssetCache &, QString *, double *)> &work,
+                     const std::function<void(int, double)> &done);
+    // Models' shapes (for their shadows) worked out away from the window:
+    // one job at a time, and then what waits on them.
+    void prepareModels();
+    void whenModelsReady(const QList<QPair<Scene, QString>> &projects, const std::function<void()> &then);
+    bool m_preparing = false, m_prepareAgain = false, m_filmModelsReady = false;
     QString m_reshaping;
     double m_feather = 1;
     int m_fill = -1;  // 0 off, 1 smooth, 2 AI; -1 until a tool picks the default.

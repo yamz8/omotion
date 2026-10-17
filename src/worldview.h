@@ -37,6 +37,9 @@ public:
     void setTime(double t);
     // The frame again, as something it uses has become ready.
     void refresh() { update(); }
+    // The window's own view: drawn with only what's ready (see
+    // World::ReadyOnly), never waiting on a model's shape.
+    void setLive(bool live) { m_live = live; }
     // The window's free view, shown instead of the shot's camera; off for
     // exports.
     void setView(bool free, const World::View &view = {});
@@ -77,6 +80,7 @@ private:
     QHash<int, World::Mesh> m_meshes;
     QHash<int, std::shared_ptr<QQuick3DTextureData>> m_sheets;
     std::shared_ptr<QQuick3DTextureData> m_occluders, m_solids;
+    bool m_live = false;
     std::shared_ptr<QQuick3DTextureData> m_solidCells[World::Frame::mostSolids];
     QByteArray m_dustVertices;
     QByteArray m_dustIndices;

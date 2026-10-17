@@ -1,6 +1,5 @@
 #include "backend.h"
 
-#include <QScopedValueRollback>
 #include "world.h"
 
 #include <QDesktopServices>
@@ -41,25 +40,13 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
     m_workAssets.setKeepFull(false);
     m_playTimer.setInterval(16);
     connect(&m_playTimer, &QTimer::timeout, this, &Backend::tick);
+    // The window's own view never waits on a model's shape (see
+    // prepareModels).
+    m_world.setLive(true);
     // The 3D view follows the scene and the playhead.
     connect(this, &Backend::sceneChanged, this, [this] {
         m_world.setScene(m_scene, m_directory);
-        // Models' shapes, for their shadows, worked out away from the
-        // window; it's drawn again with them when they're ready.
-        if (!World::modelLayers(m_scene).isEmpty() && World::info(m_scene).valid) {
-            World::setModelsPreparedAhead(true);
-            const Scene scene = m_scene;
-            const QString directory = m_directory;
-            auto *watcher = new QFutureWatcher<void>(this);
-            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher] {
-                watcher->deleteLater();
-                m_world.refresh();
-            });
-            watcher->setFuture(QtConcurrent::run([scene, directory] {
-                AssetCache assets(directory);
-                World::prepareModels(scene, assets);
-            }));
-        }
+        prepareModels();
     });
     connect(this, &Backend::timeChanged, this, [this] { m_world.setTime(m_time); });
     // Another project, maybe another film beside it.
@@ -153,8 +140,6 @@ Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picke
 }
 
 Backend::~Backend() {
-    // Frames made after it (exports, tests) work models' shapes out again.
-    World::setModelsPreparedAhead(false);
     // The AI's job uses this backend's cache; let it finish first.
     m_job.waitForFinished();
     m_peaksJob.waitForFinished();
@@ -621,11 +606,59 @@ void Backend::removeShot(int index) {
     writeFilm(film);
 }
 
+void Backend::prepareModels() {
+    if (World::modelLayers(m_scene).isEmpty() || !World::info(m_scene).valid || World::modelsReady(m_scene, m_assets))
+        return;
+    // One job at a time: the scene changing meanwhile asks for one more
+    // after it, rather than piling them up.
+    if (m_preparing) {
+        m_prepareAgain = true;
+        return;
+    }
+    m_preparing = true;
+    whenModelsReady({{m_scene, m_directory}}, [this] {
+        m_preparing = false;
+        m_world.refresh();
+        if (m_prepareAgain) {
+            m_prepareAgain = false;
+            prepareModels();
+        }
+    });
+}
+
+void Backend::whenModelsReady(const QList<QPair<Scene, QString>> &projects, const std::function<void()> &then) {
+    auto *watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [watcher, then] {
+        watcher->deleteLater();
+        then();
+    });
+    watcher->setFuture(QtConcurrent::run([projects] {
+        for (const auto &[scene, directory] : projects) {
+            AssetCache assets(directory);
+            World::prepareModels(scene, assets);
+        }
+    }));
+}
+
 void Backend::exportFilm() {
     if (!hasProject() || m_exporter.busy())
         return;
     // Every shot as saved: this one too.
     flush();
+    // Every shot's models' shapes first, away from the window.
+    if (!m_filmModelsReady) {
+        QList<QPair<Scene, QString>> shots;
+        const QDir here = QFileInfo(filmPath()).absoluteDir();
+        for (const QJsonValue &shot : readFilm().value("shots").toArray()) {
+            const QString project = here.filePath(shot.toObject().value("project").toString());
+            shots << qMakePair(Project::load(project, nullptr), project);
+        }
+        return whenModelsReady(shots, [this] {
+            m_filmModelsReady = true;
+            exportFilm();
+            m_filmModelsReady = false;
+        });
+    }
     auto film = std::make_shared<Film>();
     QString error;
     if (!film->load(filmPath(), &error))
@@ -915,33 +948,58 @@ void Backend::undoStroke() {
     changed();
 }
 
+void Backend::runTracking(const QString &busy, const std::function<int(Scene &, AssetCache &, QString *, double *)> &work,
+                          const std::function<void(int, double)> &done) {
+    // Away from the window, one at a time; if the scene changes meanwhile
+    // (an edit, a reload), the result is let go rather than overwrite it.
+    if (m_tracking)
+        return setNotice("Still following the last points.");
+    m_tracking = true;
+    setBusy(busy);
+    const Scene scene = m_scene;
+    const QString directory = m_directory;
+    const quint64 revision = m_revision;
+    struct Result {
+        Scene scene;
+        int keyed = -1;
+        QString error;
+        double residual = 0;
+    };
+    auto result = std::make_shared<Result>();
+    auto *watcher = new QFutureWatcher<void>(this);
+    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, result, revision, done] {
+        watcher->deleteLater();
+        m_tracking = false;
+        setBusy({});
+        if (m_revision != revision)
+            return setNotice("The scene changed while the points were being followed, so it's left as it is: try again.");
+        if (result->keyed < 0)
+            return setError(result->error);
+        checkpoint();
+        m_scene = result->scene;
+        done(result->keyed, result->residual);
+    });
+    watcher->setFuture(QtConcurrent::run([scene, directory, work, result] {
+        result->scene = scene;
+        AssetCache assets(directory);
+        assets.setKeepFull(false);
+        result->keyed = work(result->scene, assets, &result->error, &result->residual);
+    }));
+}
+
 void Backend::trackAt(double x, double y) {
     if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
         return setNotice("Select a video layer to track a point on.");
-    // Drawn once to show it's busy; the scene is taken after that, so an
-    // edit or a reload handled meanwhile isn't lost, and a second press
-    // waits for this one.
-    if (m_tracking)
-        return;
-    QScopedValueRollback<bool> tracking(m_tracking, true);
-    QString error;
-    setBusy("Tracking…");
-    QCoreApplication::processEvents();
-    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
-        setBusy({});
-        return;
-    }
-    Scene scene = m_scene;
-    const int follower = Project::track(scene, m_assets, m_selected, QPointF(x, y), m_time, m_scene.duration, &error);
-    setBusy({});
-    if (follower < 0)
-        return setError(error);
-    checkpoint();
-    m_scene = scene;
-    setTool("move");
-    changed();
-    select(follower);
-    setNotice(QString("%1 follows it. Parent a layer to it (or link to it) to stick it to the footage.").arg(m_scene.layers.at(follower).name));
+    const int video = m_selected;
+    const double from = m_time, to = m_scene.duration;
+    runTracking("Tracking…", [video, x, y, from, to](Scene &scene, AssetCache &assets, QString *error, double *) {
+        return Project::track(scene, assets, video, QPointF(x, y), from, to, error);
+    }, [this](int follower, double) {
+        setTool("move");
+        changed();
+        select(follower);
+        setNotice(QString("%1 follows it. Parent a layer to it (or link to it) to stick it to the footage.").arg(m_scene.layers.at(follower).name));
+    });
 }
 
 void Backend::addTrackPoint(double x, double y) {
@@ -958,34 +1016,22 @@ void Backend::finishTrack(bool stabilize) {
         return setNotice("Click points with some detail on the video first.");
     if (m_cut.size() == 1 && !stabilize)
         return trackAt(m_cut.first().x(), m_cut.first().y());
-    // Drawn once to show it's busy; the scene is taken after that, so an
-    // edit or a reload handled meanwhile isn't lost, and a second press
-    // waits for this one.
-    if (m_tracking)
-        return;
-    QScopedValueRollback<bool> tracking(m_tracking, true);
-    QString error;
-    setBusy(stabilize ? "Holding the footage still…" : "Solving the footage's move…");
-    QCoreApplication::processEvents();
-    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
-        setBusy({});
-        return;
-    }
-    Scene scene = m_scene;
-    const int keyed = Project::solve(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, stabilize, &error);
-    setBusy({});
-    if (keyed < 0)
-        return setError(error);
-    checkpoint();
-    m_scene = scene;
-    const int points = int(m_cut.size());
-    setTool("move");
-    changed();
-    select(keyed);
-    setNotice(stabilize ? QString("The footage holds still from here, from %1 points: scale it up to hide its edges.").arg(points)
-                        : QString("%1 moves, turns and grows as the footage does, from %2 points: parent layers to it to stick them on.")
-                              .arg(m_scene.layers.at(keyed).name)
-                              .arg(points));
+    const int video = m_selected, points = int(m_cut.size());
+    const QList<QPointF> clicked = m_cut;
+    const double from = m_time, to = m_scene.duration;
+    runTracking(stabilize ? "Holding the footage still…" : "Solving the footage's move…",
+                [video, clicked, from, to, stabilize](Scene &scene, AssetCache &assets, QString *error, double *) {
+                    return Project::solve(scene, assets, video, clicked, from, to, stabilize, error);
+                },
+                [this, stabilize, points](int keyed, double) {
+                    setTool("move");
+                    changed();
+                    select(keyed);
+                    setNotice(stabilize ? QString("The footage holds still from here, from %1 points: scale it up to hide its edges.").arg(points)
+                                        : QString("%1 moves, turns and grows as the footage does, from %2 points: parent layers to it to stick them on.")
+                                              .arg(m_scene.layers.at(keyed).name)
+                                              .arg(points));
+                });
 }
 
 void Backend::setCloth(const QString &name, const QVariant &value) {
@@ -1010,32 +1056,20 @@ void Backend::setCloth(const QString &name, const QVariant &value) {
 void Backend::solveCamera() {
     if (m_tool != "track" || m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
         return setNotice("Select a video layer to track points on.");
-    // Drawn once to show it's busy; the scene is taken after that, so an
-    // edit or a reload handled meanwhile isn't lost, and a second press
-    // waits for this one.
-    if (m_tracking)
-        return;
-    QScopedValueRollback<bool> tracking(m_tracking, true);
-    QString error;
-    double residual = 0;
-    setBusy("Solving the camera…");
-    QCoreApplication::processEvents();
-    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
-        setBusy({});
-        return;
-    }
-    Scene scene = m_scene;
-    const bool solved = Project::solveCamera(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, &error, &residual);
-    setBusy({});
-    if (!solved)
-        return setError(error);
-    checkpoint();
-    m_scene = scene;
-    setTool("move");
-    changed();
-    selectCamera();
-    setNotice(QString("The camera moves as the footage's did, from here to the end (the points %1 px off on average): what you add to the world stays put in it.")
-                  .arg(residual, 0, 'f', 1));
+    const int video = m_selected;
+    const QList<QPointF> clicked = m_cut;
+    const double from = m_time, to = m_scene.duration;
+    runTracking("Solving the camera…",
+                [video, clicked, from, to](Scene &scene, AssetCache &assets, QString *error, double *residual) {
+                    return Project::solveCamera(scene, assets, video, clicked, from, to, error, residual) ? 0 : -1;
+                },
+                [this](int, double residual) {
+                    setTool("move");
+                    changed();
+                    selectCamera();
+                    setNotice(QString("The camera moves as the footage's did, from here to the end (the points %1 px off on average): what you add to the world stays put in it.")
+                                  .arg(residual, 0, 'f', 1));
+                });
 }
 
 void Backend::setWarp(const QString &name, double value) {
@@ -3658,8 +3692,10 @@ void Backend::exportAs(const QString &format, double scale) {
         }));
         return;
     }
-    // An export draws every frame whole: models' shapes first.
-    World::prepareModels(m_scene, m_assets);
+    // An export draws every frame whole: models' shapes first, worked out
+    // away from the window; it starts when they're ready.
+    if (!World::modelsReady(m_scene, m_assets))
+        return whenModelsReady({{m_scene, m_directory}}, [this, format, scale] { exportAs(format, scale); });
     if (!m_exporter.start(m_scene, m_directory, output, scale))
         return setError(m_exporter.error());
     m_exportProgress = 0;

@@ -5,6 +5,7 @@
 #include <QStandardPaths>
 #include <QLinearGradient>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -2233,6 +2234,12 @@ private slots:
             Project::importModel(scene, project, dir.filePath("outside/model/m.gltf"), QVector3D(), 1, &error);
             QVERIFY(!QFile::exists(QDir(project).filePath("assets/secret.bin")));
             QVERIFY(!QFile::exists(QDir(project).filePath("secret.bin")));
+            // Nor a file named from elsewhere outright.
+            writeText(dir.filePath("outside/model/a.gltf"),
+                      QString(R"({"asset": {"version": "2.0"}, "buffers": [{"uri": "%1", "byteLength": 1}]})").arg(dir.filePath("outside/secret.bin")).toUtf8());
+            Project::importModel(scene, project, dir.filePath("outside/model/a.gltf"), QVector3D(), 1, &error);
+            QDirIterator copied(QDir(project).filePath("assets"), {"secret.bin"}, QDir::Files, QDirIterator::Subdirectories);
+            QVERIFY(!copied.hasNext());
         }
         // A glTF naming a node's child twice over is read once, quickly.
         {
@@ -2242,6 +2249,16 @@ private slots:
             clock.start();
             QVERIFY(ModelFile::triangles(dir.filePath("fan.gltf")).isEmpty());
             QVERIFY(clock.elapsed() < 1000);
+        }
+        // Sizes a file gives so big they'd wrap round are refused.
+        {
+            QByteArray buffer(16, '\0');
+            writeText(dir.filePath("huge.gltf"), QString(R"({"asset": {"version": "2.0"}, "buffers": [{"uri": "data:application/octet-stream;base64,%1", "byteLength": 16}],
+                "bufferViews": [{"buffer": 0, "byteOffset": 9200000000000000000, "byteLength": 16}],
+                "accessors": [{"bufferView": 0, "componentType": 5126, "count": 2, "type": "VEC3"}]})").arg(QString::fromLatin1(buffer.toBase64())).toUtf8());
+            const ModelFile::Gltf file = ModelFile::readGltf(dir.filePath("huge.gltf"));
+            QList<double> values;
+            QVERIFY(!ModelFile::read(file, 0, 3, &values));
         }
         // Cloth edited many times over stays drawable.
         {
@@ -3221,6 +3238,30 @@ private slots:
             const QPointF after = layerTransform(onto, assets, index, 0).map(QPointF(20, 10));
             QVERIFY2(QLineF(before, after).length() < .5, qPrintable(QString("%1,%2 %3,%4").arg(before.x()).arg(before.y()).arg(after.x()).arg(after.y())));
         }
+        // From the window: points clicked, then followed away from it, the
+        // result taken in when it's done.
+        {
+            Scene saved = Project::load(project, nullptr);
+            saved.fps = 10;
+            saved.duration = 1;
+            const int video = Project::importVideo(saved, project, dir.filePath("clip.mp4"), &error);
+            QVERIFY(video >= 0 && Project::save(project, saved, &error));
+            Backend backend;
+            QVERIFY(backend.open(project));
+            backend.select(video);
+            backend.setTool("track");
+            for (const QPointF &p : points)
+                backend.addTrackPoint(p.x(), p.y());
+            const int before = int(backend.scene().layers.size());
+            backend.finishTrack(false);
+            QTRY_VERIFY_WITH_TIMEOUT(int(backend.scene().layers.size()) == before + 1, 20000);
+            const Layer &made = backend.scene().layers.last();
+            QVERIFY2(std::abs(backend.scene().value(made, "rotation", .9) - 18) < 2,
+                     qPrintable(QString::number(backend.scene().value(made, "rotation", .9))));
+            // One undo takes it back.
+            backend.undo();
+            QCOMPARE(int(backend.scene().layers.size()), before);
+        }
         // Stabilized, the video turns and shrinks back the other way.
         QCOMPARE(Project::solve(stable, assets, clip, points, 0, .9, true, &error), clip);
         QVERIFY(std::abs(stable.value(stable.layers[clip], "rotation", .9) + 18) < 2);
@@ -3375,17 +3416,18 @@ private slots:
         // what's ready: a model new to it casts its rounded box until then.
         writeText(dir.filePath("fresh.obj"), "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 3 4\nf 1 2 4\n");
         const int fresh = Project::importModel(scene, project, dir.filePath("fresh.obj"), QVector3D(2, 0, 7), 1, &error);
-        World::setModelsPreparedAhead(true);
         auto castsByShape = [&](int layer) {
+            const World::ReadyOnly readyOnly;
             for (const World::Frame::Solid &solid : World::frame(scene, assets, 0).solids)
                 if (solid.box.layer == layer)
                     return true;
             return false;
         };
         QVERIFY(!castsByShape(fresh));
+        QVERIFY(!World::modelsReady(scene, assets));
         World::prepareModels(scene, assets);
+        QVERIFY(World::modelsReady(scene, assets));
         QVERIFY(castsByShape(fresh));
-        World::setModelsPreparedAhead(false);
 
         // A broken OBJ (corners naming no point) casts by the faces it
         // has, without reading past its points.
