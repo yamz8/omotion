@@ -320,6 +320,8 @@ public:
     // empty to it; more solve the footage's move), or the footage held still.
     Q_INVOKABLE void addTrackPoint(double x, double y);
     Q_INVOKABLE void finishTrack(bool stabilize);
+    // The track tool's points solving the camera in depth (on a world).
+    Q_INVOKABLE void solveCamera();
     // The selected layer's warp (Project::setWarp).
     Q_INVOKABLE void setWarp(const QString &name, double value);
     // The selected layer as cloth: "on" (true or false), or one setting.

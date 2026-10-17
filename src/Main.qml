@@ -159,6 +159,7 @@ ApplicationWindow {
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(false) }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "track"; onActivated: backend.finishTrack(false) }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "track"; onActivated: backend.finishTrack(true) }
+    Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "track" && backend.world.active; onActivated: backend.solveCamera() }
     Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "path"; onActivated: backend.finishPath(true) }
     Shortcut { sequence: "Shift+A"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addEmpty() }
     // Drawing, as Grease Pencil: strokes on a drawing layer, frame by frame.
@@ -662,7 +663,7 @@ ApplicationWindow {
                               ? "Paint the shape: drag to add, right-drag to take away   ·   wheel: brush size   ·   Enter apply   ·   Esc cancel"
                               : backend.tool === "track"
                               ? "Track " + (backend.values.name || "the video") + ": click points with some detail around them (" + backend.cutPoints.length + " so far)"
-                                + "\nEnter: one is followed by an empty, more solve the footage's move onto one   ·   Shift+Enter: hold the footage still   ·   Backspace drops a point   ·   Esc cancel"
+                                + "\nEnter: one is followed by an empty, more solve the footage's move onto one   ·   Shift+Enter: hold the footage still   ·   Ctrl+Enter: solve the camera in depth (on a world)   ·   Backspace drops a point   ·   Esc cancel"
                               : backend.tool === "draw"
                               ? "Draw on " + (backend.values.name || "the drawing") + ": drag to draw, right-click takes back a stroke, the wheel sizes the pen ("
                                 + Math.round(backend.brushRadius / 4 * 10) / 10 + " px)   ·   , . to another frame: drawing there starts a new drawing   ·   Esc done"

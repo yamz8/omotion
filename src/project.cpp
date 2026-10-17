@@ -1,6 +1,7 @@
 #include "project.h"
 #include "ai.h"
 #include "select.h"
+#include "world.h"
 
 #include <QDir>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include <QSet>
 #include <QUrl>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -2734,6 +2736,185 @@ int solve(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &poi
     keep(follower, "rotation", turns);
     keep(follower, "scale", sizes);
     return target;
+}
+
+bool solveCameraFromTracks(Scene &scene, AssetCache &assets, const QList<QList<QPointF>> &paths, double from, QString *error,
+                           double *residual) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (!World::info(scene).valid)
+        return fail("Solving the camera in depth needs a world: make the video's frame a world first (Shift+D).");
+    const QSizeF canvas(scene.width, scene.height);
+    // Where each point is in the world, seen at the start.
+    const World::View first = World::cameraAt(scene, assets, from);
+    QList<QVector3D> anchors;
+    QList<int> kept;
+    for (int i = 0; i < paths.size(); ++i) {
+        QVector3D where;
+        if (!paths.at(i).isEmpty() && World::pick(scene, assets, from, first, canvas, paths.at(i).first(), &where) >= 0)
+            anchors << where, kept << i;
+    }
+    if (anchors.size() < 4)
+        return fail(QString("Only %1 of the points are on the world; it takes four or more, spread out.").arg(anchors.size()));
+    static const char *names[6] = {"worldX", "worldY", "worldZ", "yaw", "pitch", "rotation"};
+    Layer &camera = scene.camera;
+    double start[6];
+    for (int k = 0; k < 6; ++k)
+        start[k] = scene.value(camera, names[k], from);
+    // The camera for a set of its values, the rest as they are then.
+    Scene trial = scene;
+    for (int k = 0; k < 6; ++k)
+        trial.camera.keys.remove(names[k]);
+    auto viewFor = [&](const double *p, double t) {
+        for (int k = 0; k < 6; ++k)
+            trial.camera.base[names[k]] = p[k];
+        return World::cameraAt(trial, assets, t);
+    };
+    // How far off each point is seen, for a set of values.
+    auto misses = [&](const double *p, double t, int f, QList<double> *out) {
+        const World::View view = viewFor(p, t);
+        out->clear();
+        for (int n = 0; n < anchors.size(); ++n) {
+            const QList<QPointF> &path = paths.at(kept.at(n));
+            if (f >= path.size())
+                continue;
+            QPointF seen;
+            if (!World::project(view, canvas, anchors.at(n), &seen))
+                seen = QPointF(1e4, 1e4);
+            *out << seen.x() - path.at(f).x() << seen.y() - path.at(f).y();
+        }
+    };
+    int frames = 0;
+    for (const QList<QPointF> &path : paths)
+        frames = std::max(frames, int(path.size()));
+    const double step = 1 / std::max(1.0, scene.fps);
+    QList<std::array<double, 6>> solved;
+    double p[6];
+    std::copy(start, start + 6, p);
+    double total = 0;
+    int counted = 0;
+    for (int f = 0; f < frames; ++f) {
+        const double t = from + f * step;
+        // Levenberg and Marquardt: small steps where the error falls,
+        // smaller where it doesn't, the slopes worked out by nudging.
+        double lambda = 1e-3;
+        QList<double> r;
+        misses(p, t, f, &r);
+        auto cost = [](const QList<double> &values) {
+            double c = 0;
+            for (const double v : values)
+                c += v * v;
+            return c;
+        };
+        double now = cost(r);
+        for (int iteration = 0; iteration < 30 && r.size() >= 8; ++iteration) {
+            const double nudge[6] = {1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2};
+            QList<QList<double>> jacobian(6);
+            for (int k = 0; k < 6; ++k) {
+                double q[6];
+                std::copy(p, p + 6, q);
+                q[k] += nudge[k];
+                QList<double> moved;
+                misses(q, t, f, &moved);
+                for (int i = 0; i < r.size(); ++i)
+                    jacobian[k] << (moved.at(i) - r.at(i)) / nudge[k];
+            }
+            double a[6][7] = {};
+            for (int k = 0; k < 6; ++k) {
+                for (int j = 0; j < 6; ++j)
+                    for (int i = 0; i < r.size(); ++i)
+                        a[k][j] += jacobian[k][i] * jacobian[j][i];
+                for (int i = 0; i < r.size(); ++i)
+                    a[k][6] -= jacobian[k][i] * r.at(i);
+                a[k][k] *= 1 + lambda;
+                a[k][k] += 1e-9;
+            }
+            for (int c = 0; c < 6; ++c) {
+                int pivot = c;
+                for (int k = c + 1; k < 6; ++k)
+                    if (std::abs(a[k][c]) > std::abs(a[pivot][c]))
+                        pivot = k;
+                std::swap(a[c], a[pivot]);
+                if (std::abs(a[c][c]) < 1e-15)
+                    break;
+                for (int k = 0; k < 6; ++k)
+                    if (k != c) {
+                        const double factor = a[k][c] / a[c][c];
+                        for (int j = c; j < 7; ++j)
+                            a[k][j] -= factor * a[c][j];
+                    }
+            }
+            double q[6];
+            double size = 0;
+            for (int k = 0; k < 6; ++k) {
+                const double change = std::abs(a[k][k]) > 1e-15 ? a[k][6] / a[k][k] : 0;
+                q[k] = p[k] + change;
+                size += change * change;
+            }
+            QList<double> tried;
+            misses(q, t, f, &tried);
+            const double then = cost(tried);
+            if (then < now) {
+                std::copy(q, q + 6, p);
+                r = tried;
+                now = then;
+                lambda = std::max(1e-7, lambda / 4);
+                if (size < 1e-12)
+                    break;
+            } else {
+                lambda *= 8;
+                if (lambda > 1e6)
+                    break;
+            }
+        }
+        if (!r.isEmpty()) {
+            total += std::sqrt(now / (r.size() / 2));
+            ++counted;
+        }
+        solved << std::array<double, 6>{p[0], p[1], p[2], p[3], p[4], p[5]};
+    }
+    for (int k = 0; k < 6; ++k) {
+        QList<Key> keys;
+        for (const Key &key : camera.keys.value(names[k]))
+            if (key.t < from - 1e-9 || key.t > from + (frames - 1) * step + 1e-9)
+                keys << key;
+        for (int f = 0; f < solved.size(); ++f)
+            keys << Key{from + f * step, std::round(solved.at(f)[k] * 1e5) / 1e5, "linear"};
+        std::sort(keys.begin(), keys.end(), [](const Key &x, const Key &y) { return x.t < y.t; });
+        camera.keys[names[k]] = keys;
+    }
+    if (residual)
+        *residual = counted ? total / counted : 0;
+    return true;
+}
+
+bool solveCamera(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &points, double from, double to, QString *error,
+                 double *residual) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (video < 0 || video >= scene.layers.size() || !scene.layers.at(video).raw.contains("video"))
+        return fail("Solve on a video layer.");
+    if (points.size() < 4)
+        return fail("Pick four points or more, spread over the video, on things that stand still.");
+    const double step = 1 / std::max(1.0, scene.fps);
+    from = std::clamp(from, 0.0, scene.duration);
+    to = std::clamp(to, from, scene.duration);
+    const int frames = int(std::lround((to - from) / step)) + 1;
+    QList<QList<QPointF>> paths;
+    for (const QPointF &point : points) {
+        QString why;
+        const QList<QPointF> path = follow(scene, assets, video, point, from, frames, &why);
+        if (path.isEmpty())
+            return fail(QString("Point %1: %2").arg(paths.size() + 1).arg(why));
+        paths << path;
+    }
+    return solveCameraFromTracks(scene, assets, paths, from, error, residual);
 }
 
 bool isModel(const QString &path) {

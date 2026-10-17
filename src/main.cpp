@@ -85,12 +85,14 @@ const char *Usage = R"(Usage:
                                          Add a video clip as a layer that plays (its frames written
                                          into the project), from start seconds, at a speed, looping
                                          unless --hold
-  omotion track <project> <video-layer> <x,y> [<x,y>...] [--from <s>] [--to <s>] [--onto <layer>] [--stabilize]
+  omotion track <project> <video-layer> <x,y> [<x,y>...] [--from <s>] [--to <s>] [--onto <layer>] [--stabilize] [--camera]
                                          Follow the point of a video under x,y (canvas pixels) frame
                                          by frame, and key a layer (or a new empty) to follow it;
                                          with more points, solve how the footage moves, turns and
                                          grows, and key that (x, y, rotation, scale); --stabilize
-                                         keys the video the opposite way, to hold it still
+                                         keys the video the opposite way, to hold it still; --camera
+                                         solves the camera in depth from four points or more on a
+                                         world made from the video's frame, and keys it
   omotion model <project> <file> <right,up,ahead> [--size <meters>]
                                          Import a 3D model (glTF, GLB or OBJ) into a world, standing
                                          there, that tall at its longest
@@ -710,13 +712,15 @@ int command(const QStringList &args) {
         QList<QPointF> points;
         double from = 0, to = edited.duration;
         QString onto;
-        bool stabilize = false;
+        bool stabilize = false, camera = false;
         for (int i = 4; i < args.size(); ++i) {
             const QStringList xy = args.at(i).split(',');
             if (xy.size() == 2 && !args.at(i).startsWith("--"))
                 points << QPointF(xy.at(0).toDouble(), xy.at(1).toDouble());
             else if (args.at(i) == "--stabilize")
                 stabilize = true;
+            else if (args.at(i) == "--camera")
+                camera = true;
             else if (i + 1 < args.size() && args.at(i) == "--from")
                 from = args.at(++i).toDouble();
             else if (i + 1 < args.size() && args.at(i) == "--to")
@@ -728,6 +732,13 @@ int command(const QStringList &args) {
         }
         if (points.isEmpty())
             return fail("track takes a point, x,y, or more.");
+        if (camera) {
+            double residual = 0;
+            if (!Project::solveCamera(edited, assets, video, points, from, to, &error, &residual) || !Project::save(directory, edited, &error))
+                return fail(error);
+            QTextStream(stdout) << QString("The camera is solved, the points %1 px off on average.\n").arg(residual, 0, 'f', 2);
+            return 0;
+        }
         // One point is followed; more (or holding it still) solve the move.
         const int keyed = points.size() == 1 && !stabilize
                               ? Project::track(edited, assets, video, points.first(), from, to, &error, onto)

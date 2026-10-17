@@ -2724,6 +2724,48 @@ private slots:
         QVERIFY(!throwsIntoWorld(scene, scene.layers[smoke]));
     }
 
+    void theCameraIsSolvedInDepth() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        scene.duration = 1;
+        scene.fps = 10;
+        // A camera that moves right and ahead, and turns a little.
+        Scene truth = scene;
+        truth.camera.keys["worldX"] = {Key{0, 0, "linear"}, Key{1, .3, "linear"}};
+        truth.camera.keys["worldZ"] = {Key{0, 0, "linear"}, Key{1, .5, "linear"}};
+        truth.camera.keys["yaw"] = {Key{0, 0, "linear"}, Key{1, 3, "linear"}};
+        // Points of the picture, followed as the true camera sees them.
+        const QSizeF canvas(scene.width, scene.height);
+        const World::View start = World::cameraAt(scene, assets, 0);
+        QList<QList<QPointF>> paths;
+        for (const QPointF &p : {QPointF(40, 60), QPointF(360, 70), QPointF(60, 180), QPointF(340, 185), QPointF(200, 120),
+                                  QPointF(120, 150), QPointF(280, 40), QPointF(100, 30)}) {
+            QVector3D where;
+            QVERIFY(World::pick(scene, assets, 0, start, canvas, p, &where) >= 0);
+            QList<QPointF> path;
+            for (int f = 0; f <= 10; ++f) {
+                QPointF seen;
+                QVERIFY(World::project(World::cameraAt(truth, assets, f / 10.0), canvas, where, &seen));
+                path << seen;
+            }
+            QVERIFY(QLineF(path.first(), p).length() < .5);
+            paths << path;
+        }
+        QString error;
+        double residual = -1;
+        QVERIFY2(Project::solveCameraFromTracks(scene, assets, paths, 0, &error, &residual), qPrintable(error));
+        QVERIFY2(residual < .5, qPrintable(QString::number(residual)));
+        for (const char *name : {"worldX", "worldZ", "yaw", "worldY", "pitch", "rotation"}) {
+            const double got = scene.value(scene.camera, name, 1), want = truth.value(truth.camera, name, 1);
+            QVERIFY2(std::abs(got - want) < (QByteArray(name).startsWith("world") ? .03 : .3), qPrintable(QString("%1 %2 %3").arg(name).arg(got).arg(want)));
+        }
+        // Too few points on the world say so.
+        Scene few = Project::load(project, nullptr);
+        QVERIFY(!Project::solveCameraFromTracks(few, assets, paths.mid(0, 3), 0, &error));
+    }
+
     void lightsAndMaterialsInAWorld() {
         QTemporaryDir dir;
         Backend backend;

@@ -31,7 +31,7 @@ Rectangle {
                      ["Shift+P", "Path: click points for the layer to follow from the playhead (Shift+Enter turns with it)"],
                      ["Shift+A", "Add an empty, a point to aim at"],
                      ["Shift+B", "Draw strokes, frame by frame (right-click takes one back)"],
-                     ["Shift+T", "Track points on a video: Enter follows them (more than one solves its move), Shift+Enter holds it still"],
+                     ["Shift+T", "Track points on a video: Enter follows them (more than one solves its move), Shift+Enter holds it still, Ctrl+Enter solves the camera in depth on a world"],
                      ["Ctrl+Shift+F", "Film: this project's shots in a row, previewed (Space plays), joined and exported"],
                      ["Inspector ▸ Rig", "Reach (IK arm) for an empty, look at a layer, roll as a wheel on a body"],
                      ["N", "A ready-made motion: sway, float, pulse, bounce, spin, fade in, or one you saved"],

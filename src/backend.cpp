@@ -965,6 +965,27 @@ void Backend::setCloth(const QString &name, const QVariant &value) {
     changed();
 }
 
+void Backend::solveCamera() {
+    if (m_tool != "track" || m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
+        return setNotice("Select a video layer to track points on.");
+    Scene scene = m_scene;
+    QString error;
+    double residual = 0;
+    setBusy("Solving the camera…");
+    QCoreApplication::processEvents();
+    const bool solved = Project::solveCamera(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, &error, &residual);
+    setBusy({});
+    if (!solved)
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    setTool("move");
+    changed();
+    selectCamera();
+    setNotice(QString("The camera moves as the footage's did, from here to the end (the points %1 px off on average): what you add to the world stays put in it.")
+                  .arg(residual, 0, 'f', 1));
+}
+
 void Backend::setWarp(const QString &name, double value) {
     Scene scene = m_scene;
     QString error;

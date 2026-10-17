@@ -240,6 +240,21 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
 int solve(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &points, double from, double to, bool stabilize,
           QString *error, const QString &onto = {});
 
+// Solving the camera in depth, as Blender's camera solver does: points of
+// a video layer followed from one time to another, where they are in the
+// world (made from the video's frame then, so its depth is known), and so
+// where the camera must have been, and how turned, for each to be seen
+// where it was followed to. Keys the scene's camera (worldX, worldY,
+// worldZ, yaw, pitch, rotation) through that stretch; the error, when it
+// can't, says why. How far off the points are left (pixels, on average)
+// comes back in residual.
+bool solveCamera(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &points, double from, double to, QString *error,
+                 double *residual = nullptr);
+// The same from tracks already made: each point's place on the canvas at
+// each frame from from on.
+bool solveCameraFromTracks(Scene &scene, AssetCache &assets, const QList<QList<QPointF>> &paths, double from, QString *error,
+                           double *residual = nullptr);
+
 // Copies an image into the project's assets and adds it as a layer on top.
 int importImage(Scene &scene, const QString &directory, const QString &path, QString *error);
 

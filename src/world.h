@@ -230,8 +230,9 @@ bool project(const View &view, const QSizeF &size, const QVector3D &point, QPoin
 // which way it goes (a unit vector).
 void ray(const View &view, const QSizeF &size, const QPointF &onScreen, QVector3D *origin, QVector3D *direction);
 // The world layer nearest the view under a point of that image, where its
-// picture isn't see-through; -1 for none.
-int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen);
+// picture isn't see-through; -1 for none. where, when wanted, is the point hit.
+int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen,
+         QVector3D *where = nullptr);
 // The corners of a world layer's mesh box where it is at time t (8 points:
 // bit 0 of the index picks x's end, bit 1 y's, bit 2 z's), and its pivot
 // there; false for no mesh.

@@ -1472,7 +1472,8 @@ bool hitTriangle(const QVector3D &origin, const QVector3D &direction, const QVec
 }
 }
 
-int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen) {
+int pick(const Scene &scene, AssetCache &assets, double t, const View &view, const QSizeF &size, const QPointF &onScreen,
+         QVector3D *where) {
     QVector3D origin, direction;
     ray(view, size, onScreen, &origin, &direction);
     const Frame now = frame(scene, assets, t);
@@ -1543,6 +1544,8 @@ int pick(const Scene &scene, AssetCache &assets, double t, const View &view, con
             found = place.layer;
         }
     }
+    if (where && found >= 0)
+        *where = origin + direction.normalized() * nearest;
     return found;
 }
 
