@@ -6,9 +6,10 @@ VARYING vec3 toEye;
 VARYING vec3 worldPos;
 
 // Whether something stands between a point and a light: each shaped
-// piece and model as an ellipsoid round its box (up to eight, packed in
-// the occluders texture: its middle, its half sizes, its turn), the line
-// to the light passing through or near it. Its own one doesn't count.
+// piece (a few ellipsoids round its parts) and model (one round its box),
+// thirty-two at most, packed in the occluders texture (its middle, its
+// half sizes and whose it is, its turn), the line to the light passing
+// through or near one. Its own don't count.
 vec3 turnBack(vec4 q, vec3 v)
 {
     vec3 u = -q.xyz;
@@ -18,10 +19,10 @@ vec3 turnBack(vec4 q, vec3 v)
 float shadowed(vec3 p, vec3 light)
 {
     float lit = 1.0;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 32; ++i) {
         if (float(i) >= occluderCount)
             break;
-        if (float(i) == ownOccluder)
+        if (texelFetch(occluders, ivec2(1, i), 0).w == ownLayer)
             continue;
         vec3 middle = texelFetch(occluders, ivec2(0, i), 0).xyz;
         vec3 size = max(texelFetch(occluders, ivec2(1, i), 0).xyz, vec3(0.001));

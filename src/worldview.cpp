@@ -172,19 +172,17 @@ void WorldSource::update() {
         frame["sheets"] = sheets;
         // Shadows from the lights: each caster's ellipsoid, and which one is
         // a layer's own.
-        QVariantMap ownOccluder;
-        QByteArray packed(8 * 3 * 4 * int(sizeof(float)), '\0');
+        QByteArray packed(32 * 3 * 4 * int(sizeof(float)), '\0');
         float *o = reinterpret_cast<float *>(packed.data());
         for (int k = 0; k < f.occluders.size(); ++k) {
             const World::Occluder &c = f.occluders.at(k);
             float *row = o + k * 12;
             row[0] = c.centre.x(), row[1] = c.centre.y(), row[2] = c.centre.z();
-            row[4] = c.half.x(), row[5] = c.half.y(), row[6] = c.half.z();
+            row[4] = c.half.x(), row[5] = c.half.y(), row[6] = c.half.z(), row[7] = float(c.layer);
             row[8] = c.rotation.x(), row[9] = c.rotation.y(), row[10] = c.rotation.z(), row[11] = c.rotation.scalar();
-            ownOccluder.insert(QString::number(c.layer), k);
         }
         QQuick3DTextureData *texture = occluders();
-        texture->setSize(QSize(3, 8));
+        texture->setSize(QSize(3, 32));
         texture->setFormat(QQuick3DTextureData::RGBA32F);
         texture->setTextureData(packed);
         frame["occluderCount"] = f.occluders.size();
@@ -207,7 +205,6 @@ void WorldSource::update() {
             if (QFileInfo::exists(probe))
                 frame["probe"] = QUrl::fromLocalFile(probe).toString();
         }
-        frame["ownOccluder"] = ownOccluder;
 
         // Puffs face the camera and are drawn far to near, so they blend.
         QList<World::Puff> puffs = f.puffs;

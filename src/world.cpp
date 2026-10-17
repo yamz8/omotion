@@ -985,6 +985,113 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
     return view;
 }
 
+namespace {
+// A shape as a few ellipsoids, one round each part of it: its points
+// gathered into parts by k-means, each part's spread along its own main
+// ways (the eigenvectors of its covariance) giving its size and turn.
+QList<Occluder> partsOf(const Mesh &shape) {
+    static QMutex lock;
+    static QHash<QByteArray, QList<Occluder>> cache;
+    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
+    {
+        QMutexLocker locked(&lock);
+        if (cache.contains(key))
+            return cache.value(key);
+    }
+    const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
+    const qsizetype count = shape.vertices.size() / qsizetype(shape.stride * sizeof(float));
+    QList<QVector3D> points;
+    const qsizetype every = std::max<qsizetype>(1, count / 4000);
+    for (qsizetype k = 0; k < count; k += every)
+        points << QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]);
+    QList<Occluder> parts;
+    if (points.size() < 8)
+        return parts;
+    // Started along its longest side, so the parts follow its length.
+    const QVector3D size = shape.maximum - shape.minimum;
+    const int longest = size.x() >= size.y() && size.x() >= size.z() ? 0 : size.y() >= size.z() ? 1 : 2;
+    constexpr int k = 4;
+    QList<QVector3D> centres;
+    for (int c = 0; c < k; ++c) {
+        QVector3D at = (shape.minimum + shape.maximum) / 2;
+        at[longest] = shape.minimum[longest] + size[longest] * (c + .5f) / k;
+        centres << at;
+    }
+    QList<int> of(points.size());
+    for (int round = 0; round < 12; ++round) {
+        for (int i = 0; i < points.size(); ++i) {
+            int best = 0;
+            for (int c = 1; c < k; ++c)
+                if ((points.at(i) - centres.at(c)).lengthSquared() < (points.at(i) - centres.at(best)).lengthSquared())
+                    best = c;
+            of[i] = best;
+        }
+        QList<QVector3D> sums(k);
+        QList<int> counts(k);
+        for (int i = 0; i < points.size(); ++i)
+            sums[of[i]] += points.at(i), ++counts[of[i]];
+        for (int c = 0; c < k; ++c)
+            if (counts[c])
+                centres[c] = sums[c] / float(counts[c]);
+    }
+    for (int c = 0; c < k; ++c) {
+        double m[3][3] = {};
+        int n = 0;
+        for (int i = 0; i < points.size(); ++i) {
+            if (of[i] != c)
+                continue;
+            const QVector3D d = points.at(i) - centres.at(c);
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b)
+                    m[a][b] += d[a] * d[b];
+            ++n;
+        }
+        if (n < 4)
+            continue;
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                m[a][b] /= n;
+        // Its main ways, by Jacobi's rotations.
+        double e[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        for (int sweep = 0; sweep < 20; ++sweep)
+            for (int p = 0; p < 2; ++p)
+                for (int q = p + 1; q < 3; ++q) {
+                    if (std::abs(m[p][q]) < 1e-12)
+                        continue;
+                    const double theta = .5 * std::atan2(2 * m[p][q], m[q][q] - m[p][p]);
+                    const double cs = std::cos(theta), sn = std::sin(theta);
+                    for (int r = 0; r < 3; ++r) {
+                        const double rp = m[r][p], rq = m[r][q];
+                        m[r][p] = cs * rp - sn * rq, m[r][q] = sn * rp + cs * rq;
+                    }
+                    for (int r = 0; r < 3; ++r) {
+                        const double pr = m[p][r], qr = m[q][r];
+                        m[p][r] = cs * pr - sn * qr, m[q][r] = sn * pr + cs * qr;
+                    }
+                    for (int r = 0; r < 3; ++r) {
+                        const double rp = e[r][p], rq = e[r][q];
+                        e[r][p] = cs * rp - sn * rq, e[r][q] = sn * rp + cs * rq;
+                    }
+                }
+        QVector3D axes[3];
+        for (int a = 0; a < 3; ++a)
+            axes[a] = QVector3D(float(e[0][a]), float(e[1][a]), float(e[2][a])).normalized();
+        if (QVector3D::dotProduct(QVector3D::crossProduct(axes[0], axes[1]), axes[2]) < 0)
+            axes[2] = -axes[2];
+        Occluder part;
+        part.centre = centres.at(c);
+        // A box's points spread its half size over the root of three.
+        part.half = QVector3D(float(std::sqrt(std::max(m[0][0], 1e-8)) * 1.8), float(std::sqrt(std::max(m[1][1], 1e-8)) * 1.8),
+                              float(std::sqrt(std::max(m[2][2], 1e-8)) * 1.8));
+        part.rotation = QQuaternion::fromAxes(axes[0], axes[1], axes[2]);
+        parts << part;
+    }
+    QMutexLocker locked(&lock);
+    cache.insert(key, parts);
+    return parts;
+}
+}
+
 Frame frame(const Scene &scene, AssetCache &assets, double t) {
     Frame frame;
     const Info world = info(scene);
@@ -1180,7 +1287,7 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     // With lights about, what can cast shadows from them.
     if (!frame.lights.isEmpty()) {
         auto add = [&](int index, const QList<QVector3D> &corners) {
-            if (corners.size() != 8 || frame.occluders.size() >= 8)
+            if (corners.size() != 8 || frame.occluders.size() >= 32)
                 return;
             const QVector3D x = corners.at(1) - corners.at(0), y = corners.at(2) - corners.at(0), z = corners.at(4) - corners.at(0);
             if (x.length() < 1e-4f || y.length() < 1e-4f || z.length() < 1e-4f)
@@ -1209,13 +1316,18 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             const Mesh shape = mesh(scene, assets, place.layer);
             if (shape.isNull())
                 continue;
-            QList<QVector3D> corners;
-            for (int k = 0; k < 8; ++k) {
-                const QVector3D rest(k & 1 ? shape.maximum.x() : shape.minimum.x(), k & 2 ? shape.maximum.y() : shape.minimum.y(),
-                                     k & 4 ? shape.maximum.z() : shape.minimum.z());
-                corners << place.position + place.rotation.rotatedVector(rest * place.scale);
+            // A few ellipsoids, each round a part of its shape, so its
+            // shadow is shaped like it.
+            for (const Occluder &part : partsOf(shape)) {
+                if (frame.occluders.size() >= 32)
+                    break;
+                Occluder o;
+                o.layer = place.layer;
+                o.centre = place.position + place.rotation.rotatedVector(part.centre * place.scale);
+                o.half = part.half * place.scale;
+                o.rotation = place.rotation * part.rotation;
+                frame.occluders << o;
             }
-            add(place.layer, corners);
         }
     }
     return frame;

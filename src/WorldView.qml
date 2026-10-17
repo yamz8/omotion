@@ -195,7 +195,7 @@ Item {
                         property real lightCount: (view.frame.lights || []).length
                         // What stands between it and the lights.
                         property real occluderCount: view.frame.occluderCount || 0
-                        property real ownOccluder: { const own = (view.frame.ownOccluder || {})[String(holder.modelData.layer)]; return own === undefined ? -1 : own }
+                        property real ownLayer: holder.modelData.layer
                         property TextureInput occluders: TextureInput { texture: view.occluderTexture }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.
@@ -249,7 +249,7 @@ Item {
                         property real lightCount: (view.frame.lights || []).length
                         // What stands between it and the lights.
                         property real occluderCount: view.frame.occluderCount || 0
-                        property real ownOccluder: { const own = (view.frame.ownOccluder || {})[String(holder.modelData.layer)]; return own === undefined ? -1 : own }
+                        property real ownLayer: holder.modelData.layer
                         property TextureInput occluders: TextureInput { texture: view.occluderTexture }
                         // Depth of field (not in the free view): how far is sharp, how much
                         // the rest blurs.

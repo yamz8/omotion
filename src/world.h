@@ -201,7 +201,7 @@ struct Frame {
     QList<Light> lights;
     QColor haze{200, 140, 160};
     QList<Shadow> shadows;
-    QList<Occluder> occluders;  // Eight at most, only with lights about.
+    QList<Occluder> occluders;  // Thirty-two at most, only with lights about.
     QList<Burst> bursts;
     QList<Puff> puffs;
     QColor dust{217, 160, 142};

@@ -2620,11 +2620,20 @@ private slots:
         const QVector3D eye = World::pictureToWorld(World::info(scene)).map(QVector3D());
         Project::addLight(scene, "lamp", QVector3D(-4, 6, eye.z() - unlit.shadows.first().position.z()), QJsonObject{{"power", 2}, {"reach", 20}});
         const World::Frame lit = World::frame(scene, assets, 0);
-        QCOMPARE(lit.occluders.size(), 1);
-        QCOMPARE(lit.occluders.first().layer, piece);
+        // A few ellipsoids round its parts, inside its box, together about
+        // as big as it.
+        QVERIFY(lit.occluders.size() >= 2 && lit.occluders.size() <= 4);
         const World::Mesh body = World::mesh(scene, assets, piece);
-        QVERIFY((lit.occluders.first().centre - (body.minimum + body.maximum) / 2).length() < .01);
-        QVERIFY(std::abs(lit.occluders.first().half.y() - (body.maximum.y() - body.minimum.y()) / 2) < .01);
+        const QVector3D size = body.maximum - body.minimum;
+        double volume = 0;
+        for (const World::Occluder &o : lit.occluders) {
+            QCOMPARE(o.layer, piece);
+            for (int k = 0; k < 3; ++k)
+                QVERIFY(o.centre[k] >= body.minimum[k] - 1e-3 && o.centre[k] <= body.maximum[k] + 1e-3);
+            volume += 4.0 / 3 * M_PI * o.half.x() * o.half.y() * o.half.z();
+        }
+        const double ball = 4.0 / 3 * M_PI * size.x() * size.y() * size.z() / 8;
+        QVERIFY2(volume > ball * .4 && volume < ball * 2.5, qPrintable(QString("%1 %2").arg(volume).arg(ball)));
     }
 
     void emittersInAWorldThrowInThreeD() {
