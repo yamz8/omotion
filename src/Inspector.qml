@@ -345,6 +345,70 @@ Rectangle {
                 }
             }
 
+            // A light: its colour, power and reach.
+            ColumnLayout {
+                visible: backend.selected >= 0 && Object.keys(inspector.v.light || {}).length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var light: inspector.v.light || {}
+                Label { text: "Light"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Colour"; color: win.text; Layout.preferredWidth: 90 }
+                    Rectangle { width: 18; height: 18; radius: 3; color: parent.parent.light.color || "white"; border.color: win.line }
+                    SmallField {
+                        id: lightColour
+                        Layout.fillWidth: true
+                        readonly property string value: parent.parent.light.color || ""
+                        onValueChanged: if (!activeFocus) text = value
+                        Component.onCompleted: text = value
+                        onAccepted: { backend.setLightValue("color", text); inspector.done() }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Power"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.light.power || 0; onCommitted: function (n) { backend.setLightValue("power", n) } }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Reach m"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.light.reach || 0; onCommitted: function (n) { backend.setLightValue("reach", n) } }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "It adds to the picture's own light, on what faces it, half as bright at its reach. Its opacity dims it, and keys like any."
+                }
+            }
+            // A piece's material, under lights.
+            ColumnLayout {
+                visible: backend.selected >= 0 && !!inspector.v.inWorld && Object.keys(inspector.v.light || {}).length === 0
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var material: inspector.v.material || {}
+                Label { text: "Material"; color: win.text; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Shine"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.material.shine || 0; onCommitted: function (n) { backend.setMaterial("shine", n) } }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label { text: "Roughness"; color: win.text; Layout.preferredWidth: 90 }
+                    NumberField { Layout.fillWidth: true; value: parent.parent.material.roughness === undefined ? .5 : parent.parent.material.roughness; onCommitted: function (n) { backend.setMaterial("roughness", n) } }
+                }
+            }
+
             // A 3D shape's mesh modifiers.
             ColumnLayout {
                 visible: backend.selected >= 0 && !!inspector.v.shaped

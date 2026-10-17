@@ -10,6 +10,16 @@ Item {
     id: view
     property var source: null
     readonly property var frame: source ? source.frame : ({})
+    // A light's position or colour (times its power), black when there's
+    // no such light; and how far it reaches.
+    function light(i, key) {
+        const list = frame.lights || [];
+        return i < list.length ? list[i][key] : Qt.vector3d(0, 0, 0);
+    }
+    function reach(i) {
+        const list = frame.lights || [];
+        return i < list.length ? list[i].reach : 1;
+    }
 
     View3D {
         anchors.fill: parent
@@ -100,6 +110,21 @@ Item {
                         vertexShader: "qrc:/shape.vert"
                         fragmentShader: "qrc:/shape.frag"
                         property color wrap: holder.place.wrap || "black"
+                        // Its material, and the lights (four at most).
+                        property real shine: holder.place.shine || 0
+                        property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
+                        property vector3d lightAt0: view.light(0, "position")
+                        property vector3d lightColour0: view.light(0, "colour")
+                        property real lightReach0: view.reach(0)
+                        property vector3d lightAt1: view.light(1, "position")
+                        property vector3d lightColour1: view.light(1, "colour")
+                        property real lightReach1: view.reach(1)
+                        property vector3d lightAt2: view.light(2, "position")
+                        property vector3d lightColour2: view.light(2, "colour")
+                        property real lightReach2: view.reach(2)
+                        property vector3d lightAt3: view.light(3, "position")
+                        property vector3d lightColour3: view.light(3, "colour")
+                        property real lightReach3: view.reach(3)
                         property real haze: holder.place.haze || 0
                         property color hazeColour: view.frame.haze || "white"
                         property TextureInput picture: TextureInput {
@@ -127,6 +152,22 @@ Item {
                         sourceBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.One
                         destinationBlend: holder.modelData.opaque ? CustomMaterial.NoBlend : CustomMaterial.OneMinusSrcAlpha
                         property real fade: holder.place.opacity === undefined ? 1 : holder.place.opacity
+                        // Its material, and the lights (four at most).
+                        property real shine: holder.place.shine || 0
+                        property real roughness: holder.place.roughness === undefined ? 0.5 : holder.place.roughness
+                        property vector3d lightAt0: view.light(0, "position")
+                        property vector3d lightColour0: view.light(0, "colour")
+                        property real lightReach0: view.reach(0)
+                        property vector3d lightAt1: view.light(1, "position")
+                        property vector3d lightColour1: view.light(1, "colour")
+                        property real lightReach1: view.reach(1)
+                        property vector3d lightAt2: view.light(2, "position")
+                        property vector3d lightColour2: view.light(2, "colour")
+                        property real lightReach2: view.reach(2)
+                        property vector3d lightAt3: view.light(3, "position")
+                        property vector3d lightColour3: view.light(3, "colour")
+                        property real lightReach3: view.reach(3)
+
                         property real haze: holder.place.haze || 0
                         property color hazeColour: view.frame.haze || "white"
                         property TextureInput picture: TextureInput {

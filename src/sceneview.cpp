@@ -190,6 +190,19 @@ void SceneView::paintGizmo(QPainter *painter) {
         const QPointF top = (to.map(gizmo.camera.at(1)) + to.map(gizmo.camera.at(2))) / 2;
         painter->drawLine(top, top + (top - to.map(gizmo.camera.at(0))) * .15);
     }
+    // Lights: little suns in their colours.
+    for (const auto &[point, colour] : gizmo.lights) {
+        const QPointF at = to.map(point);
+        painter->setPen(QPen(QColor("#0e0e10"), 1));
+        painter->setBrush(colour);
+        painter->drawEllipse(at, 5, 5);
+        painter->setPen(QPen(colour, 1.5));
+        for (int k = 0; k < 8; ++k) {
+            const double a = M_PI / 4 * k;
+            const QPointF way(std::cos(a), std::sin(a));
+            painter->drawLine(at + way * 8, at + way * 12);
+        }
+    }
     // The others selected with it, fainter.
     for (const QList<QPointF> &box : gizmo.others) {
         QColor faint = m_accent;
@@ -355,10 +368,10 @@ void SceneView::paint(QPainter *painter) {
     painter->drawRect(canvas);
 
     // A world's pieces are outlined where they are in 3D, with handles.
-    const bool inWorld = m_backend->world()->active() && World::layers(scene).contains(selected);
-    if (inWorld)
+    const bool inWorld = m_backend->world()->active() && (World::layers(scene).contains(selected) || World::lightLayers(scene).contains(selected));
+    if (inWorld || (m_backend->world()->active() && !World::lightLayers(scene).isEmpty()))
         paintGizmo(painter);
-    else if (selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
+    if (!inWorld && selected >= 0 && selected < scene.layers.size() && !m_backend->playing() &&
         scene.layers.at(selected).particles.isEmpty()) {
         const Layer &layer = scene.layers.at(selected);
         const QSizeF size = m_backend->assets().size(layer.source);

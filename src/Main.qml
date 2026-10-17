@@ -159,6 +159,7 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+A"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addEmpty() }
     // Drawing, as Grease Pencil: strokes on a drawing layer, frame by frame.
     Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.startDrawing() }
+    Shortcut { sequence: "Shift+L"; context: Qt.ApplicationShortcut; enabled: win.ready; onActivated: backend.addLight() }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startReshape() }
     Shortcut { sequence: "Shift+R"; context: Qt.ApplicationShortcut; enabled: win.hasLayer && backend.tool === "move"; onActivated: backend.startBrush() }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.ready && backend.tool === "brush"; onActivated: backend.finishBrush() }

@@ -104,8 +104,17 @@ void WorldSource::update() {
                                                                      {"rotation", QVariant::fromValue(place.rotation)},
                                                                      {"scale", place.scale},
                                                                      {"opacity", place.opacity},
-                                                                     {"visible", place.visible}});
+                                                                     {"visible", place.visible},
+                                                                     {"shine", place.shine},
+                                                                     {"roughness", place.roughness}});
         frame["places"] = places;
+        // Up to four lights, for the shaders.
+        QVariantList lights;
+        for (const World::Light &light : f.lights.mid(0, 4))
+            lights.append(QVariantMap{{"position", QVariant::fromValue(light.position)},
+                                      {"colour", QVariant::fromValue(light.colour)},
+                                      {"reach", light.reach}});
+        frame["lights"] = lights;
         QVariantList shadows;
         for (const World::Shadow &shadow : f.shadows)
             shadows.append(QVariantMap{{"position", QVariant::fromValue(shadow.position)},
@@ -181,7 +190,27 @@ void WorldGeometry::rebuild() {
     clear();
     if (m_source && (m_layer >= 0 || m_layer == World::FarLayer)) {
         const World::Mesh &mesh = m_source->mesh(m_layer);
-        if (!mesh.isNull()) {
+        if (!mesh.isNull() && !mesh.normals.isEmpty() && mesh.stride == 5) {
+            // A grid's normals go in beside each vertex, for the GPU only.
+            const qsizetype count = mesh.normals.size() / qsizetype(3 * sizeof(float));
+            QByteArray interleaved(count * 8 * qsizetype(sizeof(float)), Qt::Uninitialized);
+            const float *v = reinterpret_cast<const float *>(mesh.vertices.constData());
+            const float *n = reinterpret_cast<const float *>(mesh.normals.constData());
+            float *out = reinterpret_cast<float *>(interleaved.data());
+            for (qsizetype i = 0; i < count; ++i) {
+                std::copy(v + i * 5, v + i * 5 + 5, out + i * 8);
+                std::copy(n + i * 3, n + i * 3 + 3, out + i * 8 + 5);
+            }
+            setVertexData(interleaved);
+            setIndexData(mesh.indices);
+            setStride(8 * sizeof(float));
+            setPrimitiveType(PrimitiveType::Triangles);
+            addAttribute(Attribute::PositionSemantic, 0, Attribute::F32Type);
+            addAttribute(Attribute::TexCoord0Semantic, 3 * sizeof(float), Attribute::F32Type);
+            addAttribute(Attribute::NormalSemantic, 5 * sizeof(float), Attribute::F32Type);
+            addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
+            setBounds(mesh.minimum, mesh.maximum);
+        } else if (!mesh.isNull()) {
             setVertexData(mesh.vertices);
             setIndexData(mesh.indices);
             setStride(mesh.stride * sizeof(float));

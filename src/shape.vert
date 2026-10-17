@@ -3,6 +3,7 @@ VARYING vec4 own;
 VARYING float worn;
 VARYING vec3 facingNormal;
 VARYING vec3 toEye;
+VARYING vec3 worldPos;
 
 void MAIN()
 {
@@ -10,6 +11,7 @@ void MAIN()
     own = COLOR;
     worn = UV1.x;
     facingNormal = normalize(NORMAL_MATRIX * NORMAL);
-    toEye = CAMERA_POSITION - (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    worldPos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    toEye = CAMERA_POSITION - worldPos;
     POSITION = MODELVIEWPROJECTION_MATRIX * vec4(VERTEX, 1.0);
 }

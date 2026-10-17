@@ -457,6 +457,30 @@ ShapeFit fitShape(const Scene &scene, AssetCache &assets, int index) {
     return fit;
 }
 
+// A grid's normals, from across a few cells either way, so the lights
+// see the lie of the land rather than every little step in the AI's
+// distances.
+void addNormals(Mesh &mesh) {
+    if (mesh.columns <= 0)
+        return;
+    const float *v = reinterpret_cast<const float *>(mesh.vertices.constData());
+    const int columns = mesh.columns, rows = int(mesh.vertices.size() / qsizetype(mesh.stride * sizeof(float))) / columns;
+    auto at = [&](int r, int c) {
+        r = std::clamp(r, 0, rows - 1), c = std::clamp(c, 0, columns - 1);
+        const float *p = v + (size_t(r) * columns + c) * mesh.stride;
+        return QVector3D(p[0], p[1], p[2]);
+    };
+    mesh.normals.resize(qsizetype(columns) * rows * 3 * sizeof(float));
+    float *n = reinterpret_cast<float *>(mesh.normals.data());
+    constexpr int reach = 2;
+    for (int r = 0; r < rows; ++r)
+        for (int c = 0; c < columns; ++c) {
+            const QVector3D across = at(r, c + reach) - at(r, c - reach), down = at(r + reach, c) - at(r - reach, c);
+            const QVector3D normal = QVector3D::crossProduct(down, across).normalized();
+            *n++ = normal.x(), *n++ = normal.y(), *n++ = normal.z();
+        }
+}
+
 // A shape's mesh modifiers, as Blender's, in order: "smooth" relaxes it
 // (Taubin's way, so it doesn't shrink) "times" over; "simplify" merges
 // points closer than a "cells"th of its size into one.
@@ -646,6 +670,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
                 const quint32 a = r * (cols + 1) + c, b = a + 1, d = a + cols + 1, e = d + 1;
                 *i++ = a, *i++ = d, *i++ = b, *i++ = b, *i++ = d, *i++ = e;
             }
+        addNormals(mesh);
         mesh.minimum = QVector3D(-1e4f, -1e4f, -1e4f);
         mesh.maximum = QVector3D(1e4f, 1e4f, 1e4f);
         return mesh;
@@ -853,6 +878,7 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
     mesh.indices = QByteArray(reinterpret_cast<const char *>(kept.constData()), kept.size() * qsizetype(sizeof(quint32)));
 
     mesh.pivot = pivot(scene, assets, index);
+    addNormals(mesh);
     return mesh;
 }
 
@@ -957,6 +983,22 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
 
     frame.time = t;
     frame.haze = world.haze;
+    for (const int index : lightLayers(scene)) {
+        const Layer &layer = scene.layers.at(index);
+        if (!layer.visible)
+            continue;
+        const QJsonObject settings = layer.raw.value("light").toObject();
+        const QColor colour(settings.value("color").toString("#fff2dd"));
+        const float power = float(std::max(0.0, settings.value("power").toDouble(1)) * std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
+        if (power <= 0)
+            continue;
+        Light light;
+        light.layer = index;
+        light.position = lightPosition(scene, index, t);
+        light.colour = QVector3D(float(colour.redF()), float(colour.greenF()), float(colour.blueF())) * power;
+        light.reach = float(std::max(.1, settings.value("reach").toDouble(10)));
+        frame.lights << light;
+    }
     for (const int index : layers(scene)) {
         const Layer &layer = scene.layers.at(index);
         const QVector3D centre = pivot(scene, assets, index);
@@ -984,6 +1026,9 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         Placement place;
         place.layer = index;
         place.visible = layer.visible;
+        const QJsonObject material = layer.raw.value("material").toObject();
+        place.shine = float(std::clamp(material.value("shine").toDouble(0), 0.0, 1.0));
+        place.roughness = float(std::clamp(material.value("roughness").toDouble(.5), 0.0, 1.0));
         place.opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
         // Sizes in a world come from distances: a layer's 2D scale (how its
         // picture fits the canvas, or a flat animation) doesn't apply.
@@ -1055,6 +1100,20 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         }
     }
     return frame;
+}
+
+QList<int> lightLayers(const Scene &scene) {
+    QList<int> list;
+    for (int i = 0; i < scene.layers.size(); ++i)
+        if (scene.layers.at(i).raw.contains("light"))
+            list << i;
+    return list;
+}
+
+QVector3D lightPosition(const Scene &scene, int index, double t) {
+    const Layer &layer = scene.layers.at(index);
+    return pictureToWorld(info(scene)).map(QVector3D(0, 0, 0)) +
+           QVector3D(float(scene.value(layer, "worldX", t)), float(scene.value(layer, "worldY", t)), float(-scene.value(layer, "worldZ", t)));
 }
 
 View cameraView(const Frame &frame) { return View{frame.cameraPosition, frame.cameraRotation, frame.fov}; }

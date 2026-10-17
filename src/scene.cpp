@@ -379,7 +379,8 @@ Scene Scene::fromJson(const QJsonObject &json, QString *error) {
             return fail(QString("Layer \"%1\" has particles of kind \"%2\"; use one of %3.")
                             .arg(layer.name, layer.particles.value("kind").toString(), particleKinds().join(", ")));
         // An empty is a point to aim at or move by, with nothing to draw.
-        if (layer.source.isEmpty() && layer.particles.isEmpty() && !object.value("empty").toBool() && !object.contains("drawing"))
+        if (layer.source.isEmpty() && layer.particles.isEmpty() && !object.value("empty").toBool() && !object.contains("drawing") &&
+            !object.contains("light"))
             return fail(QString("Layer \"%1\" has no source image.").arg(layer.name));
         if (names.contains(layer.name))
             return fail(QString("Two layers are named \"%1\"; names must be unique.").arg(layer.name));

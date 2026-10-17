@@ -194,6 +194,8 @@ public:
         // its frame; and a grid on the ground, a line a meter.
         QList<QPointF> camera;
         QList<QPolygonF> grid;
+        // The lights, where they are and their colours.
+        QList<QPair<QPointF, QColor>> lights;
     };
     Gizmo gizmo() const;
     // An animated property of what's selected, as the graph editor shows it:
@@ -294,6 +296,12 @@ public:
     Q_INVOKABLE void strokeTo(double x, double y);
     Q_INVOKABLE void endStroke();
     Q_INVOKABLE void undoStroke();
+    // Lights in a world: a new one in front of the camera; the selected
+    // light's settings ("color", "power", "reach"); a piece's material
+    // ("shine", "roughness").
+    Q_INVOKABLE void addLight();
+    Q_INVOKABLE void setLightValue(const QString &name, const QVariant &value);
+    Q_INVOKABLE void setMaterial(const QString &name, double value);
     // The selected piece's shape's modifiers (World::setShapeModifier).
     Q_INVOKABLE void setShapeModifier(const QString &type, int amount);
     // Rigs the selected layer (see Project::rig: "ik", "lookAt", "wheel"),

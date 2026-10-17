@@ -94,6 +94,8 @@ struct Mesh {
     QVector3D maximum;
     QVector3D pivot;  // Its anchor, in the world, where it turns.
     int columns = 0;  // For a grid, its vertices across; 0 for a shape.
+    // For a grid, a smooth normal a vertex (x, y, z floats), for lights.
+    QByteArray normals;
     bool isNull() const { return vertices.isEmpty(); }
 };
 Mesh mesh(const Scene &scene, AssetCache &assets, int index);
@@ -115,6 +117,9 @@ struct Placement {
     float scale = 1;
     float opacity = 1;
     bool visible = true;
+    // Its material, under the lights: how much it shines, how rough.
+    float shine = 0;
+    float roughness = .5f;
 };
 // A soft shadow on the ground under a shaped piece: darkest when it
 // touches, fainter and wider the higher it is.
@@ -138,8 +143,20 @@ struct Puff {
     float size = 1;   // Across, in meters.
     float alpha = 0;
 };
+// A light in the world: a layer with "light" (its colour, power, and how
+// far it reaches), where its world properties put it from the picture's
+// camera, as bright as its opacity. It adds to the picture's own light.
+struct Light {
+    int layer = -1;
+    QVector3D position;
+    QVector3D colour;  // Times its power.
+    float reach = 10;  // Meters, where it's down to a half.
+};
+QList<int> lightLayers(const Scene &scene);
+QVector3D lightPosition(const Scene &scene, int index, double t);
 struct Frame {
     double time = 0;
+    QList<Light> lights;
     QColor haze{200, 140, 160};
     QList<Shadow> shadows;
     QList<Burst> bursts;

@@ -2131,4 +2131,57 @@ bool removeStroke(Scene &scene, int index, double t) {
     return true;
 }
 
+int addLight(Scene &scene, const QString &name, const QVector3D &at, const QJsonObject &settings) {
+    Layer light;
+    light.name = scene.uniqueName(name.isEmpty() ? QString("light") : name);
+    light.base["worldX"] = at.x();
+    light.base["worldY"] = at.y();
+    light.base["worldZ"] = at.z();
+    QJsonObject values{{"color", "#fff2dd"}, {"power", 1}, {"reach", 4}};
+    for (auto it = settings.begin(); it != settings.end(); ++it)
+        values[it.key()] = it.value();
+    light.raw["light"] = values;
+    scene.layers.append(light);
+    return int(scene.layers.size()) - 1;
+}
+
+bool setLight(Scene &scene, int index, const QString &name, const QVariant &value, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (index < 0 || index >= scene.layers.size() || !scene.layers.at(index).raw.contains("light"))
+        return fail("Select a light.");
+    QJsonObject light = scene.layers.at(index).raw.value("light").toObject();
+    if (name == "color") {
+        const QColor colour(value.toString().trimmed());
+        if (!colour.isValid())
+            return fail(QString("%1 isn't a colour; try #ffcc88.").arg(value.toString()));
+        light["color"] = colour.name();
+    } else if (name == "power" || name == "reach") {
+        bool ok = false;
+        const double number = value.toDouble(&ok);
+        if (!ok || !std::isfinite(number) || number < 0)
+            return fail(QString("A light's %1 is a number of 0 or more.").arg(name));
+        light[name] = name == "reach" ? std::max(.1, number) : std::min(number, 100.0);
+    } else {
+        return fail("A light has a color, a power and a reach.");
+    }
+    scene.layers[index].raw["light"] = light;
+    return true;
+}
+
+bool setMaterial(Scene &scene, int index, const QString &name, double value, QString *error) {
+    if (index < 0 || index >= scene.layers.size() || (name != "shine" && name != "roughness") || !std::isfinite(value)) {
+        if (error)
+            *error = "A material has a shine and a roughness, from 0 to 1.";
+        return false;
+    }
+    QJsonObject material = scene.layers.at(index).raw.value("material").toObject();
+    material[name] = std::clamp(value, 0.0, 1.0);
+    scene.layers[index].raw["material"] = material;
+    return true;
+}
+
 }

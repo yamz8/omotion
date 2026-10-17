@@ -180,6 +180,9 @@ QVariantList Backend::outliner() const {
         if (layer.raw.value("empty").toBool()) {
             kind = "empty";
             detail = "empty";
+        } else if (layer.raw.contains("light")) {
+            kind = "light";
+            detail = "light";
         } else if (layer.raw.contains("drawing")) {
             kind = "drawing";
             detail = QString("%1 drawings").arg(layer.raw.value("drawing").toObject().value("frames").toArray().size());
@@ -604,6 +607,41 @@ void Backend::undoStroke() {
     changed();
 }
 
+void Backend::addLight() {
+    if (!World::info(m_scene).valid)
+        return setNotice("Lights light a world: make one first (Shift+D).");
+    checkpoint();
+    // A little in front of the camera, up a bit, where it'll be seen.
+    const World::Frame now = World::frame(m_scene, m_assets, m_time);
+    const QVector3D origin = World::pictureToWorld(World::info(m_scene)).map(QVector3D(0, 0, 0));
+    const QVector3D ahead = now.cameraRotation.rotatedVector(QVector3D(0, 0, -1));
+    const QVector3D at = now.cameraPosition + ahead * 4 + QVector3D(0, 1, 0) - origin;
+    const int index = Project::addLight(m_scene, "light", QVector3D(at.x(), at.y(), -at.z()), {});
+    changed();
+    select(index);
+    setNotice("A light: move it with its arrows (or G), set its colour, power and reach in the inspector; its opacity dims it, and keys.");
+}
+
+void Backend::setLightValue(const QString &name, const QVariant &value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setLight(scene, m_selected, name, value, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
+void Backend::setMaterial(const QString &name, double value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setMaterial(scene, m_selected, name, value, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::setShapeModifier(const QString &type, int amount) {
     Scene scene = m_scene;
     QString error;
@@ -785,7 +823,9 @@ QVariantMap Backend::values() const {
     }
     map.insert("animated", animated);
     map.insert("links", linkTexts(layer));
-    map.insert("inWorld", World::layers(m_scene).contains(m_selected));
+    map.insert("inWorld", World::layers(m_scene).contains(m_selected) || layer.raw.contains("light"));
+    map.insert("light", layer.raw.value("light").toObject().toVariantMap());
+    map.insert("material", layer.raw.value("material").toObject().toVariantMap());
     map.insert("follow", followOf(m_scene, m_selected));
     if (!layer.particles.isEmpty()) {
         QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
@@ -2740,6 +2780,12 @@ void Backend::pickAt(double x, double y, bool add) {
                             World::info(m_scene).valid ? World::layers(m_scene) : QList<int>());
     }
     if (found < 0 && World::info(m_scene).valid)
+        for (const int index : World::lightLayers(m_scene)) {
+            QPointF at;
+            if (World::project(view(), viewSize(), World::lightPosition(m_scene, index, m_time), &at) && QLineF(at, QPointF(x, y)).length() < 14)
+                found = index;
+        }
+    if (found < 0 && World::info(m_scene).valid)
         found = World::pick(m_scene, m_assets, m_time, view(), viewSize(), QPointF(x, y));
     if (add) {
         if (found >= 0)
@@ -2757,7 +2803,7 @@ QList<int> Backend::handleTargets() const {
     list << main;
     if (main != Scene::CameraIndex)
         for (const int i : m_also)
-            if (World::layers(m_scene).contains(i))
+            if (World::layers(m_scene).contains(i) || World::lightLayers(m_scene).contains(i))
                 list << i;
     return list;
 }
@@ -2767,7 +2813,7 @@ int Backend::handleTarget() const {
         return -1;
     if (m_cameraSelected)
         return m_freeView ? Scene::CameraIndex : -1;
-    return World::layers(m_scene).contains(m_selected) ? m_selected : -1;
+    return World::layers(m_scene).contains(m_selected) || World::lightLayers(m_scene).contains(m_selected) ? m_selected : -1;
 }
 
 Backend::Gizmo Backend::gizmo() const {
@@ -2823,12 +2869,30 @@ Backend::Gizmo Backend::gizmo() const {
                     gizmo.grid << line;
             }
     }
+    for (const World::Light &light : now.lights) {
+        QPointF at;
+        if (World::project(v, size, light.position, &at)) {
+            const QVector3D c = light.colour.normalized();
+            gizmo.lights << qMakePair(at, QColor::fromRgbF(c.x(), c.y(), c.z()).lighter(130));
+        }
+    }
+    // Lights switched off still show, dimmer, so they can be found.
+    for (const int index : World::lightLayers(m_scene)) {
+        bool shown = false;
+        for (const World::Light &light : now.lights)
+            shown |= light.layer == index;
+        QPointF at;
+        if (!shown && World::project(v, size, World::lightPosition(m_scene, index, m_time), &at))
+            gizmo.lights << qMakePair(at, QColor(150, 150, 150));
+    }
     const int target = handleTarget();
     if (target == -1)
         return gizmo;
     QVector3D pivot;
     if (target == Scene::CameraIndex) {
         pivot = now.cameraPosition;
+    } else if (World::lightLayers(m_scene).contains(target)) {
+        pivot = World::lightPosition(m_scene, target, m_time);
     } else {
         QList<QVector3D> corners;
         if (!World::box(m_scene, assets, target, m_time, &corners, &pivot))
@@ -2934,6 +2998,8 @@ void Backend::beginHandle(int handle, double x, double y) {
     QList<QVector3D> corners;
     if (target == Scene::CameraIndex)
         m_handlePivot = World::frame(m_scene, m_assets, m_time).cameraPosition;
+    else if (World::lightLayers(m_scene).contains(target))
+        m_handlePivot = World::lightPosition(m_scene, target, m_time);
     else
         World::box(m_scene, m_assets, target, m_time, &corners, &m_handlePivot);
     emit viewChanged();

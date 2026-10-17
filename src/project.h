@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QPolygonF>
 #include <QString>
+#include <QVector3D>
 
 #include "scene.h"
 
@@ -180,6 +181,13 @@ int addDrawing(Scene &scene, const QString &name);
 bool addStroke(Scene &scene, AssetCache &assets, int layer, double t, const QList<QPointF> &canvas, const QColor &colour,
                double width, QString *error);
 bool removeStroke(Scene &scene, int layer, double t);
+
+// Lights and materials in a world (see World::Light): a light layer at a
+// place in meters (right, up, ahead of the picture's camera); a light's
+// colour, power or reach; a piece's shine or roughness (0 to 1).
+int addLight(Scene &scene, const QString &name, const QVector3D &at, const QJsonObject &settings);
+bool setLight(Scene &scene, int layer, const QString &name, const QVariant &value, QString *error);
+bool setMaterial(Scene &scene, int layer, const QString &name, double value, QString *error);
 
 // What changed between two versions of a scene, in a few words a line:
 // layers added and taken away, and for each layer (and the camera, the

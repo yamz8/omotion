@@ -94,6 +94,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `S` | Give the selected piece of the world a 3D shape |
 | Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click a piece of a world | Pick it where it is in 3D: a box shows round it, arrows drag it along x (red), y (green) and z (blue), and three rings turn it: about y (yaw), x (pitch) and z (roll). Ctrl while dragging snaps to 10 cm and 15° |
+| `Shift+L` | Add a light to a world: a little sun, moved by its arrows or `G`. It adds to the picture's own light, on what faces it (its colour, power and reach in the inspector; its opacity dims it, and keys). A piece's *Material* sets how it shines under lights. `omotion light` and `omotion material` do the same |
 | Shape | In the inspector, for a piece with a 3D shape: *Smooth* relaxes the AI's lumps, *Simplify* makes it lighter; kept apart from the shape as Blender's modifiers are, so 0 takes them away. `omotion mesh` does the same |
 | Look | In the inspector with nothing selected: the scene's grade (exposure, contrast, saturation, warmth, tint), a vignette, bloom (what's brighter than a level glows), and depth of field (a focus and an aperture; in a world, the focus is meters from the camera). The canvas then shows the frame as it's exported. `omotion look` does the same |
 | Emitters | A particle layer's *From* (in the inspector) makes it come from a layer: a wheel throwing dust, a chimney's embers. So many a second, each living a while, carrying on with some of the layer's speed, under gravity and wind. `omotion particles <project> dust --from car --rate 60` does the same |
@@ -344,6 +345,10 @@ photo.omotion/
 - A layer with **`drawing`** has no `source`: `{"frames": [{"t", "strokes":
   [{"color", "width", "points": [[x, y], ...]}]}]}`, points in the layer's
   pixels; each frame shows from its `t` until the next.
+- A layer with **`light`** (no `source`) lights a world: `{"color", "power",
+  "reach"}` (meters, where it's half as bright), placed by its `worldX`,
+  `worldY` and `worldZ` from the picture's camera, dimmed by its opacity. A
+  world piece's **`material`**: `{"shine", "roughness"}`, 0 to 1.
 - **`look`**: the scene's grade over every frame: `exposure` (stops),
   `contrast`, `saturation`, `temperature` and `tint` (-1 to 1), `vignette`
   and `bloom` (0 to 1), `bloomThreshold` (0.75), and depth of field: `focus`

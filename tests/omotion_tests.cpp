@@ -2309,6 +2309,52 @@ private slots:
         QVERIFY(!World::setShapeModifier(scene, 0, "smooth", 2, &error));
     }
 
+    void lightsAndMaterialsInAWorld() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(madeUpWorld(dir)));
+        const World::View shot = backend.view();
+        backend.addLight();
+        const int lamp = backend.selected();
+        QVERIFY(backend.scene().layers.at(lamp).raw.contains("light"));
+        World::Frame frame = World::frame(backend.scene(), backend.assets(), 0);
+        QCOMPARE(frame.lights.size(), 1);
+        // In front of the camera, a little up.
+        const QVector3D ahead = shot.rotation.rotatedVector(QVector3D(0, 0, -1));
+        QVERIFY(QVector3D::dotProduct(frame.lights.first().position - shot.position, ahead) > 3);
+        // Its handles move it; its power and opacity set how bright.
+        const Backend::Gizmo g = backend.gizmo();
+        QCOMPARE(g.arrows.size(), 3);
+        QCOMPARE(g.lights.size(), 1);
+        backend.beginHandle(2, g.pivot.x(), g.pivot.y());
+        backend.handleTo(g.pivot.x(), g.pivot.y() - 40);
+        backend.endHandle(true);
+        QVERIFY(World::frame(backend.scene(), backend.assets(), 0).lights.first().position.y() > frame.lights.first().position.y());
+        backend.setLightValue("power", 2);
+        backend.setLightValue("color", "#ff0000");
+        frame = World::frame(backend.scene(), backend.assets(), 0);
+        QCOMPARE(frame.lights.first().colour, QVector3D(2, 0, 0));
+        backend.setProperty("opacity", .5);
+        QCOMPARE(World::frame(backend.scene(), backend.assets(), 0).lights.first().colour, QVector3D(1, 0, 0));
+        backend.setProperty("opacity", 0);
+        QVERIFY(World::frame(backend.scene(), backend.assets(), 0).lights.isEmpty());
+        QCOMPARE(backend.gizmo().lights.size(), 1);  // Still shown, to find.
+        backend.setLightValue("power", -1);
+        QVERIFY(!backend.error().isEmpty());
+        // A piece's material reaches its placement.
+        backend.select(backend.scene().indexOf("piece"));
+        backend.setMaterial("shine", .7);
+        backend.setMaterial("roughness", 2);
+        for (const World::Placement &place : World::frame(backend.scene(), backend.assets(), 0).layers)
+            if (place.layer == backend.selected()) {
+                QCOMPARE(place.shine, .7f);
+                QCOMPARE(place.roughness, 1.f);
+            }
+        // Grids carry smooth normals for the lights.
+        const World::Mesh ground = World::mesh(backend.scene(), backend.assets(), 0);
+        QCOMPARE(ground.normals.size() / qsizetype(3 * sizeof(float)), ground.vertices.size() / qsizetype(5 * sizeof(float)));
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

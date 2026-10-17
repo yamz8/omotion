@@ -69,6 +69,7 @@ Rectangle {
         ["Draw a path for the layer to follow", "Shift+P", () => (win.idle && backend.selected >= 0), () => backend.setTool("path")],
         ["Remove the layer's rig", "", () => (win.idle && backend.selected >= 0) && (backend.values.rig || []).length > 0, () => backend.unrigSelected()],
         ["Draw: strokes on a drawing layer, frame by frame", "Shift+B", () => win.idle, () => backend.startDrawing()],
+        ["Add a light to the world", "Shift+L", () => win.idle && backend.world.active, () => backend.addLight()],
         ["Make it a rigid body", "", () => (win.idle && backend.selected >= 0), () => backend.setBody(true, false, .3)],
         ["Simulate the bodies from the playhead", "", () => win.idle, () => backend.simulate()],
         ["Redo what's out of date (AI)", "", () => win.idle && backend.staleSteps > 0, () => backend.redoStale()]

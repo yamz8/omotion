@@ -46,6 +46,7 @@ Rectangle {
                    ["Ctrl+click", "Add to the selection: they move together"],
                    ["G", "Grab it: it follows the mouse; X, Y, Z keep to an axis, click places, Esc puts back"],
                    ["`", "Free view: look at the world from anywhere, the shot's camera shown in it"],
+                   ["Shift+L", "Add a light: it adds to the picture's light on what faces it"],
                    ["Middle-drag / Alt+drag", "In the free view: orbit (Shift pans); the wheel or - = comes closer"],
                    ["← → ↑ ↓", "In the free view: orbit (Shift pans); F looks at the selected"],
                    ["Inspector", "Its real height, and a drive over the ground with jumps, dust and a shadow"],
