@@ -76,6 +76,22 @@ sculpting or node editors.
    where it's installed) that works through scene.json and the CLI;
    what it changed is shown, one undo takes it all back.
 
+## All of Blender, for the shot (October 2026)
+
+Done, each as a first version: glTF export; rigs (IK, look at, paths,
+wheels, empties); curve modifiers, clips and easing handles; pitch and
+roll rings, snapping, several selected; rigid bodies; particles from a
+layer; the look (grade, vignette, bloom, depth of field); films with
+transitions and sound; drawing frame by frame; shape modifiers; lights and
+materials; video layers and tracking; imported models; billowing layers.
+
+Still to do there: a dope sheet with a row a property; NLA clips that
+blend and fade; rotation of bodies as they tumble, and collisions with
+shapes rather than boxes; 3D particles beyond dust; cloth and real fluids;
+light probes and shadows from added lights; video tracking with several
+points (to solve a camera); models in glTF exports and in physics; films
+previewed in the window.
+
 ## Realism (folded into the world)
 
 The Quattro demo (a car flying into the wallpaper) looked like a sticker
