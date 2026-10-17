@@ -155,7 +155,7 @@ void WorldSource::update() {
         // Smoke, fire and water from its pieces, on sheets among them.
         QVariantList sheets;
         for (const World::Sheet &sheet : World::sheets(m_scene, *m_assets, m_time)) {
-            QQuick3DTextureData *texture = this->sheet(sheet.layer);
+            QQuick3DTextureData *texture = this->sheet(sheet.key);
             // Rows bottom first, as the rectangle's texture coordinates go.
             const QImage rgba = sheet.image.convertToFormat(QImage::Format_RGBA8888_Premultiplied).mirrored();
             texture->setSize(rgba.size());
@@ -163,6 +163,7 @@ void WorldSource::update() {
             texture->setHasTransparency(true);
             texture->setTextureData(QByteArray(reinterpret_cast<const char *>(rgba.constBits()), rgba.sizeInBytes()));
             sheets.append(QVariantMap{{"layer", sheet.layer},
+                                      {"key", sheet.key},
                                       {"position", QVariant::fromValue(sheet.centre)},
                                       {"rotation", QVariant::fromValue(sheet.rotation)},
                                       {"width", sheet.size.width()},
@@ -250,8 +251,8 @@ QQuick3DTextureData *WorldSource::occluders() {
     return m_occluders.get();
 }
 
-QQuick3DTextureData *WorldSource::sheet(int layer) {
-    std::shared_ptr<QQuick3DTextureData> &texture = m_sheets[layer];
+QQuick3DTextureData *WorldSource::sheet(int key) {
+    std::shared_ptr<QQuick3DTextureData> &texture = m_sheets[key];
     if (!texture) {
         texture = std::make_shared<QQuick3DTextureData>();
         QQmlEngine::setObjectOwnership(texture.get(), QQmlEngine::CppOwnership);

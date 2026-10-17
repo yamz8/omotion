@@ -142,7 +142,7 @@ Item {
                     vertexShader: "qrc:/sheet.vert"
                     fragmentShader: "qrc:/sheet.frag"
                     property real strength: modelData.opacity
-                    property TextureInput picture: TextureInput { texture: Texture { textureData: view.source.sheet(modelData.layer) } }
+                    property TextureInput picture: TextureInput { texture: Texture { textureData: view.source.sheet(modelData.key) } }
                 }
             }
         }

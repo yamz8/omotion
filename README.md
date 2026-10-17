@@ -393,10 +393,11 @@ photo.omotion/
   the right), `swirl` (0 to 1), `color`, `seed`. Worked out from the
   start, so every frame is the same each time; it loops with the scene
   (fading into itself) unless `"loop": false`. From a piece of a world,
-  smoke, fire and water stand in the world instead: worked out on a sheet
-  by the piece (its pixel settings counting as centimeters), upright and
-  square to the camera, among the pieces so nearer ones hide them; water's
-  floor is the ground there.
+  they're worked out in the world instead (their pixel settings counting
+  as centimeters), among the pieces so nearer ones hide them: smoke and
+  fire in a box of air by the piece, in three dimensions, drawn as slices
+  through it; water on a sheet by the piece, upright and square to the
+  camera, its floor the ground there.
 - Particles of kind **`water`** are drops that run together: poured from
   `x`, `y` (or `from` a layer, at `at`), `rate` drops a second, `size` a
   drop's radius, `speed` and `direction` (90 is down) and `spread`, pulled

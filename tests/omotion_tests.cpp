@@ -2718,17 +2718,26 @@ private slots:
         const int smoke = Project::addParticles(scene, "smoke", QJsonObject{{"from", "piece"}}, &error);
         QVERIFY2(smoke >= 0, qPrintable(error));
         QVERIFY(World::fluidInWorld(scene, scene.layers[smoke]));
+        // Smoke in a box of air by the piece, as slices through it, each
+        // its own picture, stacked along the way facing the camera.
         const QList<World::Sheet> sheets = World::sheets(scene, assets, 1);
-        QCOMPARE(sheets.size(), 1);
-        const World::Sheet &sheet = sheets.first();
-        // Standing by the piece it comes from, a few meters across.
-        QVERIFY((sheet.centre - World::pivot(scene, assets, scene.indexOf("piece"))).length() < sheet.size.height());
-        QVERIFY(sheet.size.width() > 1 && sheet.size.width() < 20);
+        QVERIFY2(sheets.size() >= 8, qPrintable(QString::number(sheets.size())));
+        QSet<int> keys;
         int smoky = 0;
-        for (int y = 0; y < sheet.image.height(); ++y)
-            for (int x = 0; x < sheet.image.width(); ++x)
-                smoky += qAlpha(sheet.image.pixel(x, y)) > 20;
+        const QVector3D at = World::pivot(scene, assets, scene.indexOf("piece"));
+        for (const World::Sheet &sheet : sheets) {
+            keys << sheet.key;
+            QVERIFY((sheet.centre - at).length() < sheet.size.height() * 2);
+            for (int y = 0; y < sheet.image.height(); ++y)
+                for (int x = 0; x < sheet.image.width(); ++x)
+                    smoky += qAlpha(sheet.image.pixel(x, y)) > 20;
+        }
+        QCOMPARE(keys.size(), sheets.size());
         QVERIFY(smoky > 20);
+        // Water stays a sheet.
+        scene.layers[smoke].particles["kind"] = "water";
+        QCOMPARE(World::sheets(scene, assets, 1).size(), 1);
+        scene.layers[smoke].particles["kind"] = "smoke";
         // Not drawn again over the world.
         QVERIFY(!throwsIntoWorld(scene, scene.layers[smoke]));
     }

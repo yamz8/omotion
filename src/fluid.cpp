@@ -294,4 +294,267 @@ QImage at(const Scene &scene, AssetCache &assets, const Layer &layer, double t, 
     return mixed;
 }
 
+namespace {
+// The air in three dimensions: velocity in cells a second, smoke, heat.
+struct Field3 {
+    int w = 0, h = 0, d = 0;
+    double cell = 1;
+    std::vector<float> u, v, z, smoke, heat;
+    int at(int x, int y, int k) const {
+        return (std::clamp(k, 0, d - 1) * h + std::clamp(y, 0, h - 1)) * w + std::clamp(x, 0, w - 1);
+    }
+    float sample(const std::vector<float> &f, double x, double y, double k) const {
+        x = std::clamp(x, 0.0, w - 1.001), y = std::clamp(y, 0.0, h - 1.001), k = std::clamp(k, 0.0, d - 1.001);
+        const int ix = int(x), iy = int(y), ik = int(k);
+        const float fx = float(x - ix), fy = float(y - iy), fk = float(k - ik);
+        auto f2 = [&](int kk) {
+            const float *row = &f[(size_t(kk) * h + iy) * w + ix], *below = row + w;
+            return (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
+        };
+        return f2(ik) * (1 - fk) + f2(ik + 1) * fk;
+    }
+    std::vector<float> carried(const std::vector<float> &f, double dt) const {
+        std::vector<float> out(f.size());
+        for (int k = 0; k < d; ++k)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const size_t i = (size_t(k) * h + y) * w + x;
+                    out[i] = sample(f, x - u[i] * dt, y - v[i] * dt, k - z[i] * dt);
+                }
+        return out;
+    }
+    void project() {
+        const size_t n = size_t(w) * h * d;
+        std::vector<float> spread(n), pressure(n, 0.f), next(n);
+        for (int k = 0; k < d; ++k)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    spread[(size_t(k) * h + y) * w + x] = -.5f * (u[at(x + 1, y, k)] - u[at(x - 1, y, k)] + v[at(x, y + 1, k)] -
+                                                                 v[at(x, y - 1, k)] + z[at(x, y, k + 1)] - z[at(x, y, k - 1)]);
+        for (int pass = 0; pass < 16; ++pass) {
+            for (int k = 0; k < d; ++k)
+                for (int y = 0; y < h; ++y)
+                    for (int x = 0; x < w; ++x)
+                        next[(size_t(k) * h + y) * w + x] =
+                            (spread[(size_t(k) * h + y) * w + x] + pressure[at(x + 1, y, k)] + pressure[at(x - 1, y, k)] + pressure[at(x, y + 1, k)] +
+                             pressure[at(x, y - 1, k)] + pressure[at(x, y, k + 1)] + pressure[at(x, y, k - 1)]) / 6;
+            std::swap(pressure, next);
+        }
+        for (int k = 0; k < d; ++k)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const size_t i = (size_t(k) * h + y) * w + x;
+                    u[i] -= .5f * (pressure[at(x + 1, y, k)] - pressure[at(x - 1, y, k)]);
+                    v[i] -= .5f * (pressure[at(x, y + 1, k)] - pressure[at(x, y - 1, k)]);
+                    z[i] -= .5f * (pressure[at(x, y, k + 1)] - pressure[at(x, y, k - 1)]);
+                }
+    }
+};
+
+struct Run3 {
+    Field3 field;
+    QList<QVector3D> sources;
+    QList<std::vector<quint8>> smoke, heat;
+};
+
+QMutex runs3Lock;
+QHash<QString, std::shared_ptr<Run3>> runs3;
+
+// A step of the air in the box: y here runs up, as in the world.
+void step3(Field3 &f, const Settings &s, const QVector3D &source, double t, double dt) {
+    const size_t n = f.smoke.size();
+    QRandomGenerator random(s.seed * 2654435761u + quint32(t * 1000));
+    const double radius = std::max(1.2, s.size / f.cell);
+    const QVector3D at = source / float(f.cell) + QVector3D(float((random.generateDouble() - .5) * radius * .6), 0,
+                                                            float((random.generateDouble() - .5) * radius * .6));
+    const double rise = s.speed / f.cell;
+    const int reach = int(std::ceil(radius * 2));
+    for (int k = int(at.z()) - reach; k <= int(at.z()) + reach; ++k)
+        for (int y = int(at.y()) - reach; y <= int(at.y()) + reach; ++y)
+            for (int x = int(at.x()) - reach; x <= int(at.x()) + reach; ++x) {
+                if (x < 0 || y < 0 || k < 0 || x >= f.w || y >= f.h || k >= f.d)
+                    continue;
+                const double r2 = (QVector3D(float(x), float(y), float(k)) - at).lengthSquared() / (radius * radius);
+                const float weight = float(std::exp(-r2 * 2));
+                const size_t i = (size_t(k) * f.h + y) * f.w + x;
+                f.smoke[i] += float(s.rate * weight * dt * 3);
+                if (s.fire)
+                    f.heat[i] += float(s.rate * weight * dt * 5);
+                f.v[i] += float(rise * weight * dt * 4);
+                f.u[i] += float((random.generateDouble() - .5) * rise * weight * dt * 30 * s.swirl);
+                f.z[i] += float((random.generateDouble() - .5) * rise * weight * dt * 30 * s.swirl);
+            }
+    const double lift = rise * 1.5;
+    for (size_t i = 0; i < n; ++i) {
+        f.v[i] += float(lift * (f.smoke[i] * .4 + f.heat[i]) * dt);
+        f.u[i] += float((s.wind / f.cell - f.u[i]) * std::min(1.0, double(f.smoke[i] + f.heat[i])) * dt * .8);
+    }
+    // Swirls kept going: each cell pushed round the way the air about it
+    // turns (vorticity confinement, in three dimensions).
+    if (s.swirl > 0) {
+        std::vector<QVector3D> curl(n);
+        std::vector<float> strength(n);
+        for (int k = 0; k < f.d; ++k)
+            for (int y = 0; y < f.h; ++y)
+                for (int x = 0; x < f.w; ++x) {
+                    const size_t i = (size_t(k) * f.h + y) * f.w + x;
+                    const QVector3D c(.5f * (f.z[f.at(x, y + 1, k)] - f.z[f.at(x, y - 1, k)] - f.v[f.at(x, y, k + 1)] + f.v[f.at(x, y, k - 1)]),
+                                      .5f * (f.u[f.at(x, y, k + 1)] - f.u[f.at(x, y, k - 1)] - f.z[f.at(x + 1, y, k)] + f.z[f.at(x - 1, y, k)]),
+                                      .5f * (f.v[f.at(x + 1, y, k)] - f.v[f.at(x - 1, y, k)] - f.u[f.at(x, y + 1, k)] + f.u[f.at(x, y - 1, k)]));
+                    curl[i] = c;
+                    strength[i] = c.length();
+                }
+        for (int k = 1; k < f.d - 1; ++k)
+            for (int y = 1; y < f.h - 1; ++y)
+                for (int x = 1; x < f.w - 1; ++x) {
+                    const size_t i = (size_t(k) * f.h + y) * f.w + x;
+                    QVector3D g(.5f * (strength[f.at(x + 1, y, k)] - strength[f.at(x - 1, y, k)]),
+                                .5f * (strength[f.at(x, y + 1, k)] - strength[f.at(x, y - 1, k)]),
+                                .5f * (strength[f.at(x, y, k + 1)] - strength[f.at(x, y, k - 1)]));
+                    const float length = g.length() + 1e-5f;
+                    const QVector3D push = QVector3D::crossProduct(g / length, curl[i]) * float(s.swirl * 10 * dt);
+                    f.u[i] += push.x(), f.v[i] += push.y(), f.z[i] += push.z();
+                }
+    }
+    f.u = f.carried(f.u, dt);
+    f.v = f.carried(f.v, dt);
+    f.z = f.carried(f.z, dt);
+    f.project();
+    f.smoke = f.carried(f.smoke, dt);
+    f.heat = f.carried(f.heat, dt);
+    const float fade = float(std::exp(-dt / s.life)), cool = float(std::exp(-dt * 6 / s.life));
+    for (size_t i = 0; i < n; ++i)
+        f.smoke[i] *= fade, f.heat[i] *= cool;
+}
+
+// One frame's smoke and heat, from the start.
+std::pair<const std::vector<quint8> *, const std::vector<quint8> *> volumeFrame(std::shared_ptr<Run3> &kept, const QString &key,
+                                                                                 const Settings &s, const QVector3D &size, double fps,
+                                                                                 const std::function<QVector3D(int)> &sourceAt, int frame) {
+    QMutexLocker lock(&runs3Lock);
+    std::shared_ptr<Run3> &run = runs3[key];
+    if (run)
+        for (int k = 0; k < run->sources.size() && k <= frame; ++k)
+            if ((run->sources.at(k) - sourceAt(k)).length() > .01f) {
+                run.reset();
+                break;
+            }
+    if (!run) {
+        run = std::make_shared<Run3>();
+        Field3 &f = run->field;
+        f.cell = std::max({size.x(), size.y(), size.z()}) / 40.0;
+        f.w = std::max(4, int(std::ceil(size.x() / f.cell)));
+        f.h = std::max(4, int(std::ceil(size.y() / f.cell)));
+        f.d = std::max(4, int(std::ceil(size.z() / f.cell)));
+        const size_t n = size_t(f.w) * f.h * f.d;
+        f.u.assign(n, 0), f.v.assign(n, 0), f.z.assign(n, 0), f.smoke.assign(n, 0), f.heat.assign(n, 0);
+    }
+    Field3 &f = run->field;
+    const double dt = 1 / fps / substeps;
+    while (run->smoke.size() <= frame) {
+        const int k = int(run->smoke.size());
+        const QVector3D source = sourceAt(k);
+        if (k > 0)
+            for (int sub = 0; sub < substeps; ++sub)
+                step3(f, s, source, (k - 1) / fps + sub * dt, dt);
+        run->sources << source;
+        std::vector<quint8> smoke(f.smoke.size()), heat(f.heat.size());
+        for (size_t i = 0; i < f.smoke.size(); ++i)
+            smoke[i] = pack(f.smoke[i]), heat[i] = pack(f.heat[i]);
+        run->smoke << smoke;
+        run->heat << heat;
+    }
+    kept = run;
+    if (runs3.size() > 16) {
+        runs3.clear();
+        runs3.insert(key, kept);
+    }
+    return {&kept->smoke.at(frame), &kept->heat.at(frame)};
+}
+
+// A slab of cells across the axis, summed through its thickness, as a
+// picture: smoke in its colour, fire hotter toward white.
+QImage slab(const Field3 &f, const Settings &s, const std::vector<quint8> &smoke, const std::vector<quint8> &heat, int axis, int from, int to) {
+    const int across = axis == 0 ? f.d : f.w;
+    QImage image(across, f.h, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < f.h; ++y) {
+        // Pictures run down; the box runs up.
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(f.h - 1 - y));
+        for (int a = 0; a < across; ++a) {
+            double density = 0, hot = 0;
+            for (int c = from; c < to; ++c) {
+                const size_t i = axis == 0 ? (size_t(a) * f.h + y) * f.w + c : (size_t(c) * f.h + y) * f.w + a;
+                density += smoke[i] / 128.0, hot += heat[i] / 128.0;
+            }
+            double r, g, b, alpha;
+            if (s.fire) {
+                const double glow = 1 - std::exp(-hot * 3);
+                const double white = std::clamp(hot / (to - from) - .8, 0.0, 1.0);
+                r = std::min(1.0, s.colour.redF() * 1.2 + white);
+                g = std::min(1.0, s.colour.greenF() * (.5 + glow) + white);
+                b = std::min(1.0, s.colour.blueF() * .6 + white * .8);
+                const double soot = (1 - std::exp(-density * .5)) * .35 * (1 - glow);
+                alpha = std::clamp(glow + soot, 0.0, 1.0);
+                const double bright = alpha > 0 ? glow / alpha : 0;
+                r *= bright, g *= bright, b *= bright;
+            } else {
+                alpha = 1 - std::exp(-density * 2.2);
+                r = s.colour.redF(), g = s.colour.greenF(), b = s.colour.blueF();
+            }
+            alpha *= s.colour.alphaF();
+            line[a] = qRgba(int(r * alpha * 255), int(g * alpha * 255), int(b * alpha * 255), int(alpha * 255));
+        }
+    }
+    return image;
+}
+}
+
+Box volume(const QString &key, const QJsonObject &settings, const QVector3D &size, double fps, double duration,
+           const std::function<QVector3D(int frame)> &sourceAt, double t, int axis) {
+    Scene stand;
+    stand.width = int(size.x());
+    stand.height = int(size.y());
+    const Settings s = settingsOf(stand, settings);
+    fps = std::max(1.0, fps);
+    const QString full = key + "|" + QString::fromUtf8(QJsonDocument(settings).toJson(QJsonDocument::Compact)) + "|" +
+                         QString::number(size.x()) + "," + QString::number(size.y()) + "," + QString::number(size.z()) + "|" + QString::number(fps);
+    auto slicesAt = [&](double when) {
+        const int frame = std::clamp(int(std::floor(when * fps + 1e-6)), 0, 20000);
+        std::shared_ptr<Run3> kept;
+        const auto [smoke, heat] = volumeFrame(kept, full, s, size, fps, sourceAt, frame);
+        const Field3 &f = kept->field;
+        QList<QImage> slices;
+        const int depth = axis == 0 ? f.w : f.d;
+        for (int c = 0; c < depth; c += 2)
+            slices << slab(f, s, *smoke, *heat, axis, c, std::min(depth, c + 2));
+        return slices;
+    };
+    Box box;
+    box.size = size;
+    const bool loops = settings.value("loop").toBool(true) && duration > 0;
+    const QList<QImage> now = slicesAt(t);
+    if (!loops) {
+        box.slices = now;
+        return box;
+    }
+    // Looping with the scene, as on the canvas: the smoke a scene's length
+    // on fading into the smoke now.
+    const double into = std::clamp(t / duration, 0.0, 1.0);
+    const QList<QImage> later = slicesAt(t + duration);
+    const int weight = int(std::lround(into * 256));
+    for (int i = 0; i < now.size() && i < later.size(); ++i) {
+        QImage mixed(now.at(i).size(), QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < mixed.height(); ++y) {
+            const QRgb *a = reinterpret_cast<const QRgb *>(later.at(i).constScanLine(y)), *b = reinterpret_cast<const QRgb *>(now.at(i).constScanLine(y));
+            QRgb *out = reinterpret_cast<QRgb *>(mixed.scanLine(y));
+            for (int x = 0; x < mixed.width(); ++x) {
+                auto mix = [&](int p, int q) { return (p * (256 - weight) + q * weight) >> 8; };
+                out[x] = qRgba(mix(qRed(a[x]), qRed(b[x])), mix(qGreen(a[x]), qGreen(b[x])), mix(qBlue(a[x]), qBlue(b[x])), mix(qAlpha(a[x]), qAlpha(b[x])));
+            }
+        }
+        box.slices << mixed;
+    }
+    return box;
+}
+
 }

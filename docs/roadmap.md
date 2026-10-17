@@ -98,8 +98,8 @@ particles in 3D; cloth (a layer as fabric, pinned, in the wind); smoke and fire 
 fluid; water that pours, splashes and pools,
 meeting layers that are bodies.
 
-Still to do there: fluids worked out in 3D (they're 2D sheets standing in
-the world); exact shadow shapes (a caster's shadow is made of
+Still to do there: water in 3D (it's a sheet standing in the world; smoke
+and fire are 3D); exact shadow shapes (a caster's shadow is made of
 a few rounded parts).
 
 ## Realism (folded into the world)

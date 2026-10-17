@@ -48,8 +48,9 @@ public:
     // The frame's dust as camera-facing quads: position, uv, colour.
     const QByteArray &dustVertices() const { return m_dustVertices; }
     const QByteArray &dustIndices() const { return m_dustIndices; }
-    // A world fluid's sheet (its layer's), as a texture for the 3D view.
-    Q_INVOKABLE QQuick3DTextureData *sheet(int layer);
+    // A world fluid's sheet or slice (by its key), as a texture for the 3D
+    // view.
+    Q_INVOKABLE QQuick3DTextureData *sheet(int key);
     // What casts shadows from the lights, for the shaders: three texels a
     // row (middle, half sizes, turn), a row each.
     Q_INVOKABLE QQuick3DTextureData *occluders();

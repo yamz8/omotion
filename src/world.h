@@ -174,13 +174,15 @@ QList<int> lightLayers(const Scene &scene);
 QList<int> modelLayers(const Scene &scene);
 bool modelBounds(const QString &path, QVector3D *low, QVector3D *high);
 QVector3D lightPosition(const Scene &scene, int index, double t);
-// Smoke, fire or water from a piece of the world: its fluid worked out on
-// a sheet standing in the world where the piece's point was at the start,
-// upright and square to the camera then, in centimeters; the source moving
-// over it as the piece moves. Drawn among the pieces, so nearer ones hide
-// it.
+// Smoke, fire or water from a piece of the world, drawn among the pieces
+// so nearer ones hide it. Smoke and fire are worked out in a box of air by
+// the piece's point, in centimeters, and drawn as slices through it across
+// the way most facing the camera; water on a sheet by the point, upright
+// and square to the camera. The source moves over them as the point moves,
+// up to a third of their size; past that they go along with it.
 struct Sheet {
     int layer = -1;
+    int key = -1;          // Its picture's, for the view: one a slice.
     QVector3D centre;
     QQuaternion rotation;  // A sheet facing +z, turned to stand there.
     QSizeF size;           // Meters.

@@ -17,6 +17,8 @@
 
 #include <QImage>
 #include <QRectF>
+#include <QVector3D>
+#include <functional>
 
 #include "scene.h"
 
@@ -27,5 +29,17 @@ bool isFluid(const QString &kind);
 // The smoke (or fire) at a time, as a picture of the grid with see-through
 // where there's none, and the canvas rectangle it covers.
 QImage at(const Scene &scene, AssetCache &assets, const Layer &layer, double t, QRectF *onCanvas);
+
+// The same in three dimensions, for a world: air in a box of grid cells
+// (centimeters, up is +y), its source at a point of the box at each frame
+// (a function of the frame), smoke drawn as slices across one axis (0 for
+// x, 2 for z), back to front from its low end. Each slice's picture spans
+// the box's other two sides (the horizontal one, then up).
+struct Box {
+    QVector3D size;        // Centimeters.
+    QList<QImage> slices;  // Along the axis, from its low end.
+};
+Box volume(const QString &key, const QJsonObject &settings, const QVector3D &size, double fps, double duration,
+           const std::function<QVector3D(int frame)> &sourceAt, double t, int axis);
 
 }

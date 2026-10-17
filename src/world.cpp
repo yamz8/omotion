@@ -1415,8 +1415,47 @@ QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
                 fluid.particles["floor"] = std::round(start.y() + overSheet(t).y() + (pointAt(t).y() - ground) * 100);
         }
         own.layers << fluid;
+        const float opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
+        if (kind != "water") {
+            // A box of air: as wide and deep as across, the source low in
+            // it, the box going along with the point past a third of it.
+            const QVector3D room{float(wide), float(tall), float(wide)};
+            const QVector3D low(float(wide / 2), float(tall * .12), float(wide / 2));
+            auto inBox = [&](double when) {
+                const QVector3D moved = (pointAt(std::min(when, scene.duration)) - pointAt(0)) * 100;
+                return low + QVector3D(float(std::clamp(double(moved.x()), -wide / 3, wide / 3)),
+                                       float(std::clamp(double(moved.y()), -tall * .1, tall * .5)),
+                                       float(std::clamp(double(moved.z()), -wide / 3, wide / 3)));
+            };
+            const double fps = std::max(1.0, scene.fps);
+            const int axis = std::abs(facing.x()) > std::abs(facing.z()) ? 0 : 2;
+            const Fluid::Box box = Fluid::volume(layer.name + "|" + QString::number(index), fluid.particles, room, fps, scene.duration,
+                                                 [&](int frame) { return inBox(frame / fps); }, t, axis);
+            const QVector3D corner = pointAt(t) - inBox(t) / 100;
+            // Each slice across the axis, at the middle of its slab.
+            const QQuaternion turned = axis == 2 ? QQuaternion() : QQuaternion::fromAxes(QVector3D(0, 0, 1), QVector3D(0, 1, 0), QVector3D(-1, 0, 0));
+            for (int k = 0; k < box.slices.size(); ++k) {
+                Sheet slice;
+                slice.layer = index;
+                slice.key = index * 64 + k;
+                slice.image = box.slices.at(k);
+                const float along = float((k + .5) / box.slices.size());
+                QVector3D middle = corner + room / 200;
+                if (axis == 0)
+                    middle.setX(corner.x() + along * room.x() / 100);
+                else
+                    middle.setZ(corner.z() + along * room.z() / 100);
+                slice.centre = middle;
+                slice.rotation = turned;
+                slice.size = QSizeF((axis == 0 ? room.z() : room.x()) / 100, room.y() / 100);
+                slice.opacity = opacity;
+                list << slice;
+            }
+            continue;
+        }
         Sheet sheet;
         sheet.layer = index;
+        sheet.key = index * 64;
         QRectF covers;
         sheet.image = kind == "water" ? Liquid::at(own, assets, own.layers.last(), t, .5, &covers)
                                       : Fluid::at(own, assets, own.layers.last(), t, &covers);
@@ -1429,7 +1468,7 @@ QList<Sheet> sheets(const Scene &scene, AssetCache &assets, double t) {
         const QPointF spot = start + overSheet(t);
         sheet.centre = pointAt(t) + right * float((covers.center().x() - spot.x()) / 100) +
                        QVector3D(0, float((spot.y() - covers.center().y()) / 100), 0);
-        sheet.opacity = float(std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0));
+        sheet.opacity = opacity;
         list << sheet;
     }
     return list;
