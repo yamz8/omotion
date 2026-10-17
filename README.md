@@ -79,7 +79,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Key | Does |
 | --- | --- |
 | `O` / `Shift+O` | Animate an image / open an animation folder |
-| `I` | Add an image as a layer, a 3D model (glTF, GLB, OBJ, FBX and more) into a world, standing in front of the camera (moved and turned by its handles, its size in the inspector; `omotion model`), or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
+| `I` | Add an image as a layer, a 3D model (glTF, GLB or OBJ) into a world, standing in front of the camera (moved and turned by its handles, its size in the inspector; `omotion model`), or a video clip as a layer that plays (its start, speed and looping in the inspector; `omotion video` does the same) |
 | `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
 | `Ctrl+E` | Export MP4, WebM, GIF, PNG frames, or glTF for Blender (`H` there for half size) |
