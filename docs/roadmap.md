@@ -90,11 +90,11 @@ side); models in glTF exports and in physics; films previewed in the
 window; clips that add or replace, fading in and out; a dope sheet, a row a
 property; several tracked points solving the footage's move (in its
 plane: shift, turn, growth) or stabilizing it; cuts and AI select on a
-video's frame under the playhead.
+video's frame under the playhead; soft shadows from added lights.
 
 Still to do there: collisions with shapes rather than boxes; 3D particles
-beyond dust; cloth and real fluids; light probes and shadows from added
-lights; a 3D camera solve from tracks (a moving camera's path in depth).
+beyond dust; cloth and real fluids; light probes, and true shadow maps (a light's
+shadows are soft blobs on the ground for now); a 3D camera solve from tracks (a moving camera's path in depth).
 
 ## Realism (folded into the world)
 

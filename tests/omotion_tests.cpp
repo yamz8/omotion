@@ -2415,6 +2415,20 @@ private slots:
         QVERIFY(World::setShapeModifier(scene, piece, "none", 0, &error));
         QCOMPARE(World::mesh(scene, assets, piece).indices.size(), lumpy.indices.size());
         QVERIFY(!World::setShapeModifier(scene, 0, "smooth", 2, &error));
+
+        // Standing where it was cut, it has a shadow under it; a light up to
+        // its left throws another away to its right, on the ground.
+        const World::Frame unlit = World::frame(scene, assets, 0);
+        QCOMPARE(unlit.shadows.size(), 1);
+        const QVector3D under = unlit.shadows.first().position;
+        const QVector3D eye = World::pictureToWorld(World::info(scene)).map(QVector3D());
+        Project::addLight(scene, "lamp", QVector3D(-4, 6, eye.z() - under.z()), QJsonObject{{"power", 2}, {"reach", 20}});
+        const World::Frame lit = World::frame(scene, assets, 0);
+        QCOMPARE(lit.shadows.size(), 2);
+        const World::Shadow cast = lit.shadows.last();
+        QVERIFY2(cast.position.x() > under.x() + .1, qPrintable(QString("%1 %2").arg(cast.position.x()).arg(under.x())));
+        QVERIFY(cast.opacity > 0 && cast.length >= cast.width);
+        QVERIFY(std::abs(cast.position.y() - under.y()) < 1);
     }
 
     void lightsAndMaterialsInAWorld() {

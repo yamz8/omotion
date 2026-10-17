@@ -1086,7 +1086,16 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         if (body.isNull())
             continue;
         const QVector3D at = centre + move;
-        const double ground = groundAt(scene, assets, at.x(), at.z());
+        // Where it stands in the picture, its own bottom is the ground: the
+        // depth read behind a cut-out is what was filled in there, which
+        // can be far off.
+        auto floorAt = [&](double x, double z) {
+            double floor = groundAt(scene, assets, x, z);
+            if (x >= body.minimum.x() && x <= body.maximum.x() && z >= body.minimum.z() && z <= body.maximum.z())
+                floor = std::isnan(floor) ? body.minimum.y() : std::max(floor, double(body.minimum.y()));
+            return floor;
+        };
+        const double ground = floorAt(at.x(), at.z());
         if (std::isnan(ground))
             continue;
         const double lowest = at.y() - (centre.y() - body.minimum.y());
@@ -1099,6 +1108,39 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         shadow.yaw = float(scene.value(layer, "yaw", t));
         shadow.opacity = float(.75 * place.opacity / (1 + 1.2 * height * height));
         frame.shadows.append(shadow);
+
+        // Each added light above it throws its shadow away from it along
+        // the ground: as far as the light is low, as dark as it's bright
+        // there, and longer the more it slants.
+        const double tall = body.maximum.y() - body.minimum.y();
+        const double middle = height + tall / 2;
+        for (const Light &light : frame.lights) {
+            const double above = light.position.y() - ground;
+            if (above <= middle * 1.05)
+                continue;
+            const QVector2D away(at.x() - light.position.x(), at.z() - light.position.z());
+            const double along = away.length();
+            const double reach = along * middle / (above - middle);
+            const double brightness = (light.colour.x() + light.colour.y() + light.colour.z()) / 3;
+            const double distance = (light.position - at).length() / light.reach;
+            const double strength = std::min(.7, .55 * brightness / (1 + distance * distance)) * place.opacity;
+            if (strength < .02)
+                continue;
+            const QVector2D way = along > 1e-4 ? away / float(along) : QVector2D(0, 1);
+            const double footprint = std::max(body.maximum.x() - body.minimum.x(), body.maximum.z() - body.minimum.z());
+            // Its middle where the light through its middle meets the
+            // ground, no farther than a few times its size.
+            const double shift = std::min(reach, 4.0 * footprint + tall);
+            Shadow cast;
+            const double x = at.x() + way.x() * shift, z = at.z() + way.y() * shift;
+            const double there = floorAt(x, z);
+            cast.position = QVector3D(float(x), float((std::isnan(there) ? ground : there) + .021), float(z));
+            cast.width = float(footprint);
+            cast.length = float(footprint + std::min(2 * shift, tall * along / std::max(.1, above - middle)));
+            cast.yaw = float(qRadiansToDegrees(std::atan2(way.x(), -way.y())));
+            cast.opacity = float(strength / (1 + .3 * height));
+            frame.shadows.append(cast);
+        }
     }
     // The dust: each burst throws up puffs, every one worked out from its
     // own seed and the time since, so any frame can be drawn on its own.
