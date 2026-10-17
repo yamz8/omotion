@@ -1,5 +1,7 @@
 #include "world.h"
 
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -1513,7 +1515,11 @@ bool shapeObject(Scene &scene, AssetCache &assets, int index, QString *error) {
     QSaveFile out(dir.filePath(file));
     if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit())
         return fail(QString("Couldn't write %1.").arg(file));
-    scene.layers[index].raw["shape"] = QJsonObject{{"file", file}, {"quarter", quarter}, {"fit", std::round(best * 100) / 100}};
+    // With what it was made from: the piece's image, and the world it was
+    // fitted in.
+    scene.layers[index].raw["shape"] = QJsonObject{{"file", file}, {"quarter", quarter}, {"fit", std::round(best * 100) / 100},
+                                                   {"from", cutCode(scene.layers.at(index))},
+                                                   {"world", scene.raw.value("world").toObject().value("made")}};
     return true;
 }
 
@@ -2124,6 +2130,7 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
     if (!wideOut.open(QIODevice::WriteOnly) || !wideWriter.write(stored) || !wideOut.commit())
         return fail(QString("Couldn't write %1.").arg(wideFile));
     const double focal = shape.focal;
+    const QJsonObject before = scene.raw.value("world").toObject();
     scene.raw["world"] = QJsonObject{
         {"picture", scene.layers.at(root).name},
         {"depth", depthFile},
@@ -2137,7 +2144,41 @@ bool build(Scene &scene, AssetCache &assets, int index, QString *error, double h
         {"ground", QJsonObject{{"up", QJsonArray{std::round(up.x() * 1e4) / 1e4, std::round(up.y() * 1e4) / 1e4,
                                                    std::round(up.z() * 1e4) / 1e4}},
                                {"height", std::round(height * 1000) / 1000}}}};
+    QJsonObject made = scene.raw["world"].toObject();
+    // What it was made from, so it's known when that changes; and when, so
+    // shapes fitted to it know it's new.
+    made["pieces"] = madeFrom(scene, root);
+    made["made"] = QDateTime::currentMSecsSinceEpoch();
+    if (horizon > 0 && horizon < 1)
+        made["horizon"] = horizon;
+    // Made again, it keeps what was set by hand: its size, its look.
+    if (before.value("picture").toString() == scene.layers.at(root).name)
+        for (const QString &kept : {"scale", "grain", "shutter", "haze", "dust", "horizon"})
+            if (before.contains(kept) && !(kept == QString("horizon") && horizon > 0 && horizon < 1))
+                made[kept] = before.value(kept);
+    scene.raw["world"] = made;
     return true;
+}
+
+QJsonArray madeFrom(const Scene &scene, int root) {
+    QJsonArray pieces;
+    for (int i = 0; i < scene.layers.size(); ++i)
+        if (i != root && rootOf(scene, i) == root && scene.layers.at(i).raw.value("cut").toObject().value("punch").toBool(true))
+            pieces.append(cutCode(scene.layers.at(i)));
+    return pieces;
+}
+
+QString cutCode(const Layer &layer) {
+    const QJsonObject cut = layer.raw.value("cut").toObject();
+    if (cut.isEmpty())
+        return layer.source;
+    QJsonObject shape;
+    for (const QString &key : {"from", "polygon", "mask", "maskOrigin", "feather", "origin", "punch"})
+        if (cut.contains(key))
+            shape[key] = cut.value(key);
+    return QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(shape).toJson(QJsonDocument::Compact), QCryptographicHash::Sha1)
+                                   .toHex()
+                                   .left(12));
 }
 
 }

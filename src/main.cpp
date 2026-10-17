@@ -20,6 +20,7 @@
 #include "exporter.h"
 #include "portalfilepicker.h"
 #include "project.h"
+#include "steps.h"
 #include "sceneview.h"
 #include "theme.h"
 #include "world.h"
@@ -68,6 +69,12 @@ const char *Usage = R"(Usage:
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
   omotion size <project> <layer> <meters>  Size the world so that piece is that tall (a car 1.4)
+  omotion steps <project> [<layer>]       The AI steps behind each layer (or one): what it was cut
+                                         from, how the hole was filled, the world, its shape; and
+                                         which are out of date, as JSON
+  omotion redo <project> [<layer> <step> [ai|smooth|none]]
+                                         Redo everything out of date (the world, then the shapes in
+                                         it), or one step of a layer: world, shape, or fill (with how)
   omotion drive <project> <layer> --from <x,ahead> --to <x,ahead> [--speed <km/h>] [--at <seconds>] [--face]
                                          Drive a piece of the world over its ground, in meters
                                          (x right of the camera, ahead of it): it keeps to the
@@ -359,6 +366,51 @@ int command(const QStringList &args) {
         QTextStream(stdout) << QString("%1 has a shape (fits its outline %2%).\n")
                                    .arg(args.at(3))
                                    .arg(int(shape.value("fit").toDouble() * 100));
+        return 0;
+    }
+
+    if (args.at(1) == "steps") {
+        if (args.size() != 3 && args.size() != 4)
+            return fail("steps takes a project, and a layer if just its steps are wanted.");
+        QJsonArray list;
+        for (int i = 0; i < scene.layers.size(); ++i) {
+            if (args.size() == 4 && scene.layers.at(i).name != args.at(3))
+                continue;
+            QJsonArray steps;
+            for (const Steps::Step &step : Steps::of(scene, assets, i))
+                steps.append(QJsonObject{{"step", step.name},
+                                         {"title", step.title},
+                                         {"detail", step.detail},
+                                         {"done", step.done},
+                                         {"stale", step.stale},
+                                         {"why", step.why},
+                                         {"actions", QJsonArray::fromStringList(step.actions)}});
+            list.append(QJsonObject{{"layer", scene.layers.at(i).name}, {"steps", steps}});
+        }
+        if (args.size() == 4 && list.isEmpty())
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        QTextStream(stdout) << QJsonDocument(list).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+
+    if (args.at(1) == "redo") {
+        Scene edited = scene;
+        if (args.size() == 3) {
+            QStringList done;
+            if (!Steps::redoStale(edited, assets, &error, &done) || !Project::save(directory, edited, &error))
+                return fail(error);
+            QTextStream(stdout) << (done.isEmpty() ? QString("Nothing is out of date.\n") : "Redone: " + done.join(", ") + ".\n");
+            return 0;
+        }
+        if (args.size() != 5 && args.size() != 6)
+            return fail("redo takes a project, or a project, a layer and a step (world, shape, or fill and how).");
+        const int layer = edited.indexOf(args.at(3));
+        if (layer < 0)
+            return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
+        const QString action = args.size() == 6 ? args.at(5) : QString("again");
+        if (!Steps::run(edited, assets, layer, args.at(4), action, &error) || !Project::save(directory, edited, &error))
+            return fail(error);
+        QTextStream(stdout) << QString("Redone: %1 of %2.\n").arg(args.at(4), args.at(3));
         return 0;
     }
 
@@ -688,6 +740,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

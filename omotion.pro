@@ -14,6 +14,7 @@ HEADERS += \
     src/scene.h \
     src/sceneview.h \
     src/select.h \
+    src/steps.h \
     src/theme.h \
     src/world.h \
     src/worldview.h
@@ -28,6 +29,7 @@ SOURCES += \
     src/scene.cpp \
     src/sceneview.cpp \
     src/select.cpp \
+    src/steps.cpp \
     src/theme.cpp \
     src/world.cpp \
     src/worldview.cpp

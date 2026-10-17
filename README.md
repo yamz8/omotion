@@ -94,6 +94,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click a piece of a world | Pick it where it is in 3D: a box shows round it, arrows drag it along x (red), y (green) and z (blue), its ring turns it |
 | `G` | Grab the selected piece of a world: it follows the mouse, `X` `Y` `Z` keep it to an axis, a click or `Enter` places it, right-click or `Esc` puts it back |
+| Steps | In the inspector, how the selected layer came to be: cut from what, how the hole behind it was filled, the world, its 3D shape. Each can be done again or differently (fill by the AI, smoothly, or leave open); ⚠ marks one made from something that has changed since, and the top bar's button redoes all of those in order. `omotion steps` and `omotion redo` do the same |
 | Outliner | Top right: the camera, the world with each piece under what it was cut from (▦ the picture, ▲ a 3D shape, ▱ flat), then the layers over it. Click selects, ● hides, double-click renames; World shows its haze, grain, shutter and dust colour |
 | `` ` `` | Free view: look at the world from anywhere (middle-drag or Alt+drag orbits, Shift pans, the wheel or `-` `=` comes closer, arrows orbit, `F` looks at the selected); the shot's camera shows in it and can be moved too. Nothing in the shot changes |
 | Click, drag | Select the layer under the mouse and move it (Shift+drag keeps the selection) |
@@ -302,13 +303,17 @@ photo.omotion/
   the shutter, so they export faster. `haze` is the air: its `color` (from the farthest land
   the picture shows) and `density`, how much of a piece it hides a meter
   farther than the picture has it (0.02). `grain` is the film grain over a
-  world's frames (0.025; 0 for none). A shape's sides the picture never
+  world's frames (0.025; 0 for none). `pieces` (a code for each piece cut
+  out of the picture), `made` (when, in ms) and `horizon` say what it was
+  made from, so it's known when it's out of date; made again, a world keeps
+  its `scale`, `grain`, `shutter`, `haze` and `dust`. A shape's sides the picture never
   showed catch the light round it at their edges. A world layer's **world properties**
   move it from where it is in the picture: `worldX` (right), `worldY` (up)
   and `worldZ` (away), in meters, and `yaw` (right), `pitch` (nose up) and
   `roll` (lean right), in degrees, turning about its pivot. The camera has
   the same but `roll` (its `rotation` is that), and its `zoom` is the lens.
-  A layer's `shape` names its 3D shape and which `quarter` turn faces it;
+  A layer's `shape` names its 3D shape and which `quarter` turn faces it,
+  and what it was made `from` (its cut's code) in which `world` (its `made`);
   `landings` and `takeoffs` (seconds) throw up dust.
 - **`camera`** is what part of the world the canvas shows: `x`, `y` (the
   world point at the canvas centre), `zoom` and `rotation`, constant or

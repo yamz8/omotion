@@ -11,6 +11,7 @@
 
 #include <QByteArray>
 #include <QColor>
+#include <QJsonArray>
 #include <QImage>
 #include <QList>
 #include <QMatrix4x4>
@@ -208,6 +209,14 @@ double heading(const Scene &scene, AssetCache &assets, int index);
 // of its world properties; the landings, in seconds, come back.
 bool drive(Scene &scene, AssetCache &assets, int index, const QPointF &from, const QPointF &to, double speed,
            double t, QList<double> *landings, QString *error, bool face = false);
+
+// What a world was made from, to tell when it's out of date: the shapes of
+// the pieces cut out of its picture (their holes are filled in behind).
+QJsonArray madeFrom(const Scene &scene, int root);
+// A piece's shape as a short code: the same while its outline, mask and
+// edge are (however its hole is filled), its image's path for a layer that
+// wasn't cut.
+QString cutCode(const Layer &layer);
 
 // Sizes the world so a piece of it is as tall as it really is (meters).
 bool setSize(Scene &scene, AssetCache &assets, int index, double meters, QString *error);

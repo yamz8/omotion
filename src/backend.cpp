@@ -17,6 +17,7 @@
 #include <limits>
 
 #include "project.h"
+#include "steps.h"
 
 namespace {
 constexpr int UndoLimit = 200;
@@ -224,6 +225,54 @@ QVariantMap Backend::worldInfo() const {
             {"scale", info.scale},
             {"focal", info.focal},
             {"height", info.height}};
+}
+
+QVariantList Backend::steps() const {
+    QVariantList list;
+    for (const Steps::Step &step : Steps::of(m_scene, const_cast<AssetCache &>(m_assets), m_selected))
+        list.append(QVariantMap{{"name", step.name},
+                                {"title", step.title},
+                                {"detail", step.detail},
+                                {"done", step.done},
+                                {"stale", step.stale},
+                                {"why", step.why},
+                                {"actions", step.actions}});
+    return list;
+}
+
+int Backend::staleSteps() const { return int(Steps::stale(m_scene, const_cast<AssetCache &>(m_assets)).size()); }
+
+void Backend::runStep(const QString &step, const QString &action) {
+    const int layer = m_selected;
+    if (layer < 0 || !hasProject())
+        return;
+    if (step == "cut" && action == "reshape")
+        return startReshape();
+    if (Steps::Step::slow(step, action)) {
+        const QString busy = step == "world" ? "Reading the picture in 3D again…"
+                             : step == "shape" ? "Giving it a 3D shape… (about 20 seconds)"
+                                               : "The AI is painting in behind it…";
+        worldJob(busy, "Done.", [layer, step, action](Scene &scene, AssetCache &assets, QString *error) {
+            return Steps::run(scene, assets, layer, step, action, error);
+        });
+        return;
+    }
+    Scene scene = m_scene;
+    QString error;
+    if (!Steps::run(scene, m_assets, layer, step, action, &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+    rearmWatcher();
+}
+
+void Backend::redoStale() {
+    if (Steps::stale(m_scene, m_assets).isEmpty())
+        return setNotice("Nothing is out of date.");
+    worldJob("Redoing what's out of date…", "Everything is up to date.", [](Scene &scene, AssetCache &assets, QString *error) {
+        return Steps::redoStale(scene, assets, error);
+    });
 }
 
 void Backend::setWorldValue(const QString &name, const QVariant &value) {

@@ -131,6 +131,9 @@ void SceneView::paintGizmo(QPainter *painter) {
     const Backend::Gizmo gizmo = m_backend->gizmo();
     const QTransform to = fromView();
     painter->save();
+    // Through the shot's camera, what's off the canvas isn't in the shot.
+    if (!m_backend->freeView())
+        painter->setClipRect(canvasRect());
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setBrush(Qt::NoBrush);
     painter->setPen(QPen(QColor(255, 255, 255, 28), 1));

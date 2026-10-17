@@ -18,6 +18,7 @@
 #include "project.h"
 #include "scene.h"
 #include "select.h"
+#include "steps.h"
 #include "theme.h"
 #include "world.h"
 
@@ -1642,6 +1643,53 @@ private slots:
         backend.undo();
         QCOMPARE(backend.worldInfo()["hazeColor"].toString(), World::Info().haze.name());
         QCOMPARE(backend.worldInfo()["shutter"].toDouble(), 90.0);
+    }
+
+    void aiStepsKnowWhenTheyreOutOfDate() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const int piece = scene.indexOf("piece"), root = 0;
+        auto names = [&](int index) {
+            QStringList list;
+            for (const Steps::Step &step : Steps::of(scene, assets, index))
+                list << step.name + (step.stale ? "!" : "");
+            return list;
+        };
+        // A world made before worlds kept track counts as up to date.
+        QCOMPARE(names(piece), QStringList({"cut", "fill", "world", "shape"}));
+        QCOMPARE(names(root), QStringList({"world"}));
+        QVERIFY(Steps::stale(scene, assets).isEmpty());
+        // One that knows what it was made from, and a shape fitted in it.
+        QJsonObject world = scene.raw["world"].toObject();
+        world["pieces"] = World::madeFrom(scene, root);
+        world["made"] = 1;
+        scene.raw["world"] = world;
+        scene.layers[piece].raw["shape"] = QJsonObject{{"file", "x"}, {"from", World::cutCode(scene.layers[piece])}, {"world", 1}};
+        QVERIFY(Steps::stale(scene, assets).isEmpty());
+        // Filling the hole another way changes neither.
+        QString error;
+        QVERIFY2(Steps::run(scene, assets, piece, "fill", "none", &error), qPrintable(error));
+        QCOMPARE(scene.layers[piece].raw["cut"].toObject()["fill"].toBool(), false);
+        QVERIFY(Steps::stale(scene, assets).isEmpty());
+        QVERIFY(Steps::run(scene, assets, piece, "fill", "smooth", &error));
+        QCOMPARE(scene.layers[piece].raw["cut"].toObject()["fillWith"].toString(), QString("smooth"));
+        QVERIFY(!Steps::run(scene, assets, piece, "fill", "paint", &error));
+        // Reshaping the piece puts the world out of date, and the shape too,
+        // in that order.
+        QVERIFY(Project::reshapeCut(scene, assets, piece, QPolygonF({QPointF(150, 50), QPointF(240, 50), QPointF(240, 140), QPointF(150, 140)}),
+                                    0, 0, &error));
+        QCOMPARE(names(piece), QStringList({"cut", "fill", "world!", "shape!"}));
+        const auto todo = Steps::stale(scene, assets);
+        QCOMPARE(todo.size(), 2);
+        QCOMPARE(todo.at(0), qMakePair(root, QString("world")));
+        QCOMPARE(todo.at(1), qMakePair(piece, QString("shape")));
+        // A picture with no world yet offers to make one.
+        scene.raw.remove("world");
+        QCOMPARE(names(root), QStringList({"world"}));
+        QVERIFY(!Steps::of(scene, assets, root).first().done);
+        QCOMPARE(Steps::of(scene, assets, root).first().actions, QStringList({"make"}));
     }
 
     void surfacesWrapSolidsFacingOut() {

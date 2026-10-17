@@ -85,6 +85,10 @@ class Backend : public QObject {
     // The world's own settings (its look, as scene.json has them), empty
     // without a world.
     Q_PROPERTY(QVariantMap worldInfo READ worldInfo NOTIFY sceneChanged)
+    // The selected layer's AI steps (see Steps::of), and how many steps are
+    // out of date across the scene.
+    Q_PROPERTY(QVariantList steps READ steps NOTIFY valuesChanged)
+    Q_PROPERTY(int staleSteps READ staleSteps NOTIFY sceneChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -144,6 +148,8 @@ public:
     bool freeView() const { return m_freeView; }
     QVariantList outliner() const;
     QVariantMap worldInfo() const;
+    QVariantList steps() const;
+    int staleSteps() const;
     int handle() const { return m_handle; }
 
     // What the world's view shows: the shot's camera at the playhead, or the
@@ -232,6 +238,11 @@ public:
     // "spring(3)", "bounce(2)", "arc(200)". False, with an error, if unknown.
     Q_INVOKABLE bool setEase(const QString &ease);
     Q_INVOKABLE void setSceneValue(const QString &name, const QVariant &value);
+    // Does one of the selected layer's steps again, or differently (an
+    // action from its list); the AI's run in the background.
+    Q_INVOKABLE void runStep(const QString &step, const QString &action);
+    // Redoes every step that's out of date, in order, in the background.
+    Q_INVOKABLE void redoStale();
     // A world setting: hazeColor, hazeDensity, grain, shutter (degrees) or
     // dust (a colour).
     Q_INVOKABLE void setWorldValue(const QString &name, const QVariant &value);

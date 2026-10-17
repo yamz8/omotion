@@ -250,6 +250,15 @@ ApplicationWindow {
                     color: win.muted
                 }
                 ToolButton {
+                    // AI steps made from something that has changed since.
+                    visible: backend.staleSteps > 0 && backend.busy === ""
+                    text: "⚠ " + backend.staleSteps + " out of date · redo"
+                    Material.foreground: "#ffb35c"
+                    onClicked: { backend.redoStale(); win.focusCanvas() }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "The world or a shape was made from pieces that have changed since. Redo them, in order, with the AI"
+                }
+                ToolButton {
                     text: backend.freeView ? "Free view" : "Camera view"
                     visible: backend.hasProject && backend.world.active
                     onClicked: { backend.toggleFreeView(); win.focusCanvas() }

@@ -216,6 +216,64 @@ Rectangle {
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
+            // How the layer came to be, step by step, each one can be done
+            // again; what's out of date says why.
+            ColumnLayout {
+                visible: backend.selected >= 0 && backend.steps.length > 0
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 2
+                Label { text: "Steps"; color: win.text; font.bold: true }
+                Repeater {
+                    model: backend.steps
+                    delegate: ColumnLayout {
+                        id: stepRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Label {
+                                text: stepRow.modelData.stale ? "⚠" : stepRow.modelData.done ? "✓" : "·"
+                                color: stepRow.modelData.stale ? "#ffb35c" : stepRow.modelData.done ? theme.accent : win.muted
+                                Layout.preferredWidth: 12
+                            }
+                            Label {
+                                text: stepRow.modelData.title
+                                color: stepRow.modelData.done ? win.text : win.muted
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 18
+                            wrapMode: Text.Wrap
+                            font.pixelSize: 12
+                            color: stepRow.modelData.stale ? "#ffb35c" : win.muted
+                            text: stepRow.modelData.stale ? "Out of date: " + stepRow.modelData.why : stepRow.modelData.detail
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 14
+                            spacing: 0
+                            Repeater {
+                                model: stepRow.modelData.actions
+                                delegate: ToolButton {
+                                    required property string modelData
+                                    font.pixelSize: 12
+                                    implicitHeight: 28
+                                    text: ({"reshape": "Reshape", "ai": "Fill by AI", "smooth": "Fill smoothly", "none": "Leave open",
+                                            "again": "Do again", "make": "Make"})[modelData] || modelData
+                                    onClicked: { backend.runStep(stepRow.modelData.name, modelData); inspector.done() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // The world's own look, with nothing else selected.
             ColumnLayout {
                 visible: !inspector.hasLayer && backend.world.active
