@@ -2703,6 +2703,16 @@ QList<double> layerState(const Scene &scene, AssetCache &assets, int index, doub
     QList<double> state{m.m11(), m.m12(), m.m13(), m.m21(), m.m22(), m.m23(), m.m31(), m.m32(), m.m33()};
     for (const QString &property : Scene::propertiesOf(layer))
         state << scene.value(layer, property, t);
+    // What changes in its picture rather than its place: a video's frame, a
+    // drawing's, and cloth and billowing, which move all the time.
+    if (!layer.raw.isEmpty()) {
+        if (layer.raw.contains("video"))
+            state << double(qHash(sourceAt(layer, t)));
+        if (layer.raw.contains("drawing"))
+            state << drawingFrameAt(layer, t);
+        if (layer.raw.contains("cloth") || layer.raw.contains("warp"))
+            state << t;
+    }
     return state;
 }
 
@@ -2728,11 +2738,17 @@ QRect coverage(const Scene &scene, AssetCache &assets, int first, const QList<do
         const Layer &layer = scene.layers.at(i);
         if (!layer.visible)
             continue;
+        // Empties and lights draw nothing on the canvas.
+        if (layer.particles.isEmpty() && layer.source.isEmpty() && (layer.raw.isEmpty() || !layer.raw.contains("drawing")))
+            continue;
         for (const double t : times) {
             if (scene.value(layer, "opacity", t) <= 0)
                 continue;
+            // Drawn past (or without) its picture's rectangle: a drawing,
+            // cloth, billowing, a blur of its own or out of focus.
             if (!layer.particles.isEmpty() || (!layer.pins.isEmpty() && isBent(scene, layer, t)) ||
-                scene.value(layer, "blur", t) > 0 || scene.value(layer, "glow", t) > 0)
+                scene.value(layer, "blur", t) > 0 || scene.value(layer, "glow", t) > 0 || defocus(scene, i, t) > 0 ||
+                (!layer.raw.isEmpty() && (layer.raw.contains("drawing") || layer.raw.contains("cloth") || layer.raw.contains("warp"))))
                 return all;
             area |= (layerTransform(scene, assets, i, t) * toOutput).mapRect(QRectF(QPointF(), assets.size(layer.source)));
         }

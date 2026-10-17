@@ -461,7 +461,8 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
     from = std::clamp(from, 0.0, scene.duration);
     to = std::clamp(to, from, scene.duration);
     const double dt = 1 / std::max(1.0, scene.fps);
-    const int frames = int(std::lround((to - from) / dt)) + 1;
+    // Whole frames that fit, so no key lands past to.
+    const int frames = int(std::floor((to - from) / dt + 1e-9)) + 1;
     const bool world = World::info(scene).valid;
     // A world in meters, a flat canvas in pixels with up as less y.
     const double gravity = world ? 9.81 : 2000;
@@ -655,7 +656,7 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
         for (const QString &p : properties) {
             QList<Key> keys;
             for (const Key &key : layer.keys.value(p))
-                if (key.t < from - 1e-9 || key.t > to + 1e-9)
+                if (key.t < from - 1e-9 || key.t > from + (frames - 1) * dt + 1e-9)
                     keys << key;
             for (int f = 0; f < frames; ++f)
                 keys << Key{from + f * dt, std::round(values.value(p).at(f) * 1e4) / 1e4, "linear"};

@@ -989,6 +989,36 @@ View cameraAt(const Scene &scene, AssetCache &assets, double t) {
 }
 
 namespace {
+// What's worked out from a shape, kept for the last few shapes: each with
+// the vertices it came from (shared, not copied), so the same shape is
+// found by its data without hashing it every frame, and a reshaped one
+// pushes the oldest out rather than piling up.
+template <typename T>
+class ShapeCache {
+public:
+    bool find(const QByteArray &vertices, T *out) {
+        QMutexLocker locked(&m_lock);
+        for (const auto &entry : m_entries)
+            if ((entry.first.constData() == vertices.constData() && entry.first.size() == vertices.size()) || entry.first == vertices) {
+                *out = entry.second;
+                return true;
+            }
+        return false;
+    }
+    void keep(const QByteArray &vertices, const T &value) {
+        QMutexLocker locked(&m_lock);
+        m_entries.prepend({vertices, value});
+        while (m_entries.size() > 16)
+            m_entries.removeLast();
+    }
+
+private:
+    QMutex m_lock;
+    QList<QPair<QByteArray, T>> m_entries;
+};
+}
+
+namespace {
 // Which cells of a grid over a shape's box its surface passes through,
 // thickened a cell, so a line through it can't slip between.
 // The cells of a grid over a box (low to high) that triangles pass through
@@ -1030,14 +1060,10 @@ QByteArray cellsOfTriangles(const QList<QVector3D> &corners, const QVector3D &lo
 }
 
 QByteArray cellsOf(const Mesh &shape) {
-    static QMutex lock;
-    static QHash<QByteArray, QByteArray> cache;
-    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
-    {
-        QMutexLocker locked(&lock);
-        if (cache.contains(key))
-            return cache.value(key);
-    }
+    static ShapeCache<QByteArray> cache;
+    QByteArray found;
+    if (cache.find(shape.vertices, &found))
+        return found;
     const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
     const quint32 *index = reinterpret_cast<const quint32 *>(shape.indices.constData());
     QList<QVector3D> corners;
@@ -1046,8 +1072,7 @@ QByteArray cellsOf(const Mesh &shape) {
         corners << QVector3D(v[k * shape.stride], v[k * shape.stride + 1], v[k * shape.stride + 2]);
     }
     const QByteArray cells = cellsOfTriangles(corners, shape.minimum, shape.maximum);
-    QMutexLocker locked(&lock);
-    cache.insert(key, cells);
+    cache.keep(shape.vertices, cells);
     return cells;
 }
 
@@ -1091,14 +1116,10 @@ namespace {
 // gathered into parts by k-means, each part's spread along its own main
 // ways (the eigenvectors of its covariance) giving its size and turn.
 QList<Occluder> partsOf(const Mesh &shape) {
-    static QMutex lock;
-    static QHash<QByteArray, QList<Occluder>> cache;
-    const QByteArray key = QCryptographicHash::hash(shape.vertices, QCryptographicHash::Md5);
-    {
-        QMutexLocker locked(&lock);
-        if (cache.contains(key))
-            return cache.value(key);
-    }
+    static ShapeCache<QList<Occluder>> cache;
+    QList<Occluder> found;
+    if (cache.find(shape.vertices, &found))
+        return found;
     const float *v = reinterpret_cast<const float *>(shape.vertices.constData());
     const qsizetype count = shape.vertices.size() / qsizetype(shape.stride * sizeof(float));
     QList<QVector3D> points;
@@ -1187,8 +1208,7 @@ QList<Occluder> partsOf(const Mesh &shape) {
         part.rotation = QQuaternion::fromAxes(axes[0], axes[1], axes[2]);
         parts << part;
     }
-    QMutexLocker locked(&lock);
-    cache.insert(key, parts);
+    cache.keep(shape.vertices, parts);
     return parts;
 }
 }

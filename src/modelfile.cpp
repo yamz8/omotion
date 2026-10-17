@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QQuaternion>
+#include <QSet>
 #include <QUrl>
 
 namespace ModelFile {
@@ -79,10 +80,13 @@ QMatrix4x4 nodeMatrix(const QJsonObject &node) {
 
 void walk(const QJsonObject &gltf, const std::function<void(const QJsonObject &node, const QMatrix4x4 &world)> &visit) {
     const QJsonArray nodes = gltf.value("nodes").toArray();
+    // A node is visited once, however often it's named: a file making a
+    // node its own child, or a child twice over, can't loop or multiply.
+    QSet<int> seen;
     std::function<void(int, const QMatrix4x4 &, int)> down = [&](int index, const QMatrix4x4 &above, int depth) {
-        // Kept from looping round a file that makes a node its own child.
-        if (depth > 64 || index < 0 || index >= nodes.size())
+        if (depth > 64 || index < 0 || index >= nodes.size() || seen.contains(index))
             return;
+        seen.insert(index);
         const QJsonObject node = nodes.at(index).toObject();
         const QMatrix4x4 world = above * nodeMatrix(node);
         visit(node, world);

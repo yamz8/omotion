@@ -72,8 +72,9 @@ ApplicationWindow {
             else if (commandBox.visible) commandBox.close();
             else if (win.filmVisible) win.filmVisible = false;
             else if (backend.agentBusy) backend.cancelAgent();
-            else if (backend.agentReview) backend.takeBackAgent();
+            // A grab under way is put back before the agent's change is.
             else if (backend.handle >= 0) backend.endHandle(false);
+            else if (backend.agentReview) backend.takeBackAgent();
             else if (backend.aiPrompt !== "") backend.dismissAiPrompt();
             else if (backend.downloading) backend.cancelDownload();
             else if (win.helpVisible) win.helpVisible = false;
@@ -185,7 +186,7 @@ ApplicationWindow {
     // a piece of the world (G), kept to an axis with X, Y or Z.
     // Say or search: every operator by name, or words for the agent.
     Shortcut { sequences: ["F3", "Ctrl+K"]; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !backend.agentBusy && !commandBox.visible; onActivated: commandBox.open() }
-    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.agentReview && backend.tool === "move" && !commandBox.visible; onActivated: backend.keepAgent() }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: backend.agentReview && backend.tool === "move" && backend.handle < 0 && !commandBox.visible; onActivated: backend.keepAgent() }
     Shortcut { sequence: "Ctrl+Shift+F"; context: Qt.ApplicationShortcut; enabled: backend.hasProject && !commandBox.visible; onActivated: win.filmVisible = !win.filmVisible }
     // Space plays the film while its panel is open, as it plays the scene otherwise.
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.filmVisible && backend.filmShots.length > 0; onActivated: backend.toggleFilmPlay() }

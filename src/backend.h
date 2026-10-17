@@ -610,6 +610,7 @@ private:
     int m_revision = 0;
     QString m_tool = "move";
     QList<QPointF> m_cut;
+    bool m_tracking = false;  // Following points in a video, or solving.
     QString m_reshaping;
     double m_feather = 1;
     int m_fill = -1;  // 0 off, 1 smooth, 2 AI; -1 until a tool picks the default.

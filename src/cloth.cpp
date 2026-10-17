@@ -180,10 +180,14 @@ std::shared_ptr<Run> runFor(const Scene &scene, const Layer &layer, const QSizeF
             step(*run, s, t + k * h, h);
         run->frames << run->now;
     }
-    // Old runs (settings since changed) go, so they don't pile up.
-    if (runs.size() > 64)
+    // Old runs (settings since changed) go, so they don't pile up; this
+    // one is kept (copied first: clearing frees what run refers to).
+    const std::shared_ptr<Run> kept = run;
+    if (runs.size() > 64) {
         runs.clear();
-    return run;
+        runs.insert(key, kept);
+    }
+    return kept;
 }
 
 }

@@ -49,6 +49,10 @@ bool Film::load(const QString &path, QString *error) {
         // A dissolve and a wipe overlap the shot before; a fade goes
         // through black between them, end to end.
         const double overlap = shot->transition == "dissolve" || shot->transition == "wipe" ? std::min(shot->length, m_shots.isEmpty() ? 0 : m_shots.last()->to - m_shots.last()->from) : 0;
+        // No longer than the shot before can lend it, so it never mixes
+        // over that shot held still at its end.
+        if (shot->transition == "dissolve" || shot->transition == "wipe")
+            shot->length = overlap;
         shot->start = at - overlap;
         at = shot->start + length;
         m_shots << shot;

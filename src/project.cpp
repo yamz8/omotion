@@ -2554,12 +2554,12 @@ int track(Scene &scene, AssetCache &assets, int video, const QPointF &point, dou
         return fail(QString("There's no layer named \"%1\".").arg(onto));
     if (target < 0)
         target = addEmpty(scene, clip.name + " track", {}, QPointF());
-    const int parent = scene.indexOf(scene.layers.at(target).parent);
     QList<Key> xs, ys;
     for (int f = 0; f < canvas.size(); ++f) {
         const double t = from + f * step;
-        const QTransform toCanvas = (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
-                                    cameraTransform(scene, followOf(scene, target), t);
+        // Where its x and y live, as it's drawn: its parent, the camera, and
+        // how far back it's set.
+        const QTransform toCanvas = parentTransform(scene, assets, target, t);
         const QPointF p = toCanvas.inverted().map(canvas.at(f));
         xs << Key{t, std::round(p.x() * 100) / 100, "linear"};
         ys << Key{t, std::round(p.y() * 100) / 100, "linear"};
@@ -2714,16 +2714,19 @@ int solve(Scene &scene, AssetCache &assets, int video, const QList<QPointF> &poi
     middle /= double(paths.size());
     if (target < 0)
         target = addEmpty(scene, scene.layers.at(video).name + " solve", {}, QPointF());
-    const int parent = scene.indexOf(scene.layers.at(target).parent);
-    // Where onto is on the canvas at the start rides along with the move.
-    const QPointF anchor = onto.isEmpty() ? middle : layerTransform(scene, assets, target, from).map(QPointF());
+    // Where onto's pivot is on the canvas at the start rides along with the
+    // move (its x and y are where its pivot is).
+    const Layer &onLayer = scene.layers.at(target);
+    const QSizeF onSize = assets.size(onLayer.source);
+    const QPointF anchor = onto.isEmpty() ? middle
+                                          : layerTransform(scene, assets, target, from)
+                                                .map(QPointF(onLayer.anchor.x() * onSize.width(), onLayer.anchor.y() * onSize.height()));
     const double turn = onto.isEmpty() ? 0 : scene.ownValue(scene.layers.at(target), "rotation", from);
     const double size = onto.isEmpty() ? 1 : scene.ownValue(scene.layers.at(target), "scale", from);
     QList<Key> xs, ys, turns, sizes;
     for (int f = 0; f < moves.size(); ++f) {
         const double t = from + f * step;
-        const QTransform toCanvas = (parent >= 0 ? chainTransform(scene, assets, parent, t) : QTransform()) *
-                                    cameraTransform(scene, followOf(scene, target), t);
+        const QTransform toCanvas = parentTransform(scene, assets, target, t);
         const QPointF p = toCanvas.inverted().map(moves.at(f).map(anchor));
         xs << Key{t, round(p.x()), "linear"};
         ys << Key{t, round(p.y()), "linear"};
@@ -2964,9 +2967,18 @@ int importModel(Scene &scene, const QString &directory, const QString &path, con
                 }
         }
     }
+    const QString inside = QDir::cleanPath(dir.filePath(folder));
     for (const QString &name : files) {
-        dir.mkpath(QFileInfo(dir.filePath(folder + "/" + name)).absolutePath());
-        if (!QFile::copy(from.filePath(name), dir.filePath(folder + "/" + name)) && name == files.first())
+        // Only what lies inside its own folder: a name reaching out of it
+        // ("../..") would copy, and make folders, outside the project.
+        const QString to = QDir::cleanPath(dir.filePath(folder + "/" + name));
+        if (!to.startsWith(inside + "/")) {
+            if (name == files.first())
+                return fail(QString("Couldn't copy %1 into the project.").arg(path));
+            continue;
+        }
+        dir.mkpath(QFileInfo(to).absolutePath());
+        if (!QFile::copy(from.filePath(name), to) && name == files.first())
             return fail(QString("Couldn't copy %1 into the project.").arg(path));
     }
     Layer layer;

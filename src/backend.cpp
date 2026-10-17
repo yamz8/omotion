@@ -1,4 +1,6 @@
 #include "backend.h"
+
+#include <QScopedValueRollback>
 #include "world.h"
 
 #include <QDesktopServices>
@@ -916,10 +918,20 @@ void Backend::undoStroke() {
 void Backend::trackAt(double x, double y) {
     if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
         return setNotice("Select a video layer to track a point on.");
-    Scene scene = m_scene;
+    // Drawn once to show it's busy; the scene is taken after that, so an
+    // edit or a reload handled meanwhile isn't lost, and a second press
+    // waits for this one.
+    if (m_tracking)
+        return;
+    QScopedValueRollback<bool> tracking(m_tracking, true);
     QString error;
     setBusy("Tracking…");
     QCoreApplication::processEvents();
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
+        setBusy({});
+        return;
+    }
+    Scene scene = m_scene;
     const int follower = Project::track(scene, m_assets, m_selected, QPointF(x, y), m_time, m_scene.duration, &error);
     setBusy({});
     if (follower < 0)
@@ -946,10 +958,20 @@ void Backend::finishTrack(bool stabilize) {
         return setNotice("Click points with some detail on the video first.");
     if (m_cut.size() == 1 && !stabilize)
         return trackAt(m_cut.first().x(), m_cut.first().y());
-    Scene scene = m_scene;
+    // Drawn once to show it's busy; the scene is taken after that, so an
+    // edit or a reload handled meanwhile isn't lost, and a second press
+    // waits for this one.
+    if (m_tracking)
+        return;
+    QScopedValueRollback<bool> tracking(m_tracking, true);
     QString error;
     setBusy(stabilize ? "Holding the footage still…" : "Solving the footage's move…");
     QCoreApplication::processEvents();
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
+        setBusy({});
+        return;
+    }
+    Scene scene = m_scene;
     const int keyed = Project::solve(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, stabilize, &error);
     setBusy({});
     if (keyed < 0)
@@ -988,11 +1010,21 @@ void Backend::setCloth(const QString &name, const QVariant &value) {
 void Backend::solveCamera() {
     if (m_tool != "track" || m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video"))
         return setNotice("Select a video layer to track points on.");
-    Scene scene = m_scene;
+    // Drawn once to show it's busy; the scene is taken after that, so an
+    // edit or a reload handled meanwhile isn't lost, and a second press
+    // waits for this one.
+    if (m_tracking)
+        return;
+    QScopedValueRollback<bool> tracking(m_tracking, true);
     QString error;
     double residual = 0;
     setBusy("Solving the camera…");
     QCoreApplication::processEvents();
+    if (m_selected < 0 || !m_scene.layers.at(m_selected).raw.contains("video")) {
+        setBusy({});
+        return;
+    }
+    Scene scene = m_scene;
     const bool solved = Project::solveCamera(scene, m_assets, m_selected, m_cut, m_time, m_scene.duration, &error, &residual);
     setBusy({});
     if (!solved)

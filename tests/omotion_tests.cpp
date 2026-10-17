@@ -2181,6 +2181,78 @@ private slots:
         QVERIFY(std::abs(backend.scene().layers[square].keys["x"].last().t - 1.5) < .05);
     }
 
+    // Things the reviews found, kept found.
+    void reviewedBugsStayFixed() {
+        QTemporaryDir dir;
+        AssetCache assets;
+        QString error;
+        // A drawing that moves with a flat shutter still shows.
+        {
+            Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"width": 100, "height": 100, "fps": 10, "duration": 2, "shutter": 180,
+                "layers": [{"name": "pen", "drawing": {"frames": [{"t": 0, "strokes": [{"points": [[10, 10], [90, 90]], "color": "red", "width": 8}]}]},
+                            "keys": {"x": [{"t": 0, "v": 0}, {"t": 2, "v": 20}]}}]})").object(), &error);
+            QVERIFY2(error.isEmpty(), qPrintable(error));
+            const QImage frame = renderFrame(scene, assets, 1);
+            int red = 0;
+            for (int y = 0; y < frame.height(); ++y)
+                for (int x = 0; x < frame.width(); ++x)
+                    red += qRed(frame.pixel(x, y)) > 150 && qAlpha(frame.pixel(x, y)) > 100;
+            QVERIFY2(red > 100, qPrintable(QString::number(red)));
+        }
+        // Bodies baked from between frames leave nothing past where they
+        // were asked to stop.
+        {
+            Scene scene = twoSquares(dir, assets);
+            scene.duration = 1;
+            QVERIFY(Physics::setBody(scene, 0, {{"bounce", 0}}, &error));
+            QVERIFY(Physics::bake(scene, assets, .013, 1, &error) >= 0);
+            for (const Key &key : scene.layers[0].keys.value("y"))
+                QVERIFY(key.t <= 1 + 1e-9);
+        }
+        // A dissolve longer than the shot before it lasts only as long.
+        {
+            const QString one = Project::open(writePicture(dir.filePath("one.png")), nullptr);
+            Scene a = Project::load(one, nullptr);
+            a.duration = .5;
+            QVERIFY(Project::save(one, a, &error));
+            const QString two = Project::open(writePicture(dir.filePath("two.png")), nullptr);
+            writeText(dir.filePath("film.json"), QString(R"({"fps": 10, "shots": [{"project": "%1"}, {"project": "%2", "transition": "dissolve", "length": 3}]})")
+                                                     .arg(QFileInfo(one).fileName(), QFileInfo(two).fileName()).toUtf8());
+            Film film;
+            QVERIFY2(film.load(dir.filePath("film.json"), &error), qPrintable(error));
+            const Scene b = Project::load(two, nullptr);
+            QVERIFY(std::abs(film.duration() - b.duration) < 1e-6);
+        }
+        // A model naming files outside its folder copies only what's inside.
+        {
+            QDir(dir.path()).mkpath("outside/model");
+            writeText(dir.filePath("outside/secret.bin"), "x");
+            writeText(dir.filePath("outside/model/m.gltf"), R"({"asset": {"version": "2.0"}, "buffers": [{"uri": "../secret.bin", "byteLength": 1}]})");
+            const QString project = Project::open(writePicture(dir.filePath("p.png")), nullptr);
+            Scene scene = Project::load(project, nullptr);
+            Project::importModel(scene, project, dir.filePath("outside/model/m.gltf"), QVector3D(), 1, &error);
+            QVERIFY(!QFile::exists(QDir(project).filePath("assets/secret.bin")));
+            QVERIFY(!QFile::exists(QDir(project).filePath("secret.bin")));
+        }
+        // A glTF naming a node's child twice over is read once, quickly.
+        {
+            writeText(dir.filePath("fan.gltf"), R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+                "nodes": [{"children": [0, 0, 0]}]})");
+            QElapsedTimer clock;
+            clock.start();
+            QVERIFY(ModelFile::triangles(dir.filePath("fan.gltf")).isEmpty());
+            QVERIFY(clock.elapsed() < 1000);
+        }
+        // Cloth edited many times over stays drawable.
+        {
+            Scene scene = twoSquares(dir, assets);
+            for (int k = 0; k < 70; ++k) {
+                QVERIFY(Cloth::set(scene, 1, {{"pin", "left"}, {"wind", 100 + k}}, &error));
+                QVERIFY(!Cloth::at(scene, scene.layers[1], QSizeF(40, 40), .1).isNull());
+            }
+        }
+    }
+
     void clipsBlendAndFade() {
         QString error;
         Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"duration": 4, "layers": [{"name": "a", "source": "a",
@@ -3132,6 +3204,23 @@ private slots:
         // footage took it: the middle drifted 18 px right.
         const QPointF middle = layerTransform(scene, assets, solved, .9).map(QPointF());
         QVERIFY2(QLineF(middle, QPointF(122.5 + 18, 82.5)).length() < 12, qPrintable(QString("%1,%2").arg(middle.x()).arg(middle.y())));
+        // Onto a picture layer, it starts where it was, by its pivot, and
+        // a layer set back in depth stays on the footage all the same.
+        {
+            Scene onto = scene;
+            QImage hat(40, 20, QImage::Format_ARGB32);
+            hat.fill(Qt::blue);
+            hat.save(QDir(project).filePath("hat.png"));
+            const int index = Project::importImage(onto, project, QDir(project).filePath("hat.png"), &error);
+            QVERIFY2(index >= 0, qPrintable(error));
+            onto.layers[index].base["x"] = 120;
+            onto.layers[index].base["y"] = 80;
+            onto.layers[index].base["z"] = 300;
+            const QPointF before = layerTransform(onto, assets, index, 0).map(QPointF(20, 10));
+            QVERIFY2(Project::solve(onto, assets, clip, points, 0, .9, false, &error, onto.layers[index].name) == index, qPrintable(error));
+            const QPointF after = layerTransform(onto, assets, index, 0).map(QPointF(20, 10));
+            QVERIFY2(QLineF(before, after).length() < .5, qPrintable(QString("%1,%2 %3,%4").arg(before.x()).arg(before.y()).arg(after.x()).arg(after.y())));
+        }
         // Stabilized, the video turns and shrinks back the other way.
         QCOMPARE(Project::solve(stable, assets, clip, points, 0, .9, true, &error), clip);
         QVERIFY(std::abs(stable.value(stable.layers[clip], "rotation", .9) + 18) < 2);
