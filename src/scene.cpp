@@ -2156,8 +2156,8 @@ void drawOne(QPainter &painter, const QString &kind, const QPointF &at, double r
 // its point as the piece moves and turns there, pulled down by real
 // gravity, and seen through the world's camera, nearer ones bigger. Its
 // settings in pixels are taken as centimeters: a speed of 300 is 3 m/s.
-void drawEmitted3D(QPainter &painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
-                   const QTransform &canvasToOutput, int source) {
+void drawEmitted3D(QPainter *painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
+                   const QTransform &canvasToOutput, int source, QList<QVector3D> *places = nullptr) {
     const Layer &from = scene.layers.at(source);
     const QString kind = settings.value("kind").toString();
     const double rate = std::max(0.0, settings.value("rate").toDouble(40));
@@ -2220,7 +2220,16 @@ void drawEmitted3D(QPainter &painter, const Scene &scene, const QJsonObject &set
         const QVector3D velocity = aim * float(speed * pace) + carried * float(inherit);
         const double slowed = drag > 0 ? (1 - std::exp(-drag * age)) / drag : age;
         const QVector3D pull(float(wind), float(-gravity), 0);
-        const QVector3D place = start + velocity * float(slowed) + pull * float(.5 * age * age);
+        QVector3D place = start + velocity * float(slowed) + pull * float(.5 * age * age);
+        // The ground stops them: rain is gone into it, the rest lie on it.
+        const double floor = World::groundAt(scene, assets, place.x(), place.z());
+        if (!std::isnan(floor) && place.y() < floor) {
+            if (kind == "rain")
+                continue;
+            place.setY(float(floor + r0));
+        }
+        if (places)
+            *places << place;
         const double depth = QVector3D::dotProduct(place - view.position, forward);
         QPointF onCanvas;
         if (depth < .05 || !World::project(view, canvas, place, &onCanvas))
@@ -2236,14 +2245,16 @@ void drawEmitted3D(QPainter &painter, const Scene &scene, const QJsonObject &set
         const double r = r0 * grow * (kind == "dust" ? 1 + 2.5 * grown : 1) * focal / depth;
         seen << Seen{depth, onCanvas, (ahead - onCanvas) * 50, std::max(.3, r), 360 * (turn + age * .7), .55 + .45 * std::cos(4 * age + flicker), c};
     }
+    if (!painter)
+        return;
     // Farthest first, so nearer ones cover them.
     std::sort(seen.begin(), seen.end(), [](const Seen &a, const Seen &b) { return a.depth > b.depth; });
-    painter.save();
-    painter.setTransform(canvasToOutput, true);
-    painter.setPen(Qt::NoPen);
+    painter->save();
+    painter->setTransform(canvasToOutput, true);
+    painter->setPen(Qt::NoPen);
     for (const Seen &p : seen)
-        drawOne(painter, kind, p.at, p.r, p.c, p.way, 8 + std::hypot(p.way.x(), p.way.y()) * .03, p.turn, p.squash);
-    painter.restore();
+        drawOne(*painter, kind, p.at, p.r, p.c, p.way, 8 + std::hypot(p.way.x(), p.way.y()) * .03, p.turn, p.squash);
+    painter->restore();
 }
 
 // An emitter's particles, each from its birth on the source layer, worked
@@ -2255,7 +2266,7 @@ void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &setti
         return;
     // A piece of a world throws them into the world.
     if (World::info(scene).valid && World::layers(scene).contains(source) && source != scene.indexOf(World::info(scene).picture))
-        return drawEmitted3D(painter, scene, settings, t, assets, canvasToOutput, source);
+        return drawEmitted3D(&painter, scene, settings, t, assets, canvasToOutput, source);
     const Layer &from = scene.layers.at(source);
     const QString kind = settings.value("kind").toString();
     const double rate = std::max(0.0, settings.value("rate").toDouble(40));
@@ -2305,6 +2316,17 @@ void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &setti
     }
     painter.restore();
 }
+}
+
+QList<QVector3D> particlesInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t) {
+    QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
+    for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
+        settings.insert(it.key(), it.value());
+    const int source = scene.indexOf(settings.value("from").toString());
+    QList<QVector3D> places;
+    if (source >= 0 && World::info(scene).valid && World::layers(scene).contains(source))
+        drawEmitted3D(nullptr, scene, settings, t, assets, QTransform(), source, &places);
+    return places;
 }
 
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow, AssetCache *assets,

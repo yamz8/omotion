@@ -16,6 +16,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTransform>
+#include <QVector3D>
 #include <functional>
 #include <limits>
 
@@ -310,6 +311,9 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 // speed and pulled by "gravity" (down) and "wind" (right), slowed by
 // "drag"; drawn on the canvas, so assets and the particle layer's own
 // transform to the output (toOutput) are needed for them.
+// Where an emitter's particles are in a world at a time, when it throws
+// them from one of the world's pieces (none otherwise).
+QList<QVector3D> particlesInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});

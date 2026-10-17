@@ -399,7 +399,8 @@ photo.omotion/
   pulled by `gravity` (down, px/s²) and `wind` (right), slowed by `drag`.
   From a piece of a world, they're thrown into the world instead: from
   that point on the piece as it moves and turns, spreading into the depth
-  as much as across, falling as things fall there, and seen through the
+  as much as across, falling as things fall there until they reach the
+  ground (rain goes into it, the rest lie on it), and seen through the
   world's camera (nearer ones bigger); there its pixel settings count as
   centimeters (`speed` 300 is 3 m/s, `gravity` 980 is Earth's).
 - **`body`** on a layer makes it a rigid body: `mass`, `bounce` (0 to 1),

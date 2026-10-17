@@ -2569,6 +2569,35 @@ private slots:
         const QRect far = drawn(farther);
         QVERIFY(!far.isEmpty());
         QVERIFY2(far.width() < near.width(), qPrintable(QString("%1 %2").arg(far.width()).arg(near.width())));
+        // Falling hard, they stop at the ground: dust lies on it, rain is
+        // gone into it.
+        auto amount = [&](const Scene &s) -> int {
+            QImage image(s.width, s.height, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            drawParticles(painter, s, s.layers.at(sparks), .5, 1, &assets, QTransform(), QTransform());
+            painter.end();
+            int count = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    count += qAlpha(image.pixel(x, y)) > 8;
+            return count;
+        };
+        Scene falling = scene;
+        falling.layers[sparks].particles["gravity"] = 200000;
+        falling.layers[sparks].particles["life"] = 3;
+        QVERIFY(amount(falling) > 0);
+        const QList<QVector3D> places = particlesInWorld(falling, assets, falling.layers.at(sparks), .5);
+        QVERIFY(!places.isEmpty());
+        int resting = 0;
+        for (const QVector3D &p : places) {
+            const double floor = World::groundAt(falling, assets, p.x(), p.z());
+            if (std::isnan(floor))
+                continue;
+            QVERIFY2(p.y() >= floor - 1e-3, qPrintable(QString("%1 %2").arg(p.y()).arg(floor)));
+            resting += std::abs(p.y() - floor) < .2;
+        }
+        QVERIFY(resting > 0);
     }
 
     void lightsAndMaterialsInAWorld() {
