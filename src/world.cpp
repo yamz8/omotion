@@ -431,9 +431,16 @@ ShapeFit computeFit(const Scene &scene, AssetCache &assets, int index);
 // Fitting reads the piece's depth closely, and every frame asks where a
 // piece is: fits are kept until what they depend on changes.
 QByteArray layerKey(const Scene &scene, AssetCache &assets, int index) {
-    if (index == FarLayer)
-        return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")}, {"directory", assets.directory()}, {"index", index}})
+    if (index == FarLayer) {
+        // Its mesh follows where its picture shows, so a picture made again
+        // under the same name makes it again too.
+        const QFileInfo picture(QDir(assets.directory()).filePath(info(scene).farPicture));
+        return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")},
+                                         {"directory", assets.directory()},
+                                         {"index", index},
+                                         {"picture", QString::number(picture.lastModified().toMSecsSinceEpoch())}})
             .toJson(QJsonDocument::Compact);
+    }
     const Layer &layer = scene.layers.at(index);
     return QJsonDocument(QJsonObject{{"world", scene.raw.value("world")},
                                      {"directory", assets.directory()},
@@ -671,10 +678,41 @@ Mesh buildMesh(const Scene &scene, AssetCache &assets, int index) {
                 *v++ = p.x(), *v++ = p.y(), *v++ = p.z();
                 *v++ = float(c) / cols, *v++ = 1 - float(r) / rows;
             }
-        mesh.indices.resize(qsizetype(cols) * rows * 6 * sizeof(quint32));
+        // Its picture is see-through but for the band behind the near
+        // things' edges, so only the cells where it shows get triangles (and
+        // three cells round them, for what its smaller copies spill): the
+        // rest would be millions of invisible ones drawn every frame.
+        std::vector<uchar> shows(size_t(cols) * rows, 0);
+        const QImage seen = QImage(QDir(assets.directory()).filePath(world.farPicture)).convertToFormat(QImage::Format_Alpha8);
+        if (seen.isNull())
+            std::fill(shows.begin(), shows.end(), 1);
+        for (int y = 0; y < seen.height(); ++y) {
+            const uchar *line = seen.constScanLine(y);
+            const size_t r = size_t(std::min(rows - 1, int(qint64(y) * rows / seen.height())));
+            for (int x = 0; x < seen.width(); ++x)
+                if (line[x])
+                    shows[r * cols + size_t(std::min(cols - 1, int(qint64(x) * cols / seen.width())))] = 1;
+        }
+        constexpr int Spill = 3;
+        std::vector<uchar> across(shows.size(), 0);
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c)
+                for (int k = std::max(0, c - Spill); k <= std::min(cols - 1, c + Spill) && !across[size_t(r) * cols + c]; ++k)
+                    across[size_t(r) * cols + c] = shows[size_t(r) * cols + k];
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c) {
+                uchar any = 0;
+                for (int k = std::max(0, r - Spill); k <= std::min(rows - 1, r + Spill) && !any; ++k)
+                    any = across[size_t(k) * cols + c];
+                shows[size_t(r) * cols + c] = any;
+            }
+        const qsizetype kept = std::count(shows.begin(), shows.end(), uchar(1));
+        mesh.indices.resize(kept * 6 * qsizetype(sizeof(quint32)));
         quint32 *i = reinterpret_cast<quint32 *>(mesh.indices.data());
         for (int r = 0; r < rows; ++r)
             for (int c = 0; c < cols; ++c) {
+                if (!shows[size_t(r) * cols + c])
+                    continue;
                 const quint32 a = r * (cols + 1) + c, b = a + 1, d = a + cols + 1, e = d + 1;
                 *i++ = a, *i++ = d, *i++ = b, *i++ = b, *i++ = d, *i++ = e;
             }

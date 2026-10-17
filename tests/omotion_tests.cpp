@@ -3571,7 +3571,25 @@ private slots:
             }
             QVERIFY(far <= near * 1.15f + 1e-3f);
         }
-        QVERIFY(!World::mesh(scene, assets, World::FarLayer).isNull());
+        const World::Mesh opaque = World::mesh(scene, assets, World::FarLayer);
+        QVERIFY(!opaque.isNull());
+        // The layer behind shows only where its picture does: a picture
+        // see-through but for a strip has triangles only about the strip.
+        QImage strip(400, 200, QImage::Format_ARGB32_Premultiplied);
+        strip.fill(Qt::transparent);
+        QPainter(&strip).fillRect(QRect(100, 0, 40, 200), Qt::red);
+        QVERIFY(strip.save(QDir(project).filePath("assets/world/strip.png")));
+        world["far"] = QJsonObject{{"depth", "assets/world/d.png"}, {"picture", "assets/world/strip.png"}};
+        scene.raw["world"] = world;
+        const World::Mesh band = World::mesh(scene, assets, World::FarLayer);
+        QVERIFY(!band.isNull());
+        QVERIFY(band.indices.size() * 3 < opaque.indices.size());
+        const float *bv = reinterpret_cast<const float *>(band.vertices.constData());
+        const quint32 *bt = reinterpret_cast<const quint32 *>(band.indices.constData());
+        for (qsizetype i = 0; i < band.indices.size() / qsizetype(sizeof(quint32)); ++i) {
+            const float u = bv[bt[i] * 5 + 3];
+            QVERIFY2(u > .25f - .15f && u < .35f + .15f, qPrintable(QString::number(u)));
+        }
     }
 
     void aiSaysWhatsMissing() {

@@ -580,8 +580,12 @@ int command(const QStringList &args) {
                 body["fixed"] = true;
             else if (args.at(i) == "--no-tumble")
                 body["tumble"] = false;
-            else if (i + 1 < args.size() && (args.at(i) == "--mass" || args.at(i) == "--bounce" || args.at(i) == "--friction"))
-                body[args.at(i).mid(2)] = args.at(++i).toDouble();
+            else if (i + 1 < args.size() && (args.at(i) == "--mass" || args.at(i) == "--bounce" || args.at(i) == "--friction")) {
+                // The name before the value: an assignment works out its
+                // right side first.
+                const QString name = args.at(i).mid(2);
+                body[name] = args.at(++i).toDouble();
+            }
             else
                 return fail(QString("body doesn't know %1.").arg(args.at(i)));
         }
@@ -980,7 +984,7 @@ int command(const QStringList &args) {
                 return 1;
         }
         bool invertible = false;
-        layerTransform(edited, assets, layer, t).inverted(&invertible);
+        (void)layerTransform(edited, assets, layer, t).inverted(&invertible);
         if (!invertible)
             return fail(QString("\"%1\" is scaled to nothing at %2 s, so it has no pivot to move.").arg(args.at(3)).arg(t));
         Project::setPivot(edited, assets, layer, point, t);

@@ -33,7 +33,9 @@ class WorldSource : public QObject {
 public:
     explicit WorldSource(QObject *parent = nullptr) : QObject(parent) {}
 
-    void setScene(const Scene &scene, const QString &directory);
+    void setScene(const Scene &scene, const QString &directory) { setScene(scene, directory, m_time); }
+    // The same at a time, worked out once rather than for each.
+    void setScene(const Scene &scene, const QString &directory, double t);
     void setTime(double t);
     // The frame again, as something it uses has become ready.
     void refresh() { update(); }

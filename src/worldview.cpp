@@ -23,7 +23,8 @@
 #include <QtQml>
 #include <rhi/qrhi.h>
 
-void WorldSource::setScene(const Scene &scene, const QString &directory) {
+void WorldSource::setScene(const Scene &scene, const QString &directory, double t) {
+    m_time = t;
     if (m_assets->directory() != directory)
         m_assets->setDirectory(directory);
     m_scene = scene;
@@ -468,11 +469,28 @@ struct WorldRenderer::Private {
         batch->readBackTexture(texture.get(), &result);
         control.commandBuffer()->resourceUpdate(batch);
         control.endFrame();
-        QImage image(reinterpret_cast<const uchar *>(result.data.constData()), result.pixelSize.width(),
-                     result.pixelSize.height(), QImage::Format_RGBA8888_Premultiplied);
-        if (rhi->isYUpInFramebuffer())
-            image = image.mirrored();
-        return image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        const QSize got = result.pixelSize;
+        if (Q_BYTE_ORDER != Q_LITTLE_ENDIAN || result.data.size() < qsizetype(got.width()) * got.height() * 4) {
+            QImage image(reinterpret_cast<const uchar *>(result.data.constData()), got.width(), got.height(),
+                         QImage::Format_RGBA8888_Premultiplied);
+            if (rhi->isYUpInFramebuffer())
+                image = image.mirrored();
+            return image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        }
+        // Turned the right way up and its red and blue swapped in one pass,
+        // rather than a copy for each: a shutter draws a frame many times.
+        QImage image(got, QImage::Format_ARGB32_Premultiplied);
+        const bool flip = rhi->isYUpInFramebuffer();
+        const quint32 *from = reinterpret_cast<const quint32 *>(result.data.constData());
+        for (int y = 0; y < got.height(); ++y) {
+            const quint32 *row = from + size_t(flip ? got.height() - 1 - y : y) * got.width();
+            quint32 *out = reinterpret_cast<quint32 *>(image.scanLine(y));
+            for (int x = 0; x < got.width(); ++x) {
+                const quint32 v = row[x];
+                out[x] = (v & 0xff00ff00u) | ((v & 0xffu) << 16) | ((v >> 16) & 0xffu);
+            }
+        }
+        return image;
     }
 };
 
@@ -493,10 +511,8 @@ QImage WorldRenderer::render(const Scene &scene, const QString &directory, doubl
     QElapsedTimer clock;
     clock.start();
     const int revision = d->source.revision();
-    d->source.setScene(scene, directory);
+    d->source.setScene(scene, directory, t);
     const qint64 a = clock.nsecsElapsed();
-    d->source.setTime(t);
-    const qint64 b = clock.nsecsElapsed();
     // A new world's pictures are uploaded on its first frame; the second one
     // shows them.
     QImage image = d->draw();
@@ -504,7 +520,7 @@ QImage WorldRenderer::render(const Scene &scene, const QString &directory, doubl
         image = d->draw();
     // OMOTION_PROFILE=1 tells where a frame's time goes.
     if (qEnvironmentVariableIsSet("OMOTION_PROFILE"))
-        fprintf(stderr, "world render: scene %.1f ms, frame %.1f ms, draw %.1f ms\n", a / 1e6, (b - a) / 1e6, (clock.nsecsElapsed() - b) / 1e6);
+        fprintf(stderr, "world render: scene %.1f ms, draw %.1f ms\n", a / 1e6, (clock.nsecsElapsed() - a) / 1e6);
     return image;
 }
 

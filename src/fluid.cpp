@@ -6,6 +6,7 @@
 #include <QMutex>
 #include <QRandomGenerator>
 #include <cmath>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -51,47 +52,63 @@ struct Field {
     int w = 0, h = 0;
     double cell = 1;
     std::vector<float> u, v, d, heat;
-    int at(int x, int y) const { return std::clamp(y, 0, h - 1) * w + std::clamp(x, 0, w - 1); }
-    float sample(const std::vector<float> &f, double x, double y) const {
-        x = std::clamp(x, 0.0, w - 1.001);
-        y = std::clamp(y, 0.0, h - 1.001);
-        const int ix = int(x), iy = int(y);
-        const float fx = float(x - ix), fy = float(y - iy);
-        const float *row = &f[size_t(iy) * w + ix], *below = row + w;
-        return (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
-    }
     // Carried along by the air: each cell takes what was where the air
-    // there came from, a step ago.
-    std::vector<float> carried(const std::vector<float> &f, double dt) const {
-        std::vector<float> out(f.size());
+    // there came from, a step ago. Several fields carried by the same air
+    // go together, so where it came from is worked out once for them all.
+    void carry(std::initializer_list<std::vector<float> *> fields, double dt) const {
+        std::vector<std::vector<float>> out;
+        for (const std::vector<float> *f : fields)
+            out.emplace_back(f->size());
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) {
                 const int i = y * w + x;
-                out[i] = sample(f, x - u[i] * dt, y - v[i] * dt);
+                const double fromX = std::clamp(x - u[i] * dt, 0.0, w - 1.001), fromY = std::clamp(y - v[i] * dt, 0.0, h - 1.001);
+                const int ix = int(fromX), iy = int(fromY);
+                const float fx = float(fromX - ix), fy = float(fromY - iy);
+                const size_t at = size_t(iy) * w + ix;
+                size_t k = 0;
+                for (const std::vector<float> *f : fields) {
+                    const float *row = f->data() + at, *below = row + w;
+                    out[k++][size_t(i)] = (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
+                }
             }
-        return out;
+        size_t k = 0;
+        for (std::vector<float> *f : fields)
+            f->swap(out[k++]);
     }
     // Air neither piles up nor thins out: the part of its flow that would
     // is taken away (a pressure worked out by relaxation).
+    // Runs each(x, y, here, left, right, up, down) for every cell, with the
+    // indices of it and its neighbours (the edge's own where there's
+    // none, so air doesn't leave the grid). Only the first and last columns need
+    // working out; the rest are the next ones along.
+    template <typename Each>
+    void cells(Each &&each) const {
+        for (int y = 0; y < h; ++y) {
+            const int row = y * w, up = std::max(y - 1, 0) * w, down = std::min(y + 1, h - 1) * w;
+            auto one = [&](int x) { each(x, y, row + x, row + std::max(x - 1, 0), row + std::min(x + 1, w - 1), up + x, down + x); };
+            one(0);
+            for (int x = 1; x < w - 1; ++x)
+                each(x, y, row + x, row + x - 1, row + x + 1, up + x, down + x);
+            if (w > 1)
+                one(w - 1);
+        }
+    }
     void project() {
         std::vector<float> spread(size_t(w) * h), pressure(size_t(w) * h, 0.f);
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x)
-                spread[size_t(y) * w + x] = -.5f * (u[at(x + 1, y)] - u[at(x - 1, y)] + v[at(x, y + 1)] - v[at(x, y - 1)]);
+        cells([&](int, int, int i, int left, int right, int up, int down) { spread[i] = -.5f * (u[right] - u[left] + v[down] - v[up]); });
         std::vector<float> next(pressure.size());
         for (int pass = 0; pass < 24; ++pass) {
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                    next[size_t(y) * w + x] = (spread[size_t(y) * w + x] + pressure[at(x + 1, y)] + pressure[at(x - 1, y)] +
-                                               pressure[at(x, y + 1)] + pressure[at(x, y - 1)]) / 4;
+            const float *p = pressure.data();
+            float *out = next.data();
+            const float *from = spread.data();
+            cells([&](int, int, int i, int left, int right, int up, int down) { out[i] = (from[i] + p[right] + p[left] + p[down] + p[up]) / 4; });
             std::swap(pressure, next);
         }
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x) {
-                const int i = y * w + x;
-                u[i] -= .5f * (pressure[at(x + 1, y)] - pressure[at(x - 1, y)]);
-                v[i] -= .5f * (pressure[at(x, y + 1)] - pressure[at(x, y - 1)]);
-            }
+        cells([&](int, int, int i, int left, int right, int up, int down) {
+            u[i] -= .5f * (pressure[right] - pressure[left]);
+            v[i] -= .5f * (pressure[down] - pressure[up]);
+        });
     }
 };
 
@@ -128,9 +145,7 @@ void step(Field &f, const Settings &s, const QPointF &source, double t, double d
     // air already turns, so it curls rather than smearing out.
     if (s.swirl > 0) {
         std::vector<float> turn(n);
-        for (int y = 0; y < f.h; ++y)
-            for (int x = 0; x < f.w; ++x)
-                turn[size_t(y) * f.w + x] = .5f * (f.v[f.at(x + 1, y)] - f.v[f.at(x - 1, y)] - f.u[f.at(x, y + 1)] + f.u[f.at(x, y - 1)]);
+        f.cells([&](int, int, int i, int left, int right, int up, int down) { turn[i] = .5f * (f.v[right] - f.v[left] - f.u[down] + f.u[up]); });
         for (int y = 1; y < f.h - 1; ++y)
             for (int x = 1; x < f.w - 1; ++x) {
                 const int i = y * f.w + x;
@@ -140,11 +155,14 @@ void step(Field &f, const Settings &s, const QPointF &source, double t, double d
                 f.v[i] -= float(s.swirl * 10 * (gx / length) * turn[i] * dt);
             }
     }
-    f.u = f.carried(f.u, dt);
-    f.v = f.carried(f.v, dt);
+    f.carry({&f.u}, dt);
+    f.carry({&f.v}, dt);
     f.project();
-    f.d = f.carried(f.d, dt);
-    f.heat = f.carried(f.heat, dt);
+    // Only fire has heat: smoke's stays nothing.
+    if (s.fire)
+        f.carry({&f.d, &f.heat}, dt);
+    else
+        f.carry({&f.d}, dt);
     // Flames cool quickly into smoke: short tongues under a long plume.
     const float fade = float(std::exp(-dt / s.life)), cool = float(std::exp(-dt * 6 / s.life));
     for (int i = 0; i < n; ++i) {
@@ -300,54 +318,75 @@ struct Field3 {
     int w = 0, h = 0, d = 0;
     double cell = 1;
     std::vector<float> u, v, z, smoke, heat;
-    int at(int x, int y, int k) const {
-        return (std::clamp(k, 0, d - 1) * h + std::clamp(y, 0, h - 1)) * w + std::clamp(x, 0, w - 1);
-    }
-    float sample(const std::vector<float> &f, double x, double y, double k) const {
-        x = std::clamp(x, 0.0, w - 1.001), y = std::clamp(y, 0.0, h - 1.001), k = std::clamp(k, 0.0, d - 1.001);
-        const int ix = int(x), iy = int(y), ik = int(k);
-        const float fx = float(x - ix), fy = float(y - iy), fk = float(k - ik);
-        auto f2 = [&](int kk) {
-            const float *row = &f[(size_t(kk) * h + iy) * w + ix], *below = row + w;
-            return (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
-        };
-        return f2(ik) * (1 - fk) + f2(ik + 1) * fk;
-    }
-    std::vector<float> carried(const std::vector<float> &f, double dt) const {
-        std::vector<float> out(f.size());
+    // As the flat field's carry().
+    void carry(std::initializer_list<std::vector<float> *> fields, double dt) const {
+        std::vector<std::vector<float>> out;
+        for (const std::vector<float> *f : fields)
+            out.emplace_back(f->size());
+        const size_t plane = size_t(w) * h;
         for (int k = 0; k < d; ++k)
             for (int y = 0; y < h; ++y)
                 for (int x = 0; x < w; ++x) {
                     const size_t i = (size_t(k) * h + y) * w + x;
-                    out[i] = sample(f, x - u[i] * dt, y - v[i] * dt, k - z[i] * dt);
+                    const double fromX = std::clamp(x - u[i] * dt, 0.0, w - 1.001), fromY = std::clamp(y - v[i] * dt, 0.0, h - 1.001),
+                                 fromK = std::clamp(k - z[i] * dt, 0.0, d - 1.001);
+                    const int ix = int(fromX), iy = int(fromY), ik = int(fromK);
+                    const float fx = float(fromX - ix), fy = float(fromY - iy), fk = float(fromK - ik);
+                    const size_t at = (size_t(ik) * h + iy) * w + ix;
+                    size_t n = 0;
+                    for (const std::vector<float> *f : fields) {
+                        auto flat = [&](const float *row) {
+                            const float *below = row + w;
+                            return (row[0] * (1 - fx) + row[1] * fx) * (1 - fy) + (below[0] * (1 - fx) + below[1] * fx) * fy;
+                        };
+                        out[n++][i] = flat(f->data() + at) * (1 - fk) + flat(f->data() + at + plane) * fk;
+                    }
                 }
-        return out;
+        size_t n = 0;
+        for (std::vector<float> *f : fields)
+            f->swap(out[n++]);
+    }
+    // Each cell and its six neighbours' indices (the edge's own where
+    // there's none), as the flat field's cells().
+    struct Around {
+        size_t i, left, right, below, above, back, front;
+    };
+    template <typename Each>
+    void cells(Each &&each) const {
+        for (int k = 0; k < d; ++k)
+            for (int y = 0; y < h; ++y) {
+                const size_t row = (size_t(k) * h + y) * w, below = (size_t(k) * h + std::max(y - 1, 0)) * w,
+                             above = (size_t(k) * h + std::min(y + 1, h - 1)) * w, back = (size_t(std::max(k - 1, 0)) * h + y) * w,
+                             front = (size_t(std::min(k + 1, d - 1)) * h + y) * w;
+                auto one = [&](int x) {
+                    each(Around{row + x, row + std::max(x - 1, 0), row + std::min(x + 1, w - 1), below + x, above + x, back + x, front + x});
+                };
+                one(0);
+                for (int x = 1; x < w - 1; ++x)
+                    each(Around{row + x, row + x - 1, row + x + 1, below + x, above + x, back + x, front + x});
+                if (w > 1)
+                    one(w - 1);
+            }
     }
     void project() {
         const size_t n = size_t(w) * h * d;
         std::vector<float> spread(n), pressure(n, 0.f), next(n);
-        for (int k = 0; k < d; ++k)
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                    spread[(size_t(k) * h + y) * w + x] = -.5f * (u[at(x + 1, y, k)] - u[at(x - 1, y, k)] + v[at(x, y + 1, k)] -
-                                                                 v[at(x, y - 1, k)] + z[at(x, y, k + 1)] - z[at(x, y, k - 1)]);
+        cells([&](const Around &a) {
+            spread[a.i] = -.5f * (u[a.right] - u[a.left] + v[a.above] - v[a.below] + z[a.front] - z[a.back]);
+        });
         for (int pass = 0; pass < 16; ++pass) {
-            for (int k = 0; k < d; ++k)
-                for (int y = 0; y < h; ++y)
-                    for (int x = 0; x < w; ++x)
-                        next[(size_t(k) * h + y) * w + x] =
-                            (spread[(size_t(k) * h + y) * w + x] + pressure[at(x + 1, y, k)] + pressure[at(x - 1, y, k)] + pressure[at(x, y + 1, k)] +
-                             pressure[at(x, y - 1, k)] + pressure[at(x, y, k + 1)] + pressure[at(x, y, k - 1)]) / 6;
+            const float *p = pressure.data(), *from = spread.data();
+            float *out = next.data();
+            cells([&](const Around &a) {
+                out[a.i] = (from[a.i] + p[a.right] + p[a.left] + p[a.above] + p[a.below] + p[a.front] + p[a.back]) / 6;
+            });
             std::swap(pressure, next);
         }
-        for (int k = 0; k < d; ++k)
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x) {
-                    const size_t i = (size_t(k) * h + y) * w + x;
-                    u[i] -= .5f * (pressure[at(x + 1, y, k)] - pressure[at(x - 1, y, k)]);
-                    v[i] -= .5f * (pressure[at(x, y + 1, k)] - pressure[at(x, y - 1, k)]);
-                    z[i] -= .5f * (pressure[at(x, y, k + 1)] - pressure[at(x, y, k - 1)]);
-                }
+        cells([&](const Around &a) {
+            u[a.i] -= .5f * (pressure[a.right] - pressure[a.left]);
+            v[a.i] -= .5f * (pressure[a.above] - pressure[a.below]);
+            z[a.i] -= .5f * (pressure[a.front] - pressure[a.back]);
+        });
     }
 };
 
@@ -394,34 +433,34 @@ void step3(Field3 &f, const Settings &s, const QVector3D &source, double t, doub
     if (s.swirl > 0) {
         std::vector<QVector3D> curl(n);
         std::vector<float> strength(n);
-        for (int k = 0; k < f.d; ++k)
-            for (int y = 0; y < f.h; ++y)
-                for (int x = 0; x < f.w; ++x) {
-                    const size_t i = (size_t(k) * f.h + y) * f.w + x;
-                    const QVector3D c(.5f * (f.z[f.at(x, y + 1, k)] - f.z[f.at(x, y - 1, k)] - f.v[f.at(x, y, k + 1)] + f.v[f.at(x, y, k - 1)]),
-                                      .5f * (f.u[f.at(x, y, k + 1)] - f.u[f.at(x, y, k - 1)] - f.z[f.at(x + 1, y, k)] + f.z[f.at(x - 1, y, k)]),
-                                      .5f * (f.v[f.at(x + 1, y, k)] - f.v[f.at(x - 1, y, k)] - f.u[f.at(x, y + 1, k)] + f.u[f.at(x, y - 1, k)]));
-                    curl[i] = c;
-                    strength[i] = c.length();
-                }
+        f.cells([&](const Field3::Around &a) {
+            const QVector3D c(.5f * (f.z[a.above] - f.z[a.below] - f.v[a.front] + f.v[a.back]),
+                              .5f * (f.u[a.front] - f.u[a.back] - f.z[a.right] + f.z[a.left]),
+                              .5f * (f.v[a.right] - f.v[a.left] - f.u[a.above] + f.u[a.below]));
+            curl[a.i] = c;
+            strength[a.i] = c.length();
+        });
         for (int k = 1; k < f.d - 1; ++k)
             for (int y = 1; y < f.h - 1; ++y)
                 for (int x = 1; x < f.w - 1; ++x) {
                     const size_t i = (size_t(k) * f.h + y) * f.w + x;
-                    QVector3D g(.5f * (strength[f.at(x + 1, y, k)] - strength[f.at(x - 1, y, k)]),
-                                .5f * (strength[f.at(x, y + 1, k)] - strength[f.at(x, y - 1, k)]),
-                                .5f * (strength[f.at(x, y, k + 1)] - strength[f.at(x, y, k - 1)]));
+                    // Inside, so its neighbours are simply the next cells along.
+                    const size_t across = size_t(f.w), deep = size_t(f.w) * f.h;
+                    QVector3D g(.5f * (strength[i + 1] - strength[i - 1]), .5f * (strength[i + across] - strength[i - across]),
+                                .5f * (strength[i + deep] - strength[i - deep]));
                     const float length = g.length() + 1e-5f;
                     const QVector3D push = QVector3D::crossProduct(g / length, curl[i]) * float(s.swirl * 10 * dt);
                     f.u[i] += push.x(), f.v[i] += push.y(), f.z[i] += push.z();
                 }
     }
-    f.u = f.carried(f.u, dt);
-    f.v = f.carried(f.v, dt);
-    f.z = f.carried(f.z, dt);
+    f.carry({&f.u}, dt);
+    f.carry({&f.v}, dt);
+    f.carry({&f.z}, dt);
     f.project();
-    f.smoke = f.carried(f.smoke, dt);
-    f.heat = f.carried(f.heat, dt);
+    if (s.fire)
+        f.carry({&f.smoke, &f.heat}, dt);
+    else
+        f.carry({&f.smoke}, dt);
     const float fade = float(std::exp(-dt / s.life)), cool = float(std::exp(-dt * 6 / s.life));
     for (size_t i = 0; i < n; ++i)
         f.smoke[i] *= fade, f.heat[i] *= cool;
