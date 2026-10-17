@@ -5,8 +5,8 @@
 // pieces fall in meters onto its ground; a flat scene's layers in pixels
 // onto the bottom of the canvas. Bodies are boxes that turn: they meet the
 // ground with their corners, so a knock off their middle or a landing on
-// an edge spins them, and they tip over onto a face as they come to rest.
-// Against each other they meet as the boxes square to the axes around them.
+// an edge spins them, and they tip over onto a face as they come to rest;
+// against each other they meet as turned boxes too.
 
 #include <QList>
 #include <QString>

@@ -2255,6 +2255,23 @@ private slots:
         QVERIFY2(std::abs(lying.bottom() - 100) < 1.5, qPrintable(QString::number(lying.bottom())));
         QVERIFY(!sliding.layers[0].keys.contains("rotation"));
 
+        // Dropped on a fixed box turned 30°, it meets its slope rather than
+        // the box square round it, and slides off sideways.
+        {
+            twoSquares(dir, assets);
+            Scene slope = Scene::fromJson(QJsonDocument::fromJson(R"({"width": 300, "height": 200, "duration": 3, "layers": [
+                {"name": "under", "source": "under.png", "x": 150, "y": 170, "rotation": 30},
+                {"name": "over", "source": "over.png", "x": 150, "y": 60}]})").object());
+            QVERIFY(Physics::setBody(slope, 0, {{"fixed", true}}, &error));
+            QVERIFY(Physics::setBody(slope, 1, {{"bounce", 0}, {"friction", .3}}, &error));
+            QCOMPARE(Physics::bake(slope, assets, 0, 3, &error), 1);
+            const double went = slope.value(slope.layers[1], "x", 3) - 150;
+            QVERIFY2(std::abs(went) > 40, qPrintable(QString::number(went)));
+            // And it lies on a face on the floor.
+            const double lying = slope.value(slope.layers[1], "rotation", 3);
+            QVERIFY2(std::abs(lying - std::round(lying / 90) * 90) < 3, qPrintable(QString::number(lying)));
+        }
+
         // In a world: dropped from up high, it lands on the ground there.
         QTemporaryDir worldDir;
         const QString project = madeUpWorld(worldDir);

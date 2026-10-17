@@ -1,6 +1,7 @@
 #include "physics.h"
 
 #include <QJsonObject>
+#include <QtMath>
 #include <cmath>
 
 #include "world.h"
@@ -82,20 +83,88 @@ QList<QVector3D> corners(const Body &b) {
     return list;
 }
 
-// How far it reaches along each axis as it's turned: the box square to the
-// axes around it, for meeting other bodies.
-QVector3D reach(const Body &b) {
-    if (b.half.z() > 1e5f) {
-        QVector3D r;
-        for (const QVector3D &c : corners(b))
-            r = QVector3D(std::max(r.x(), std::abs(c.x() - b.centre.x())), std::max(r.y(), std::abs(c.y() - b.centre.y())), b.half.z());
-        return r;
+// Two turned boxes against each other, as the separating axis test has
+// it: if no line (a face's way, or across an edge of each) keeps them
+// apart, they overlap, and least along one of those: which way (from a to
+// b), how deep, and where they touch (the corners of one inside the other
+// at the face they meet, or between their edges where edges cross).
+bool overlap(const Body &a, const Body &b, QVector3D *normal, float *depth, QList<QVector3D> *contacts) {
+    const bool flat = a.half.z() > 1e5f || b.half.z() > 1e5f;
+    const int sides = flat ? 2 : 3;
+    QVector3D axesA[3], axesB[3];
+    for (int k = 0; k < 3; ++k) {
+        QVector3D unit;
+        unit[k] = 1;
+        axesA[k] = a.turn.rotatedVector(unit);
+        axesB[k] = b.turn.rotatedVector(unit);
     }
-    QVector3D r;
-    for (const QVector3D &c : corners(b))
-        for (int k = 0; k < 3; ++k)
-            r[k] = std::max(r[k], std::abs(c[k] - b.centre[k]));
-    return r;
+    auto radius = [&](const Body &body, const QVector3D *axes, const QVector3D &along) {
+        double r = 0;
+        for (int k = 0; k < sides; ++k)
+            r += body.half[k] * std::abs(QVector3D::dotProduct(axes[k], along));
+        return r;
+    };
+    QList<QVector3D> candidates;
+    QList<int> kinds;  // 0 a face, 1 b face, 2 edges.
+    for (int k = 0; k < sides; ++k)
+        candidates << axesA[k], kinds << 0;
+    for (int k = 0; k < sides; ++k)
+        candidates << axesB[k], kinds << 1;
+    if (!flat)
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) {
+                const QVector3D across = QVector3D::crossProduct(axesA[i], axesB[j]);
+                if (across.length() > 1e-3f)
+                    candidates << across.normalized(), kinds << 2;
+            }
+    const QVector3D between = b.centre - a.centre;
+    double least = 1e30;
+    int best = -1;
+    for (int c = 0; c < candidates.size(); ++c) {
+        const QVector3D &along = candidates.at(c);
+        const double gap = radius(a, axesA, along) + radius(b, axesB, along) - std::abs(QVector3D::dotProduct(between, along));
+        if (gap <= 0)
+            return false;
+        // Faces are preferred a little over edges, which wobble.
+        const double weighed = kinds.at(c) == 2 ? gap * 1.05 : gap;
+        if (weighed < least)
+            least = weighed, best = c;
+    }
+    QVector3D n = candidates.at(best);
+    if (QVector3D::dotProduct(between, n) < 0)
+        n = -n;
+    *normal = n;
+    *depth = float(radius(a, axesA, n) + radius(b, axesB, n) - std::abs(QVector3D::dotProduct(between, n)));
+    // The corners of one inside the other, at the face they meet; edges
+    // crossing touch between the corners of each deepest in the other.
+    auto inside = [&](const Body &body, const Body &other, const QVector3D *otherAxes) {
+        QList<QVector3D> found;
+        const double slack = .02 * std::max({other.half.x(), other.half.y(), flat ? 0.f : other.half.z()});
+        for (const QVector3D &p : corners(body)) {
+            bool in = true;
+            for (int k = 0; k < sides && in; ++k)
+                in = std::abs(QVector3D::dotProduct(p - other.centre, otherAxes[k])) <= other.half[k] + slack;
+            if (in)
+                found << p;
+        }
+        return found;
+    };
+    auto deepest = [&](const Body &body, const QVector3D &way) {
+        QVector3D found;
+        double most = -1e30;
+        for (const QVector3D &p : corners(body))
+            if (QVector3D::dotProduct(p, way) > most)
+                most = QVector3D::dotProduct(p, way), found = p;
+        return found;
+    };
+    contacts->clear();
+    if (kinds.at(best) == 0)
+        *contacts = inside(b, a, axesA);
+    else if (kinds.at(best) == 1)
+        *contacts = inside(a, b, axesB);
+    if (contacts->isEmpty())
+        *contacts << (deepest(a, n) + deepest(b, -n)) / 2;
+    return true;
 }
 }
 
@@ -104,14 +173,17 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
     QList<QList<Pose>> path(bodies.size());
     constexpr int substeps = 8;
     const double h = dt / substeps;
+    // Each starts turned as it is; its poses say how it has turned since.
+    QList<QQuaternion> starts;
     for (Body &b : bodies) {
-        b.turn = QQuaternion();
+        b.turn.normalize();
+        starts << b.turn;
         if (!b.tumble || b.fixed)
             b.spin = QVector3D();
     }
     for (int f = 0; f < frames; ++f) {
         for (int i = 0; i < bodies.size(); ++i)
-            path[i] << Pose{bodies.at(i).centre, bodies.at(i).turn};
+            path[i] << Pose{bodies.at(i).centre, (bodies.at(i).turn * starts.at(i).inverted()).normalized()};
         for (int step = 0; step < substeps; ++step) {
             for (Body &b : bodies) {
                 if (b.fixed)
@@ -152,51 +224,35 @@ QList<QList<Pose>> simulate(QList<Body> bodies, double gravity, const std::funct
                 // A box rolls badly: turning on the ground dies away.
                 b.spin *= float(std::max(0.0, 1 - h * 2));
             }
-            // Each pair that overlaps is pushed apart along where they
-            // overlap least, and their speeds that way exchanged, as boxes
-            // that bounce off each other; how they rub turns them.
+            // Each pair that overlaps is pushed apart the way they overlap
+            // least, and pushed off each other where they touch: bouncing,
+            // rubbing and turning about it.
             for (int i = 0; i < bodies.size(); ++i)
                 for (int j = i + 1; j < bodies.size(); ++j) {
                     Body &a = bodies[i], &b = bodies[j];
                     if (a.fixed && b.fixed)
                         continue;
-                    const QVector3D ha = reach(a), hb = reach(b);
-                    const QVector3D d = b.centre - a.centre;
-                    int axis = -1;
-                    float least = 1e30f;
-                    for (int k = 0; k < 3; ++k) {
-                        const float overlap = ha[k] + hb[k] - std::abs(d[k]);
-                        if (overlap <= 0) {
-                            axis = -1;
-                            break;
-                        }
-                        if (overlap < least)
-                            least = overlap, axis = k;
-                    }
-                    if (axis < 0)
-                        continue;
                     QVector3D normal;
-                    normal[axis] = d[axis] >= 0 ? 1.f : -1.f;
+                    QList<QVector3D> contacts;
+                    float depth = 0;
+                    if (!overlap(a, b, &normal, &depth, &contacts))
+                        continue;
                     const double ia = inverseMass(a), ib = inverseMass(b);
                     const double share = ia + ib;
-                    a.centre -= normal * float(least * ia / share);
-                    b.centre += normal * float(least * ib / share);
-                    // They touch in the middle of where they overlap, on
-                    // the face between them.
-                    QVector3D contact;
-                    for (int k = 0; k < 3; ++k)
-                        contact[k] = k == axis ? a.centre[k] + normal[k] * ha[k]
-                                               : (std::max(a.centre[k] - ha[k], b.centre[k] - hb[k]) +
-                                                  std::min(a.centre[k] + ha[k], b.centre[k] + hb[k])) / 2;
-                    const QVector3D ra = contact - a.centre, rb = contact - b.centre;
-                    const double closing = QVector3D::dotProduct(b.velocity - a.velocity, normal);
-                    double pressed = 0;
-                    if (closing < 0) {
-                        pressed = -(1 + std::min(a.bounce, b.bounce)) * closing / share;
-                        a.velocity -= normal * float(pressed * ia);
-                        b.velocity += normal * float(pressed * ib);
-                    }
-                    rub(b, rb, &a, ra, normal, std::sqrt(a.friction * b.friction), pressed);
+                    a.centre -= normal * float(depth * ia / share);
+                    b.centre += normal * float(depth * ib / share);
+                    for (int pass = 0; pass < 2; ++pass)
+                        for (const QVector3D &contact : contacts) {
+                            const QVector3D ra = contact - a.centre, rb = contact - b.centre;
+                            const double closing = QVector3D::dotProduct(pointVelocity(b, rb) - pointVelocity(a, ra), normal);
+                            if (closing >= 0)
+                                continue;
+                            const double bounce = pass == 0 && -closing > gravity * h * 4 ? std::min(a.bounce, b.bounce) : 0;
+                            const double pressed = -(1 + bounce) * closing / (give(a, ra, normal) + give(b, rb, normal));
+                            push(a, ra, normal * float(-pressed));
+                            push(b, rb, normal * float(pressed));
+                            rub(b, rb, &a, ra, normal, std::sqrt(a.friction * b.friction), pressed);
+                        }
                 }
         }
     }
@@ -255,36 +311,49 @@ int bake(Scene &scene, AssetCache &assets, double from, double to, QString *erro
     const bool world = World::info(scene).valid;
     // A world in meters, a flat canvas in pixels with up as less y.
     const double gravity = world ? 9.81 : 2000;
-    auto where = [&](int index, double t) -> std::pair<QVector3D, QVector3D> {
+    // Where a body is, how big (half its size along its own sides) and how
+    // it's turned: a world piece's box as it stands, a flat layer's solid
+    // part as it's drawn, in the simulation's axes (up is +y).
+    struct Place {
+        QVector3D centre, half;
+        QQuaternion turn;
+    };
+    auto where = [&](int index, double t) -> Place {
         if (world) {
             QList<QVector3D> corners;
             QVector3D pivot;
-            if (!World::box(scene, assets, index, t, &corners, &pivot))
+            if (!World::box(scene, assets, index, t, &corners, &pivot) || corners.size() != 8)
                 return {};
-            QVector3D low = corners.first(), high = corners.first();
-            for (const QVector3D &c : corners)
-                for (int k = 0; k < 3; ++k)
-                    low[k] = std::min(low[k], c[k]), high[k] = std::max(high[k], c[k]);
-            return {(low + high) / 2, (high - low) / 2};
+            // Its corners go along its own x, then y, then z.
+            const QVector3D x = corners.at(1) - corners.at(0), y = corners.at(2) - corners.at(0), z = corners.at(4) - corners.at(0);
+            if (x.length() < 1e-6f || y.length() < 1e-6f || z.length() < 1e-6f)
+                return {};
+            return {(corners.at(0) + corners.at(7)) / 2, QVector3D(x.length(), y.length(), z.length()) / 2,
+                    QQuaternion::fromAxes(x.normalized(), y.normalized(), z.normalized())};
         }
         const Layer &layer = scene.layers.at(index);
-        const QRectF box = layerTransform(scene, assets, index, t).mapRect(solid(assets.image(layer.source)));
+        const QTransform m = layerTransform(scene, assets, index, t);
+        const QRectF box = solid(assets.image(layer.source));
+        const QPointF centre = m.map(box.center());
+        const double sx = std::hypot(m.m11(), m.m12()), sy = std::hypot(m.m21(), m.m22());
+        const double angle = qRadiansToDegrees(std::atan2(m.m12(), m.m11()));
         // As deep as can be, so they only ever push each other across and up.
-        return {QVector3D(float(box.center().x()), float(-box.center().y()), 0), QVector3D(float(box.width() / 2), float(box.height() / 2), 1e6f)};
+        return {QVector3D(float(centre.x()), float(-centre.y()), 0), QVector3D(float(box.width() / 2 * sx), float(box.height() / 2 * sy), 1e6f),
+                QQuaternion::fromAxisAndAngle(0, 0, 1, float(-angle))};
     };
     QList<Body> bodies;
     for (const int index : layers) {
         const QJsonObject settings = scene.layers.at(index).raw.value("body").toObject();
-        const auto [centre, half] = where(index, from);
-        if (half.isNull())
+        const Place place = where(index, from);
+        if (place.half.isNull())
             return fail(QString("%1 has no size to be a body.").arg(scene.layers.at(index).name));
         // It starts moving as its keys have it moving then.
-        const auto [later, unused] = where(index, std::min(scene.duration, from + dt));
-        Q_UNUSED(unused)
+        const QVector3D later = where(index, std::min(scene.duration, from + dt)).centre;
         Body body;
-        body.centre = centre;
-        body.half = half;
-        body.velocity = from + dt <= scene.duration ? (later - centre) / float(dt) : QVector3D();
+        body.centre = place.centre;
+        body.half = place.half;
+        body.turn = place.turn;
+        body.velocity = from + dt <= scene.duration ? (later - place.centre) / float(dt) : QVector3D();
         body.mass = std::max(1e-3, settings.value("mass").toDouble(1));
         body.bounce = std::clamp(settings.value("bounce").toDouble(.3), 0.0, 1.0);
         body.friction = std::clamp(settings.value("friction").toDouble(.5), 0.0, 1.0);
