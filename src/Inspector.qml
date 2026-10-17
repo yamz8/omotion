@@ -601,19 +601,48 @@ Rectangle {
                 Label { text: "Clips"; color: win.text; font.bold: true }
                 Repeater {
                     model: inspector.v.clips || []
-                    delegate: RowLayout {
+                    delegate: ColumnLayout {
+                        id: clipRow
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true
-                        Label {
+                        spacing: 2
+                        RowLayout {
                             Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            color: win.text
-                            font.pixelSize: 12
-                            text: modelData.motion + " from " + Number(modelData.start || 0).toFixed(2) + " s"
-                                  + ((modelData.repeat || 1) > 1 ? ", ×" + modelData.repeat : "")
+                            Label {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                color: win.text
+                                font.pixelSize: 12
+                                text: modelData.motion + " from " + Number(modelData.start || 0).toFixed(2) + " s"
+                                      + ((modelData.repeat || 1) > 1 ? ", ×" + modelData.repeat : "")
+                            }
+                            ComboBox {
+                                font.pixelSize: 12
+                                implicitHeight: 30
+                                Layout.preferredWidth: 96
+                                model: ["add", "replace"]
+                                currentIndex: modelData.blend === "replace" ? 1 : 0
+                                onActivated: function (i) { backend.setClip(index, "blend", model[i]); inspector.done() }
+                            }
+                            ToolButton { text: "✕"; font.pixelSize: 12; implicitHeight: 26; onClicked: { backend.removeClip(index); inspector.done() } }
                         }
-                        ToolButton { text: "✕"; font.pixelSize: 12; implicitHeight: 26; onClicked: { backend.removeClip(index); inspector.done() } }
+                        // Influence and fades, so one clip hands over to the next.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            Repeater {
+                                model: [["amount", "Influence", 1], ["fadeIn", "Fade in s", 0], ["fadeOut", "Fade out s", 0]]
+                                delegate: NumberField {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: modelData[1]
+                                    value: clipRow.modelData[modelData[0]] === undefined ? modelData[2] : clipRow.modelData[modelData[0]]
+                                    onCommitted: function (n) { backend.setClip(clipRow.index, modelData[0], n) }
+                                }
+                            }
+                        }
                     }
                 }
             }

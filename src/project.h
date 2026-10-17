@@ -167,6 +167,9 @@ bool setModifier(Scene &scene, int layer, const QString &property, const QString
 bool addClip(Scene &scene, int layer, const QString &motion, double start, int repeat, double speed, double amount,
              QString *error);
 bool removeClip(Scene &scene, int layer, int clip);
+// One setting of a clip: start, repeat, speed, amount, fadeIn, fadeOut
+// (seconds) or blend ("add" or "replace").
+bool setClip(Scene &scene, int layer, int clip, const QString &name, const QJsonValue &value, QString *error);
 
 // A setting of the scene's look (see applyLook, and focus and aperture for
 // depth of field): checked and set; 0 for a setting that's neutral when

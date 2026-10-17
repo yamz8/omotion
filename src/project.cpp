@@ -2008,6 +2008,40 @@ bool addClip(Scene &scene, int index, const QString &motion, double start, int r
     return true;
 }
 
+bool setClip(Scene &scene, int index, int clip, const QString &name, const QJsonValue &value, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    Layer *layer = scene.at(index);
+    if (!layer)
+        return fail("There's no such layer.");
+    QJsonArray clips = layer->raw.value("clips").toArray();
+    if (clip < 0 || clip >= clips.size())
+        return fail(QString("%1 has no clip %2.").arg(layer->name).arg(clip + 1));
+    QJsonObject settings = clips.at(clip).toObject();
+    if (name == "blend") {
+        if (value.toString() != "add" && value.toString() != "replace")
+            return fail("A clip blends by add or replace.");
+        if (value.toString() == "add")
+            settings.remove("blend");
+        else
+            settings["blend"] = "replace";
+    } else if (QStringList{"start", "repeat", "speed", "amount", "fadeIn", "fadeOut"}.contains(name)) {
+        const double n = value.toDouble(std::nan(""));
+        if (!std::isfinite(n))
+            return fail(QString("A clip's %1 is a number.").arg(name));
+        if ((name == "repeat" && n < 1) || (name == "speed" && n <= 0) || ((name == "start" || name.startsWith("fade")) && n < 0))
+            return fail(QString("A clip's %1 can't be %2.").arg(name).arg(n));
+        settings[name] = name == "repeat" ? QJsonValue(int(n)) : QJsonValue(std::round(n * 1000) / 1000);
+    } else
+        return fail(QString("A clip has no %1: use start, repeat, speed, amount, fadeIn, fadeOut or blend.").arg(name));
+    clips[clip] = settings;
+    layer->raw["clips"] = clips;
+    return true;
+}
+
 bool removeClip(Scene &scene, int index, int clip) {
     Layer *layer = scene.at(index);
     if (!layer)

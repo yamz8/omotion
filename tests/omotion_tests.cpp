@@ -1847,6 +1847,44 @@ private slots:
         QVERIFY(!gltf.contains("animations"));
     }
 
+    void clipsBlendAndFade() {
+        QString error;
+        Scene scene = Scene::fromJson(QJsonDocument::fromJson(R"({"duration": 4, "layers": [{"name": "a", "source": "a",
+            "keys": {"x": [{"t": 0, "v": 100}, {"t": 4, "v": 100}]}}],
+            "motions": {"rise": {"keys": {"x": [{"t": 0, "v": 0}, {"t": 1, "v": 50}]}},
+                        "there": {"keys": {"x": [{"t": 0, "v": 500}, {"t": 1, "v": 500}]}}}})").object(), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const Layer &a = scene.layers[0];
+        // Added, from 1 s, and held at its end.
+        scene.layers[0].raw["clips"] = QJsonArray{QJsonObject{{"motion", "rise"}, {"start", 1}}};
+        QCOMPARE(scene.value(a, "x", .5), 100.0);
+        QCOMPARE(scene.value(a, "x", 2), 150.0);
+        QCOMPARE(scene.value(a, "x", 3), 150.0);
+        // Faded out over its last half second: back to the keys after.
+        QVERIFY(Project::setClip(scene, 0, 0, "fadeOut", .5, &error));
+        QCOMPARE(scene.value(a, "x", 3), 100.0);
+        QVERIFY(scene.value(a, "x", 1.75) < 150 && scene.value(a, "x", 1.75) > 100);
+        // Faded in: none of it at its start, all of it by the end of the fade.
+        QVERIFY(Project::setClip(scene, 0, 0, "fadeOut", 0, &error));
+        QVERIFY(Project::setClip(scene, 0, 0, "fadeIn", 1, &error));
+        QCOMPARE(scene.value(a, "x", 1), 100.0);
+        QCOMPARE(scene.value(a, "x", 2.5), 150.0);
+        // One that replaces takes it to its own value, over what's below,
+        // half way with half its influence.
+        QJsonArray clips = scene.layers[0].raw["clips"].toArray();
+        clips.append(QJsonObject{{"motion", "there"}, {"start", 3}, {"blend", "replace"}, {"amount", .5}});
+        scene.layers[0].raw["clips"] = clips;
+        QCOMPARE(scene.value(a, "x", 3.5), (150.0 + 500.0) / 2);
+        QVERIFY(Project::setClip(scene, 0, 1, "amount", 1, &error));
+        QCOMPARE(scene.value(a, "x", 3.5), 500.0);
+        QVERIFY(!Project::setClip(scene, 0, 1, "blend", "mix", &error));
+        QVERIFY(!Project::setClip(scene, 0, 1, "speed", 0, &error));
+        QVERIFY(!Project::setClip(scene, 0, 2, "amount", 1, &error));
+        // Saved and read back the same.
+        const Scene again = Scene::fromJson(scene.toJson(), &error);
+        QCOMPARE(again.value(again.layers[0], "x", 3.5), 500.0);
+    }
+
     void rigsReachLookRollAndFollow() {
         QTemporaryDir dir;
         // An arm: an upper bone 100 px long pointing right, its pivot at its

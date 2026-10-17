@@ -793,6 +793,9 @@ double smoothNoise(double x, quint32 seed) {
     };
     return (octave(x) * 2 + octave(x * 2.3 + 17)) / 3;
 }
+
+// Eased from 0 to 1, for fades that start and end gently.
+double smooth(double x) { return x * x * (3 - 2 * x); }
 }
 
 double Scene::ownValue(const Layer &layer, const QString &property, double t) const {
@@ -823,8 +826,12 @@ double Scene::ownValue(const Layer &layer, const QString &property, double t) co
             v += modifier.value("amount").toDouble(1) *
                  smoothNoise(t * modifier.value("speed").toDouble(2), quint32(qHash(property) + modifier.value("seed").toInt(1) * 7919u));
     }
-    // Clips: saved motions laid on the layer, each adding how far its own
-    // keys have moved from where they start, from its start, repeated.
+    // Clips: saved motions laid on the layer, as Blender's NLA strips, in
+    // order, each over what's below it. One that adds moves the value by
+    // how far its own keys have moved from where they start; one that
+    // replaces takes the value to its keys'. Its influence (amount) fades
+    // in from its start and out to its end, over fadeIn and fadeOut
+    // seconds; without a fade out, it holds where it ended.
     if (!layer.raw.isEmpty() && layer.raw.contains("clips")) {
         const QJsonObject motions = raw.value("motions").toObject();
         for (const QJsonValue &c : layer.raw.value("clips").toArray()) {
@@ -837,14 +844,29 @@ double Scene::ownValue(const Layer &layer, const QString &property, double t) co
                 keys << Key{k.toObject().value("t").toDouble(), k.toObject().value("v").toDouble(), k.toObject().value("ease").toString("linear")};
             const double length = keys.last().t - keys.first().t;
             const int repeat = std::max(1, clip.value("repeat").toInt(1));
-            double local = (t - clip.value("start").toDouble()) * clip.value("speed").toDouble(1);
+            const double speed = clip.value("speed").toDouble(1) > 0 ? clip.value("speed").toDouble(1) : 1;
+            const double since = t - clip.value("start").toDouble();
+            double local = since * speed;
             if (local < 0)
                 continue;
             if (length > 0 && local < length * repeat)
                 local = std::fmod(local, length);
             else
                 local = length;
-            v += clip.value("amount").toDouble(1) * (interpolate(keys, keys.first().t + local, property) - keys.first().v);
+            double influence = clip.value("amount").toDouble(1);
+            const double fadeIn = clip.value("fadeIn").toDouble(0), fadeOut = clip.value("fadeOut").toDouble(0);
+            const double end = length * repeat / speed;
+            if (fadeIn > 0)
+                influence *= smooth(std::clamp(since / fadeIn, 0.0, 1.0));
+            if (fadeOut > 0)
+                influence *= smooth(std::clamp((end - since) / fadeOut, 0.0, 1.0));
+            if (influence == 0)
+                continue;
+            const double own = interpolate(keys, keys.first().t + local, property);
+            if (clip.value("blend").toString() == "replace")
+                v += influence * (own - v);
+            else
+                v += influence * (own - keys.first().v);
         }
     }
     return v;

@@ -343,6 +343,7 @@ public:
     Q_INVOKABLE void setModifier(const QString &property, const QString &type, double amount = 0, double speed = 2);
     Q_INVOKABLE void addClip(const QString &motion, int repeat = 1);
     Q_INVOKABLE void removeClip(int clip);
+    Q_INVOKABLE void setClip(int clip, const QString &name, const QVariant &value);
     // Rigid bodies: the selected layer as one (or a fixed one), or not; and
     // every body let fall from the playhead to the end, baked into keys.
     Q_INVOKABLE void setBody(bool body, bool fixed, double bounce);

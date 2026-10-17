@@ -121,7 +121,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag ◆ | Retime keyframes on the timeline; Shift+click picks several to move together |
 | `X` | Remove the picked keyframes, or those at the playhead |
 | `E` | Change the easing out of the picked keyframes, or those at the playhead |
-| Modifiers, clips | In the graph editor, a property seen alone can *Cycle* (its keys over and over) or get *Noise* (a smooth wobble: a hand-held camera). In `N`, a saved motion goes on *as a clip*: it adds to the animation from the playhead without touching its keys, and the inspector lists the clips. `omotion modifier` and `omotion clip` do the same |
+| Modifiers, clips | In the graph editor, a property seen alone can *Cycle* (its keys over and over) or get *Noise* (a smooth wobble: a hand-held camera). In `N`, a saved motion goes on *as a clip*: it adds to the animation from the playhead without touching its keys, and the inspector lists the clips: each adds or replaces, with its influence and its fades in and out, so one motion hands over to the next. `omotion modifier` and `omotion clip` do the same |
 | `Ctrl+Tab` | The graph editor (or Curves on the timeline): the selected layer's or camera's animated properties as curves over the scene, each fitted to the height; drag a key in time and value (Shift: value only), and a picked key's curve by its two handles; click a property to see it alone with its values |
 | `Ctrl+C` / `Ctrl+V` | Copy keyframes, and paste them at the playhead on the selected layer (any layer) |
 | `V` | Select the camera (or its row at the top of the timeline): drag the canvas to pan, wheel to zoom, `[ ]` to turn, `K` to keyframe |
@@ -347,9 +347,13 @@ photo.omotion/
 - **`modifiers`** on a layer (or the camera), by property: `[{"type": "cycle"}]`
   repeats its keys past the last; `{"type": "noise", "amount", "speed",
   "seed"}` adds a smooth wobble. **`clips`**: `[{"motion", "start", "repeat",
-  "speed", "amount"}]` add a motion's change from its first key, from
-  `start`; the scene's **`motions`** keep each motion's `keys` (by property,
-  times from 0), copied in when it's laid on.
+  "speed", "amount", "blend", "fadeIn", "fadeOut"}]`, in order, each over
+  what's below: one adds its motion's change from its first key, from
+  `start`; with `"blend": "replace"` it takes the value to the motion's own.
+  `amount` is its influence, eased in over `fadeIn` seconds from its start
+  and out over `fadeOut` to its end (without one it holds where it ended).
+  The scene's **`motions`** keep each motion's `keys` (by property, times
+  from 0), copied in when it's laid on.
 - **`warp`** makes a layer billow: `{"amount", "scale"}` (pixels of its
   picture), `"speed", "seed"}`, looping with the scene.
 - A video layer has **`video`**: `{"frames"` (a folder of the project, with

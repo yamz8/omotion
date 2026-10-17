@@ -112,9 +112,11 @@ const char *Usage = R"(Usage:
                                          keys over and over; noise adds a smooth wobble of that
                                          amount, speed times a second; none takes them away
   omotion clip <project> <layer|camera> <motion> [--at <s>] [--repeat <n>] [--speed <x>] [--amount <x>]
+               [--blend add|replace] [--fade-in <s>] [--fade-out <s>]
   omotion clip <project> <layer|camera> --none
                                          Lay a saved motion on as a clip (it adds to the animation,
-                                         keys untouched), or take the clips away
+                                         keys untouched, or replaces it), fading in and out over
+                                         the seconds given, or take the clips away
   omotion look <project> [--<setting> <value>]... | --none
                                          The scene's look: exposure (stops), contrast, saturation,
                                          temperature, tint, vignette, bloom, bloomThreshold, and
@@ -499,9 +501,14 @@ int command(const QStringList &args) {
         if (layer == -1)
             return fail(QString("There's no layer named \"%1\".").arg(args.at(3)));
         QHash<QString, double> options;
+        QString blend;
         const int first = args.at(1) == "modifier" ? 6 : 5;
-        for (int i = first; i + 1 < args.size(); i += 2)
-            options.insert(args.at(i), args.at(i + 1).toDouble());
+        for (int i = first; i + 1 < args.size(); i += 2) {
+            if (args.at(i) == "--blend")
+                blend = args.at(i + 1);
+            else
+                options.insert(args.at(i), args.at(i + 1).toDouble());
+        }
         if (args.at(1) == "modifier") {
             if (args.size() < 6)
                 return fail("modifier takes cycle, noise or none.");
@@ -510,9 +517,15 @@ int command(const QStringList &args) {
         } else if (args.at(4) == "--none") {
             while (Project::removeClip(edited, layer, 0)) {
             }
-        } else if (!Project::addClip(edited, layer, args.at(4), options.value("--at", 0), int(options.value("--repeat", 1)),
-                                     options.value("--speed", 1), options.value("--amount", 1), &error)) {
-            return fail(error);
+        } else {
+            if (!Project::addClip(edited, layer, args.at(4), options.value("--at", 0), int(options.value("--repeat", 1)),
+                                  options.value("--speed", 1), options.value("--amount", 1), &error))
+                return fail(error);
+            const int clip = int(edited.at(layer)->raw.value("clips").toArray().size()) - 1;
+            if ((!blend.isEmpty() && !Project::setClip(edited, layer, clip, "blend", blend, &error)) ||
+                (options.contains("--fade-in") && !Project::setClip(edited, layer, clip, "fadeIn", options.value("--fade-in"), &error)) ||
+                (options.contains("--fade-out") && !Project::setClip(edited, layer, clip, "fadeOut", options.value("--fade-out"), &error)))
+                return fail(error);
         }
         if (!Project::save(directory, edited, &error))
             return fail(error);

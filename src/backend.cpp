@@ -432,6 +432,16 @@ void Backend::addClip(const QString &motion, int repeat) {
     setNotice(QString("%1 is a clip from %2 s: it adds to the animation without changing its keys.").arg(motion).arg(m_time, 0, 'f', 2));
 }
 
+void Backend::setClip(int clip, const QString &name, const QVariant &value) {
+    Scene scene = m_scene;
+    QString error;
+    if (!Project::setClip(scene, target(), clip, name, QJsonValue::fromVariant(value), &error))
+        return setError(error);
+    checkpoint();
+    m_scene = scene;
+    changed();
+}
+
 void Backend::removeClip(int clip) {
     Scene scene = m_scene;
     if (!Project::removeClip(scene, target(), clip))
