@@ -30,6 +30,7 @@
 #include "cloth.h"
 #include "fluid.h"
 #include "liquid.h"
+#include "modelfile.h"
 #include "theme.h"
 #include "world.h"
 #include "worldview.h"
@@ -3213,6 +3214,11 @@ private slots:
         QVector3D low, high;
         QVERIFY(World::modelBounds(dir.filePath("box.obj"), &low, &high));
         QCOMPARE(high - low, QVector3D(2, 4, 2));
+        // Spaced with tabs, read the same way for its size as for its shape.
+        writeText(dir.filePath("tabbed.obj"), "v\t0\t0\t0\nv\t3\t0\t0\nv\t0\t1\t0\nf\t1\t2\t3\n");
+        QVERIFY(World::modelBounds(dir.filePath("tabbed.obj"), &low, &high));
+        QCOMPARE(high - low, QVector3D(3, 1, 0));
+        QCOMPARE(ModelFile::triangles(dir.filePath("tabbed.obj")).size(), 3);
         Scene scene = Project::load(project, nullptr);
         AssetCache assets(project);
         QString error;

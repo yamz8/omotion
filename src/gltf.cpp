@@ -13,6 +13,7 @@
 #include <QVector3D>
 #include <cmath>
 
+#include "modelfile.h"
 #include "world.h"
 
 namespace Gltf {
@@ -231,28 +232,10 @@ bool copyGltf(Builder &b, const QString &path, QJsonArray *roots, QStringList *e
             *error = QString("%1: %2").arg(QFileInfo(path).fileName(), why);
         return false;
     };
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return fail("couldn't read it");
-    const QByteArray bytes = file.readAll();
-    QByteArray text;
-    QList<QByteArray> buffers;
-    if (bytes.startsWith("glTF")) {
-        // Chunks after the header: the JSON, then the binary.
-        for (qsizetype at = 12; at + 8 <= bytes.size();) {
-            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + at);
-            const quint32 type = *reinterpret_cast<const quint32 *>(bytes.constData() + at + 4);
-            if (type == 0x4E4F534A)
-                text = bytes.mid(at + 8, length);
-            else if (type == 0x004E4942)
-                buffers << bytes.mid(at + 8, length);
-            at += 8 + length;
-        }
-    } else
-        text = bytes;
-    const QJsonObject gltf = QJsonDocument::fromJson(text).object();
-    if (gltf.isEmpty())
-        return fail("it isn't glTF");
+    const ModelFile::Gltf file = ModelFile::readGltf(path);
+    if (file.json.isEmpty() || !file.error.isEmpty())
+        return fail(file.error);
+    const QJsonObject &gltf = file.json;
     for (const QJsonValue &required : gltf.value("extensionsRequired").toArray())
         if (!required.toString().startsWith("KHR_materials_") && required.toString() != "KHR_texture_transform" &&
             required.toString() != "KHR_mesh_quantization")
@@ -269,18 +252,7 @@ bool copyGltf(Builder &b, const QString &path, QJsonArray *roots, QStringList *e
         *out = f.readAll();
         return true;
     };
-    // A GLB's own binary is buffer 0; anything else names a file.
-    const QJsonArray bufferList = gltf.value("buffers").toArray();
-    QList<QByteArray> data;
-    for (int i = 0; i < bufferList.size(); ++i) {
-        const QString uri = bufferList.at(i).toObject().value("uri").toString();
-        QByteArray d;
-        if (uri.isEmpty())
-            d = buffers.value(0);
-        else if (!load(uri, &d))
-            return fail(QString("couldn't read its %1").arg(uri.startsWith("data:") ? QString("buffer") : uri));
-        data << d;
-    }
+    const QList<QByteArray> &data = file.buffers;
     const int views = int(b.views.size()), accessors = int(b.accessors.size()), images = int(b.images.size()),
               samplers = int(b.samplers.size()), textures = int(b.textures.size()), materials = int(b.materials.size()),
               meshes = int(b.meshes.size()), nodes = int(b.nodes.size());
@@ -288,7 +260,7 @@ bool copyGltf(Builder &b, const QString &path, QJsonArray *roots, QStringList *e
         const QJsonObject view = v.toObject();
         const QByteArray &from = data.value(view.value("buffer").toInt());
         const qsizetype offset = view.value("byteOffset").toInteger(), length = view.value("byteLength").toInteger();
-        if (offset + length > from.size())
+        if (offset < 0 || length < 0 || offset + length > from.size())
             return fail("its buffers are shorter than it says");
         b.view(from.mid(offset, length), view.value("target").toInt());
         if (view.contains("byteStride")) {

@@ -1,4 +1,5 @@
 #include "world.h"
+#include "modelfile.h"
 #include "fluid.h"
 #include "liquid.h"
 
@@ -1049,155 +1050,6 @@ QByteArray cellsOf(const Mesh &shape) {
     return cells;
 }
 
-// An imported model's triangles, in its own units: an OBJ's faces, or a
-// glTF's meshes through the nodes above them.
-QList<QVector3D> modelTriangles(const QString &path) {
-    QList<QVector3D> corners;
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return corners;
-    const QByteArray bytes = file.readAll();
-    if (QFileInfo(path).suffix().toLower() == "obj") {
-        QList<QVector3D> points;
-        for (const QByteArray &raw : bytes.split('\n')) {
-            const QList<QByteArray> words = raw.simplified().split(' ');
-            if (words.first() == "v" && words.size() >= 4)
-                points << QVector3D(words.at(1).toFloat(), words.at(2).toFloat(), words.at(3).toFloat());
-            else if (words.first() == "f" && words.size() >= 4) {
-                QList<int> face;
-                for (int k = 1; k < words.size(); ++k) {
-                    const int id = words.at(k).split('/').first().toInt();
-                    face << (id < 0 ? int(points.size()) + id : id - 1);
-                }
-                // Corners that name no point (past either end, or not a
-                // number) leave out the triangles they're in.
-                auto known = [&](int i) { return i >= 0 && i < points.size(); };
-                for (int k = 2; k < face.size(); ++k)
-                    if (known(face.at(0)) && known(face.at(k - 1)) && known(face.at(k)))
-                        corners << points.at(face.at(0)) << points.at(face.at(k - 1)) << points.at(face.at(k));
-            }
-        }
-        return corners;
-    }
-    QByteArray text = bytes, binary;
-    if (bytes.startsWith("glTF"))
-        for (qsizetype at = 12; at + 8 <= bytes.size();) {
-            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + at);
-            const quint32 type = *reinterpret_cast<const quint32 *>(bytes.constData() + at + 4);
-            if (type == 0x4E4F534A)
-                text = bytes.mid(at + 8, length);
-            else if (type == 0x004E4942)
-                binary = bytes.mid(at + 8, length);
-            at += 8 + length;
-        }
-    const QJsonObject gltf = QJsonDocument::fromJson(text).object();
-    const QDir beside = QFileInfo(path).absoluteDir();
-    QList<QByteArray> buffers;
-    for (const QJsonValue &b : gltf.value("buffers").toArray()) {
-        const QString uri = b.toObject().value("uri").toString();
-        if (uri.isEmpty())
-            buffers << binary;
-        else if (uri.startsWith("data:"))
-            buffers << QByteArray::fromBase64(uri.mid(uri.indexOf(',') + 1).toLatin1());
-        else {
-            QFile f(beside.filePath(QUrl::fromPercentEncoding(uri.toUtf8())));
-            buffers << (f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray());
-        }
-    }
-    const QJsonArray views = gltf.value("bufferViews").toArray(), accessors = gltf.value("accessors").toArray(),
-                     meshes = gltf.value("meshes").toArray(), nodes = gltf.value("nodes").toArray();
-    // An accessor's values, as numbers, its count of them by its kind.
-    auto read = [&](int index, int width, QList<double> *out) {
-        const QJsonObject a = accessors.at(index).toObject();
-        if (!a.contains("bufferView"))
-            return false;
-        const QJsonObject view = views.at(a.value("bufferView").toInt()).toObject();
-        const QByteArray &buffer = buffers.value(view.value("buffer").toInt());
-        const int type = a.value("componentType").toInt();
-        const int size = type == 5126 || type == 5125 ? 4 : type == 5123 || type == 5122 ? 2 : 1;
-        const qsizetype stride = view.value("byteStride").toInt(size * width);
-        const qsizetype start = view.value("byteOffset").toInteger() + a.value("byteOffset").toInteger();
-        const qsizetype count = a.value("count").toInteger();
-        // Nothing outside its buffer, either way, whatever the file says.
-        if (start < 0 || stride < size * width || count <= 0 || start + (count - 1) * stride + size * width > buffer.size())
-            return false;
-        for (qsizetype i = 0; i < count; ++i)
-            for (int k = 0; k < width; ++k) {
-                const char *p = buffer.constData() + start + i * stride + k * size;
-                double value = 0;
-                if (type == 5126)
-                    value = *reinterpret_cast<const float *>(p);
-                else if (type == 5125)
-                    value = *reinterpret_cast<const quint32 *>(p);
-                else if (type == 5123)
-                    value = *reinterpret_cast<const quint16 *>(p);
-                else if (type == 5121)
-                    value = *reinterpret_cast<const quint8 *>(p);
-                else
-                    return false;
-                *out << value;
-            }
-        return true;
-    };
-    std::function<void(int, const QMatrix4x4 &, int)> visit = [&](int index, const QMatrix4x4 &above, int depth) {
-        if (depth > 64 || index < 0 || index >= nodes.size())
-            return;
-        const QJsonObject node = nodes.at(index).toObject();
-        QMatrix4x4 local;
-        const QJsonArray m = node.value("matrix").toArray();
-        if (m.size() == 16) {
-            float values[16];
-            for (int k = 0; k < 16; ++k)
-                values[k] = float(m.at(k).toDouble());
-            local = QMatrix4x4(values).transposed();
-        } else {
-            const QJsonArray tr = node.value("translation").toArray(), r = node.value("rotation").toArray(), sc = node.value("scale").toArray();
-            if (tr.size() == 3)
-                local.translate(float(tr.at(0).toDouble()), float(tr.at(1).toDouble()), float(tr.at(2).toDouble()));
-            if (r.size() == 4)
-                local.rotate(QQuaternion(float(r.at(3).toDouble()), float(r.at(0).toDouble()), float(r.at(1).toDouble()), float(r.at(2).toDouble())));
-            if (sc.size() == 3)
-                local.scale(float(sc.at(0).toDouble()), float(sc.at(1).toDouble()), float(sc.at(2).toDouble()));
-        }
-        const QMatrix4x4 world = above * local;
-        if (node.contains("mesh"))
-            for (const QJsonValue &p : meshes.at(node.value("mesh").toInt()).toObject().value("primitives").toArray()) {
-                const QJsonObject primitive = p.toObject();
-                if (primitive.value("mode").toInt(4) != 4)
-                    continue;
-                QList<double> positions, order;
-                if (!read(primitive.value("attributes").toObject().value("POSITION").toInt(-1), 3, &positions))
-                    continue;
-                if (primitive.contains("indices"))
-                    read(primitive.value("indices").toInt(), 1, &order);
-                else
-                    for (qsizetype k = 0; k < positions.size() / 3; ++k)
-                        order << double(k);
-                // Whole triangles only, each of three points it has, so one
-                // bad index can't put every later triangle out of step.
-                for (qsizetype t = 0; t + 2 < order.size(); t += 3) {
-                    QVector3D triangle[3];
-                    bool whole = true;
-                    for (int c = 0; c < 3 && whole; ++c) {
-                        const qsizetype at = qsizetype(order.at(t + c)) * 3;
-                        whole = at >= 0 && at + 2 < positions.size();
-                        if (whole)
-                            triangle[c] = world.map(QVector3D(float(positions.at(at)), float(positions.at(at + 1)), float(positions.at(at + 2))));
-                    }
-                    if (whole)
-                        corners << triangle[0] << triangle[1] << triangle[2];
-                }
-            }
-        for (const QJsonValue &child : node.value("children").toArray())
-            visit(child.toInt(), world, depth + 1);
-    };
-    const QJsonArray scenes = gltf.value("scenes").toArray();
-    for (const QJsonValue &root : scenes.at(gltf.value("scene").toInt(0)).toObject().value("nodes").toArray())
-        visit(root.toInt(), QMatrix4x4(), 0);
-    corners.resize(corners.size() / 3 * 3);
-    return corners;
-}
-
 QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D &high) {
     // One a file, kept with what it was made from (when the file was saved,
     // and the box), so a new save replaces it rather than piling up.
@@ -1215,7 +1067,7 @@ QByteArray modelCells(const QString &path, const QVector3D &low, const QVector3D
         if (it != cache.constEnd() && it->saved == saved && it->low == low && it->high == high)
             return it->cells;
     }
-    const QByteArray cells = cellsOfTriangles(modelTriangles(path), low, high);
+    const QByteArray cells = cellsOfTriangles(ModelFile::triangles(path), low, high);
     QMutexLocker locked(&lock);
     cache.insert(path, Made{saved, low, high, cells});
     return cells;
@@ -1802,72 +1654,34 @@ bool modelBounds(const QString &path, QVector3D *low, QVector3D *high) {
             return true;
         }
     }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return false;
     QVector3D a(1e30f, 1e30f, 1e30f), b(-1e30f, -1e30f, -1e30f);
     auto grow = [&](const QVector3D &p) {
         for (int k = 0; k < 3; ++k)
             a[k] = std::min(a[k], p[k]), b[k] = std::max(b[k], p[k]);
     };
-    const QString suffix = QFileInfo(path).suffix().toLower();
-    if (suffix == "obj") {
-        while (!file.atEnd()) {
-            const QByteArray line = file.readLine().trimmed();
-            if (!line.startsWith("v "))
-                continue;
-            const QList<QByteArray> parts = line.simplified().split(' ');
-            if (parts.size() >= 4)
-                grow(QVector3D(parts.at(1).toFloat(), parts.at(2).toFloat(), parts.at(3).toFloat()));
-        }
+    if (QFileInfo(path).suffix().toLower() == "obj") {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return false;
+        for (const QVector3D &p : ModelFile::objPoints(file.readAll()))
+            grow(p);
     } else {
         // glTF: each mesh's position box, through the nodes above it.
-        QByteArray text = file.readAll();
-        if (suffix == "glb") {
-            if (text.size() < 20 || !text.startsWith("glTF"))
-                return false;
-            const quint32 length = *reinterpret_cast<const quint32 *>(text.constData() + 12);
-            text = text.mid(20, length);
-        }
-        const QJsonObject gltf = QJsonDocument::fromJson(text).object();
-        const QJsonArray nodes = gltf.value("nodes").toArray(), meshes = gltf.value("meshes").toArray(),
-                         accessors = gltf.value("accessors").toArray();
-        std::function<void(int, const QMatrix4x4 &)> visit = [&](int index, const QMatrix4x4 &above) {
-            const QJsonObject node = nodes.at(index).toObject();
-            QMatrix4x4 local;
-            const QJsonArray m = node.value("matrix").toArray();
-            if (m.size() == 16) {
-                float values[16];
-                for (int k = 0; k < 16; ++k)
-                    values[k] = float(m.at(k).toDouble());
-                local = QMatrix4x4(values).transposed();  // glTF's are column by column.
-            } else {
-                const QJsonArray tr = node.value("translation").toArray(), r = node.value("rotation").toArray(), sc = node.value("scale").toArray();
-                if (tr.size() == 3)
-                    local.translate(float(tr.at(0).toDouble()), float(tr.at(1).toDouble()), float(tr.at(2).toDouble()));
-                if (r.size() == 4)
-                    local.rotate(QQuaternion(float(r.at(3).toDouble()), float(r.at(0).toDouble()), float(r.at(1).toDouble()), float(r.at(2).toDouble())));
-                if (sc.size() == 3)
-                    local.scale(float(sc.at(0).toDouble()), float(sc.at(1).toDouble()), float(sc.at(2).toDouble()));
+        const ModelFile::Gltf file = ModelFile::readGltf(path);
+        const QJsonArray meshes = file.json.value("meshes").toArray(), accessors = file.json.value("accessors").toArray();
+        ModelFile::walk(file.json, [&](const QJsonObject &node, const QMatrix4x4 &world) {
+            if (!node.contains("mesh"))
+                return;
+            for (const QJsonValue &primitive : meshes.at(node.value("mesh").toInt()).toObject().value("primitives").toArray()) {
+                const QJsonObject accessor = accessors.at(primitive.toObject().value("attributes").toObject().value("POSITION").toInt(-1)).toObject();
+                const QJsonArray mn = accessor.value("min").toArray(), mx = accessor.value("max").toArray();
+                if (mn.size() != 3 || mx.size() != 3)
+                    continue;
+                for (int c = 0; c < 8; ++c)
+                    grow(world.map(QVector3D(float((c & 1 ? mx : mn).at(0).toDouble()), float((c & 2 ? mx : mn).at(1).toDouble()),
+                                             float((c & 4 ? mx : mn).at(2).toDouble()))));
             }
-            const QMatrix4x4 world = above * local;
-            if (node.contains("mesh"))
-                for (const QJsonValue &primitive : meshes.at(node.value("mesh").toInt()).toObject().value("primitives").toArray()) {
-                    const QJsonObject accessor = accessors.at(primitive.toObject().value("attributes").toObject().value("POSITION").toInt(-1)).toObject();
-                    const QJsonArray mn = accessor.value("min").toArray(), mx = accessor.value("max").toArray();
-                    if (mn.size() != 3 || mx.size() != 3)
-                        continue;
-                    for (int c = 0; c < 8; ++c)
-                        grow(world.map(QVector3D(float((c & 1 ? mx : mn).at(0).toDouble()), float((c & 2 ? mx : mn).at(1).toDouble()),
-                                                 float((c & 4 ? mx : mn).at(2).toDouble()))));
-                }
-            for (const QJsonValue &child : node.value("children").toArray())
-                visit(child.toInt(), world);
-        };
-        const QJsonArray scenes = gltf.value("scenes").toArray();
-        const QJsonArray roots = scenes.at(gltf.value("scene").toInt(0)).toObject().value("nodes").toArray();
-        for (const QJsonValue &root : roots)
-            visit(root.toInt(), QMatrix4x4());
+        });
     }
     if (a.x() > b.x())
         return false;
