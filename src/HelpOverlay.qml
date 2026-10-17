@@ -11,7 +11,7 @@ Rectangle {
 
     readonly property var groups: [
         ["Project", [["O", "Animate an image"], ["Shift+O", "Open an animation folder"], ["I", "Add an image as a layer"], ["Shift+I", "Add particles: snow, rain, dust, fireflies, leaves, embers"], ["Ctrl+M", "Add music or sound"],
-                     ["Ctrl+E", "Export MP4, WebM, GIF or PNG frames"], ["Ctrl+Shift+K", "Move unused images to the trash"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
+                     ["Ctrl+E", "Export MP4, WebM, GIF, PNG frames, or glTF for Blender"], ["Ctrl+Shift+K", "Move unused images to the trash"], ["Ctrl+Z", "Undo"], ["Ctrl+Shift+Z", "Redo"],
                      ["F3 / Ctrl+K", "Say or search: find any operator by name, or say what you want and Claude Code does it"],
                      ["?", "This list"], ["Q", "Quit"]]],
         ["View", [["Ctrl+wheel", "Look closer, about the mouse"], ["Middle-drag", "Move the view"],

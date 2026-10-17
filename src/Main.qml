@@ -734,6 +734,7 @@ ApplicationWindow {
         Shortcut { sequences: ["2", "W"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("webm") }
         Shortcut { sequences: ["3", "G"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("gif") }
         Shortcut { sequences: ["4", "F"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("png") }
+        Shortcut { sequences: ["5"]; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: exportChoice.pick("glb") }
         Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: { win.exportMenuVisible = false; backend.openRenders() } }
         Shortcut { sequence: "H"; context: Qt.ApplicationShortcut; enabled: win.exportMenuVisible; onActivated: win.exportHalf = !win.exportHalf }
 
@@ -771,7 +772,8 @@ ApplicationWindow {
                     model: [["1", "MP4", "H.264, plays everywhere", "mp4"],
                             ["2", "WebM", "VP9, keeps transparency", "webm"],
                             ["3", "GIF", "Loops at 15 fps, for chats and READMEs", "gif"],
-                            ["4", "PNG frames", "A numbered image per frame", "png"]]
+                            ["4", "PNG frames", "A numbered image per frame", "png"],
+                            ["5", "glTF", "The scene in 3D, moving, for Blender", "glb"]]
                     delegate: Rectangle {
                         required property var modelData
                         width: exportColumn.width

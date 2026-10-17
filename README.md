@@ -82,7 +82,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | `I` | Add an image as a layer |
 | `Ctrl+M` | Add music or sound: it plays along, shows as a waveform on the timeline, and goes into MP4 and WebM |
 | `Shift+I` | Add particles: snow, rain, dust, fireflies, leaves or embers, looping with the scene |
-| `Ctrl+E` | Export MP4, WebM, GIF or PNG frames (`H` there for half size) |
+| `Ctrl+E` | Export MP4, WebM, GIF, PNG frames, or glTF for Blender (`H` there for half size) |
 | `Ctrl+Shift+K` | Move images nothing uses any more (not even undo) to the trash |
 | `F3` / `Ctrl+K` | Say or search: type to find any operator by name and `Enter` runs it; or say what you want ("make the car jump over the crest") and `Ctrl+Enter` hands it to Claude Code (see [Saying what you want](#saying-what-you-want)) |
 | `Space` | Play / pause |

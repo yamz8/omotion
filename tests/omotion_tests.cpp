@@ -19,6 +19,7 @@
 #include "scene.h"
 #include "select.h"
 #include "steps.h"
+#include "gltf.h"
 #include "theme.h"
 #include "world.h"
 
@@ -1798,6 +1799,49 @@ private slots:
         backend.flush();
         QCOMPARE(Project::load(backend.projectPath(), nullptr).fps, 30.0);
         qunsetenv("OMOTION_AGENT");
+    }
+
+    void scenesExportAsGltf() {
+        auto read = [](const QString &path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly))
+                return QJsonObject();
+            const QByteArray bytes = file.readAll();
+            if (bytes.size() < 20 || bytes.left(4) != "glTF")
+                return QJsonObject();
+            const quint32 length = *reinterpret_cast<const quint32 *>(bytes.constData() + 12);
+            return QJsonDocument::fromJson(bytes.mid(20, length)).object();
+        };
+        auto names = [](const QJsonObject &gltf) {
+            QStringList list;
+            for (const QJsonValue &node : gltf["nodes"].toArray())
+                list << node.toObject()["name"].toString();
+            return list;
+        };
+        QTemporaryDir dir;
+        // A world: its picture and piece as meshes, the piece moving.
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        const int piece = scene.indexOf("piece");
+        scene.layers[piece].keys["worldX"] = {Key{0, 0}, Key{1, 2}};
+        QString error;
+        QVERIFY2(Gltf::write(scene, assets, dir.filePath("world.glb"), &error), qPrintable(error));
+        QJsonObject gltf = read(dir.filePath("world.glb"));
+        QCOMPARE(gltf["asset"].toObject()["version"].toString(), QString("2.0"));
+        QCOMPARE(names(gltf), QStringList({scene.layers[0].name, "piece", "camera"}));
+        QCOMPARE(gltf["meshes"].toArray().size(), 2);
+        const QJsonArray channels = gltf["animations"].toArray().first().toObject()["channels"].toArray();
+        QCOMPARE(channels.size(), 1);  // Only what moves.
+        QCOMPARE(channels.first().toObject()["target"].toObject()["node"].toInt(), 1);
+        QCOMPARE(channels.first().toObject()["target"].toObject()["path"].toString(), QString("translation"));
+        // A flat scene: a card a layer, under the canvas, and the camera.
+        AssetCache flatAssets;
+        Scene flat = twoSquares(dir, flatAssets);
+        QVERIFY(Gltf::write(flat, flatAssets, dir.filePath("flat.glb"), &error));
+        gltf = read(dir.filePath("flat.glb"));
+        QCOMPARE(names(gltf), QStringList({"canvas", "under", "over", "camera"}));
+        QVERIFY(!gltf.contains("animations"));
     }
 
     void surfacesWrapSolidsFacingOut() {

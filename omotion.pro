@@ -9,6 +9,7 @@ HEADERS += \
     src/backend.h \
     src/exporter.h \
     src/filepicker.h \
+    src/gltf.h \
     src/graphview.h \
     src/portalfilepicker.h \
     src/project.h \
@@ -25,6 +26,7 @@ SOURCES += \
     src/ai.cpp \
     src/backend.cpp \
     src/exporter.cpp \
+    src/gltf.cpp \
     src/graphview.cpp \
     src/portalfilepicker.cpp \
     src/project.cpp \

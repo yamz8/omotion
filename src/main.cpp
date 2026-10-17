@@ -18,6 +18,7 @@
 #include "ai.h"
 #include "backend.h"
 #include "exporter.h"
+#include "gltf.h"
 #include "graphview.h"
 #include "portalfilepicker.h"
 #include "project.h"
@@ -70,6 +71,9 @@ const char *Usage = R"(Usage:
   omotion shape <project> <layer>        Give a piece of the world a 3D shape, with the AI
                                          (about 20 s): it can turn and has a back
   omotion size <project> <layer> <meters>  Size the world so that piece is that tall (a car 1.4)
+  omotion gltf <project> <output.glb>    The scene for Blender or any 3D tool: a world's meshes and
+                                         pictures, its pieces and camera moving as they do; a flat
+                                         scene as cards moving as its layers do
   omotion steps <project> [<layer>]       The AI steps behind each layer (or one): what it was cut
                                          from, how the hole was filled, the world, its shape; and
                                          which are out of date, as JSON
@@ -367,6 +371,15 @@ int command(const QStringList &args) {
         QTextStream(stdout) << QString("%1 has a shape (fits its outline %2%).\n")
                                    .arg(args.at(3))
                                    .arg(int(shape.value("fit").toDouble() * 100));
+        return 0;
+    }
+
+    if (args.at(1) == "gltf") {
+        if (args.size() != 4)
+            return fail("gltf takes a project and the .glb file to write.");
+        if (!Gltf::write(scene, assets, args.at(3), &error))
+            return fail(error);
+        QTextStream(stdout) << args.at(3) << "\n";
         return 0;
     }
 
@@ -741,7 +754,7 @@ int main(int argc, char *argv[]) {
                                        !std::strcmp(argv[1], "preset") || !std::strcmp(argv[1], "pivot") ||
                                        !std::strcmp(argv[1], "info") || !std::strcmp(argv[1], "particles") || !std::strcmp(argv[1], "audio") ||
                                        !std::strcmp(argv[1], "motion") || !std::strcmp(argv[1], "link") || !std::strcmp(argv[1], "world") || !std::strcmp(argv[1], "shape") || !std::strcmp(argv[1], "drive") || !std::strcmp(argv[1], "ground") || !std::strcmp(argv[1], "size") ||
-                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "redo") ||
+                                       !std::strcmp(argv[1], "steps") || !std::strcmp(argv[1], "gltf") || !std::strcmp(argv[1], "redo") ||
                                        !std::strcmp(argv[1], "models"));
     // No window, but a world still needs the GPU, which a desktop session's
     // platform gives without showing anything; elsewhere, offscreen.

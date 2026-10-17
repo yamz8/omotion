@@ -16,6 +16,7 @@
 #include <cmath>
 #include <limits>
 
+#include "gltf.h"
 #include "project.h"
 #include "steps.h"
 
@@ -2684,6 +2685,31 @@ void Backend::exportAs(const QString &format, double scale) {
     const QDir renders(QDir(m_directory).filePath("renders"));
     const QString name = projectName() + (scale < 1 ? "-small" : "");
     const QString output = format == "png" ? renders.filePath(name + "-frames") : renders.filePath(name + "." + format);
+    if (format == "glb") {
+        // For Blender and other 3D tools: written off the window's thread,
+        // as a world's meshes are big.
+        if (m_job.isRunning())
+            return;
+        QDir().mkpath(renders.path());
+        const Scene scene = m_scene;
+        const QString directory = m_directory;
+        auto failed = std::make_shared<QString>();
+        setBusy("Writing the scene as glTF…");
+        m_job.disconnect(this);
+        connect(&m_job, &QFutureWatcher<void>::finished, this, [this, failed, output] {
+            setBusy({});
+            if (!failed->isEmpty())
+                return setError(*failed);
+            setNotice("Exported " + QFileInfo(output).fileName() + ": open it in Blender (File ▸ Import ▸ glTF).");
+        });
+        m_job.setFuture(QtConcurrent::run([scene, directory, output, failed] {
+            AssetCache assets(directory);
+            QString error;
+            if (!Gltf::write(scene, assets, output, &error))
+                *failed = error;
+        }));
+        return;
+    }
     if (!m_exporter.start(m_scene, m_directory, output, scale))
         return setError(m_exporter.error());
     m_exportProgress = 0;
