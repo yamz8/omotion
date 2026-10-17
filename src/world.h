@@ -102,6 +102,9 @@ struct Mesh {
 Mesh mesh(const Scene &scene, AssetCache &assets, int index);
 // Just the pivot, without building the mesh.
 QVector3D pivot(const Scene &scene, AssetCache &assets, int index);
+// A turn by yaw (right about up), pitch (up about the right) and roll
+// (clockwise about ahead), in degrees, as pieces and the camera turn.
+QQuaternion turn(double yaw, double pitch, double roll);
 
 // Where everything is at a moment: the camera, and each of layers() moved by
 // its world properties about its pivot.

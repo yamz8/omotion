@@ -298,13 +298,13 @@ QRectF shownBox(const QImage &image) {
     return QRectF(box);
 }
 
+}
+
 QQuaternion turn(double yaw, double pitch, double roll) {
     // Yaw to the right about up, then pitch up about the right, then roll
     // clockwise about ahead, as a driver or a camera turns.
     return QQuaternion::fromAxisAndAngle(0, 1, 0, float(-yaw)) * QQuaternion::fromAxisAndAngle(1, 0, 0, float(pitch)) *
            QQuaternion::fromAxisAndAngle(0, 0, 1, float(-roll));
-}
-
 }
 
 // A piece's own distances: the picture's depth cells under its rectangle,

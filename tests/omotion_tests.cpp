@@ -2431,6 +2431,42 @@ private slots:
         QVERIFY(std::abs(cast.position.y() - under.y()) < 1);
     }
 
+    void emittersInAWorldThrowInThreeD() {
+        QTemporaryDir dir;
+        const QString project = madeUpWorld(dir);
+        Scene scene = Project::load(project, nullptr);
+        AssetCache assets(project);
+        QString error;
+        const int sparks = Project::addParticles(scene, "dust", QJsonObject{{"from", "piece"}, {"rate", 200}, {"life", .5},
+                                                                           {"speed", 0}, {"gravity", 0}, {"size", 10}}, &error);
+        QVERIFY2(sparks >= 0, qPrintable(error));
+        // Drawn where the piece's pivot is seen, and smaller the farther it is.
+        auto drawn = [&](const Scene &s) {
+            QImage image(s.width, s.height, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            QPainter painter(&image);
+            drawParticles(painter, s, s.layers.at(sparks), .5, 1, &assets, QTransform(), QTransform());
+            painter.end();
+            QRect box;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (qAlpha(image.pixel(x, y)) > 8)
+                        box |= QRect(x, y, 1, 1);
+            return box;
+        };
+        const QRect near = drawn(scene);
+        QVERIFY(!near.isEmpty());
+        const World::View shot = World::cameraView(World::frame(scene, assets, .5));
+        QPointF pivot;
+        QVERIFY(World::project(shot, QSizeF(scene.width, scene.height), World::pivot(scene, assets, scene.indexOf("piece")), &pivot));
+        QVERIFY2(QRectF(near).adjusted(-2, -2, 2, 2).contains(pivot), qPrintable(QString("%1,%2").arg(pivot.x()).arg(pivot.y())));
+        Scene farther = scene;
+        farther.layers[farther.indexOf("piece")].base["worldZ"] = 6;
+        const QRect far = drawn(farther);
+        QVERIFY(!far.isEmpty());
+        QVERIFY2(far.width() < near.width(), qPrintable(QString("%1 %2").arg(far.width()).arg(near.width())));
+    }
+
     void lightsAndMaterialsInAWorld() {
         QTemporaryDir dir;
         Backend backend;

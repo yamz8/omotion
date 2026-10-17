@@ -2134,6 +2134,100 @@ void drawOne(QPainter &painter, const QString &kind, const QPointF &at, double r
     }
 }
 
+// An emitter on a piece of a world: its particles thrown in meters from
+// its point as the piece moves and turns there, pulled down by real
+// gravity, and seen through the world's camera, nearer ones bigger. Its
+// settings in pixels are taken as centimeters: a speed of 300 is 3 m/s.
+void drawEmitted3D(QPainter &painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
+                   const QTransform &canvasToOutput, int source) {
+    const Layer &from = scene.layers.at(source);
+    const QString kind = settings.value("kind").toString();
+    const double rate = std::max(0.0, settings.value("rate").toDouble(40));
+    const double life = std::max(.05, settings.value("life").toDouble(1.5));
+    if (rate <= 0)
+        return;
+    const World::Info world = World::info(scene);
+    const World::Frame now = World::frame(scene, assets, t);
+    const World::View view = World::cameraView(now);
+    const QSizeF canvas(scene.width, scene.height);
+    const QVector3D forward = view.rotation.rotatedVector(QVector3D(0, 0, -1)), right = view.rotation.rotatedVector(QVector3D(1, 0, 0)),
+                    up = view.rotation.rotatedVector(QVector3D(0, 1, 0));
+    const double focal = scene.height / 2.0 / std::tan(qDegreesToRadians(view.fov) / 2);
+    // Its point: where on its picture it was put, as far off its pivot as
+    // that is at its distance, turned and moved as it is.
+    const QVector3D centre = World::pivot(scene, assets, source);
+    const QSizeF size = assets.size(from.source);
+    const QJsonArray at = settings.value("at").toArray();
+    const QPointF pixel = at.size() == 2 ? QPointF(at.at(0).toDouble(), at.at(1).toDouble())
+                                         : QPointF(from.anchor.x() * size.width(), from.anchor.y() * size.height());
+    const QPointF fromPivot = pixel - QPointF(from.anchor.x() * size.width(), from.anchor.y() * size.height());
+    const double metersAPixel = (centre - World::pictureToWorld(world).map(QVector3D())).length() / std::max(1.0, world.focal);
+    const QVector3D offset(float(fromPivot.x() * metersAPixel), float(-fromPivot.y() * metersAPixel), 0);
+    auto emitter = [&](double when) {
+        const QVector3D move(float(scene.value(from, "worldX", when)), float(scene.value(from, "worldY", when)), float(-scene.value(from, "worldZ", when)));
+        return centre + move + World::turn(scene.value(from, "yaw", when), scene.value(from, "pitch", when), scene.value(from, "roll", when)).rotatedVector(offset);
+    };
+    const double speed = settings.value("speed").toDouble() / 100, r0 = std::max(.2, settings.value("size").toDouble()) / 100;
+    const double direction = qDegreesToRadians(settings.value("direction").toDouble());
+    const double spread = qDegreesToRadians(settings.value("spread").toDouble());
+    const double inherit = settings.value("inherit").toDouble(.5);
+    const double gravity = settings.value("gravity").toDouble(kind == "rain" ? 900 : kind == "embers" ? -120 : kind == "dust" ? -20 : 80) / 100;
+    const double wind = settings.value("wind").toDouble(0) / 100, drag = std::max(0.0, settings.value("drag").toDouble(1));
+    const double twinkle = std::clamp(settings.value("twinkle").toDouble(), 0.0, 1.0);
+    const QColor colour(settings.value("color").toString("#ffffff"));
+    const quint32 seed = quint32(settings.value("seed").toInt(1));
+    const double step = 1 / std::max(1.0, scene.fps);
+    const qint64 first = std::max<qint64>(0, qint64(std::floor((t - life) * rate))), last = qint64(std::floor(t * rate));
+    struct Seen {
+        double depth;
+        QPointF at, way;
+        double r, turn, squash;
+        QColor c;
+    };
+    QList<Seen> seen;
+    for (qint64 i = first; i <= last && i - first < 20000; ++i) {
+        const double born = i / rate, age = t - born;
+        if (age < 0 || age > life)
+            continue;
+        QRandomGenerator random(seed * 2654435761u + quint32(i) * 40503u);
+        const double pace = .6 + .8 * random.generateDouble();
+        const double angle = direction + spread * (random.generateDouble() * 2 - 1);
+        const double grow = .5 + random.generateDouble(), flicker = random.generateDouble() * 2 * M_PI, turn = random.generateDouble();
+        // Spread into the depth as much as across, so it's a cone, not a fan.
+        const double into = std::sin(spread * (random.generateDouble() * 2 - 1));
+        const QVector3D start = emitter(born);
+        const QVector3D carried = (emitter(born + step) - emitter(std::max(0.0, born - step))) / float(born >= step ? 2 * step : step);
+        // The direction as it looks: 0° to the right, 90° down the screen.
+        const QVector3D aim = (right * float(std::cos(angle)) - up * float(std::sin(angle)) + forward * float(into)).normalized();
+        const QVector3D velocity = aim * float(speed * pace) + carried * float(inherit);
+        const double slowed = drag > 0 ? (1 - std::exp(-drag * age)) / drag : age;
+        const QVector3D pull(float(wind), float(-gravity), 0);
+        const QVector3D place = start + velocity * float(slowed) + pull * float(.5 * age * age);
+        const double depth = QVector3D::dotProduct(place - view.position, forward);
+        QPointF onCanvas;
+        if (depth < .05 || !World::project(view, canvas, place, &onCanvas))
+            continue;
+        // Its way on the screen, for rain's streaks.
+        QPointF ahead;
+        const QVector3D moving = velocity * float(std::exp(-drag * age)) + pull * float(age);
+        World::project(view, canvas, place + moving * .02f, &ahead);
+        const double grown = age / life;
+        QColor c = colour;
+        const double glow = 1 - twinkle * (.5 + .5 * std::sin(6 * age + flicker));
+        c.setAlphaF(std::clamp(c.alphaF() * glow * std::min(1.0, age / .08) * std::pow(1 - grown, 1.2), 0.0, 1.0));
+        const double r = r0 * grow * (kind == "dust" ? 1 + 2.5 * grown : 1) * focal / depth;
+        seen << Seen{depth, onCanvas, (ahead - onCanvas) * 50, std::max(.3, r), 360 * (turn + age * .7), .55 + .45 * std::cos(4 * age + flicker), c};
+    }
+    // Farthest first, so nearer ones cover them.
+    std::sort(seen.begin(), seen.end(), [](const Seen &a, const Seen &b) { return a.depth > b.depth; });
+    painter.save();
+    painter.setTransform(canvasToOutput, true);
+    painter.setPen(Qt::NoPen);
+    for (const Seen &p : seen)
+        drawOne(painter, kind, p.at, p.r, p.c, p.way, 8 + std::hypot(p.way.x(), p.way.y()) * .03, p.turn, p.squash);
+    painter.restore();
+}
+
 // An emitter's particles, each from its birth on the source layer, worked
 // out from the time alone so any frame can be drawn by itself.
 void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
@@ -2141,6 +2235,9 @@ void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &setti
     const int source = scene.indexOf(settings.value("from").toString());
     if (source < 0)
         return;
+    // A piece of a world throws them into the world.
+    if (World::info(scene).valid && World::layers(scene).contains(source) && source != scene.indexOf(World::info(scene).picture))
+        return drawEmitted3D(painter, scene, settings, t, assets, canvasToOutput, source);
     const Layer &from = scene.layers.at(source);
     const QString kind = settings.value("kind").toString();
     const double rate = std::max(0.0, settings.value("rate").toDouble(40));
