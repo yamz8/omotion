@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineF>
 #include <QMutex>
 #include <QRecursiveMutex>
 #include <QPainter>
@@ -964,6 +965,48 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
         }
     }
     return frame;
+}
+
+double motion(const Scene &scene, AssetCache &assets, double from, double to, const QSize &size) {
+    const Frame a = frame(scene, assets, from), b = frame(scene, assets, to);
+    if (a.layers.size() != b.layers.size() || size.isEmpty())
+        return 0;
+    // Onto the screen as Qt Quick 3D's camera sees it: looking down -z, the
+    // field of view vertical.
+    auto project = [&size](const Frame &f, const QVector3D &point, QPointF *onScreen) {
+        const QVector3D v = f.cameraRotation.inverted().rotatedVector(point - f.cameraPosition);
+        if (v.z() > -Near)
+            return false;
+        const double k = size.height() / 2.0 / std::tan(f.fov * M_PI / 360);
+        *onScreen = QPointF(size.width() / 2.0 + k * v.x() / -v.z(), size.height() / 2.0 - k * v.y() / -v.z());
+        return true;
+    };
+    // Points well off screen at both ends don't show, however far they go.
+    const QRectF screen = QRectF(QPointF(), QSizeF(size)).adjusted(-size.width() * .1, -size.height() * .1,
+                                                                  size.width() * .1, size.height() * .1);
+    double most = 0;
+    for (int i = 0; i < a.layers.size(); ++i) {
+        const Placement &p = a.layers.at(i), &q = b.layers.at(i);
+        if ((!p.visible || p.opacity <= 0) && (!q.visible || q.opacity <= 0))
+            continue;
+        const Mesh shape = mesh(scene, assets, p.layer);
+        if (shape.isNull())
+            continue;
+        const float *vertex = reinterpret_cast<const float *>(shape.vertices.constData());
+        const qsizetype count = shape.vertices.size() / qsizetype(shape.stride * sizeof(float));
+        // A few hundred of its points tell well enough how far it goes.
+        const qsizetype step = std::max<qsizetype>(1, count / 400);
+        for (qsizetype k = 0; k < count; k += step) {
+            const QVector3D rest(vertex[k * shape.stride], vertex[k * shape.stride + 1], vertex[k * shape.stride + 2]);
+            QPointF start, end;
+            if (!project(a, p.position + p.rotation.rotatedVector(rest * p.scale), &start) ||
+                !project(b, q.position + q.rotation.rotatedVector(rest * q.scale), &end))
+                continue;
+            if (screen.contains(start) || screen.contains(end))
+                most = std::max(most, QLineF(start, end).length());
+        }
+    }
+    return most;
 }
 
 namespace {

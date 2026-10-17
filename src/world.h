@@ -150,6 +150,10 @@ struct Frame {
     QList<Placement> layers;
 };
 Frame frame(const Scene &scene, AssetCache &assets, double t);
+// How far the world moves on screen between two moments, in pixels of an
+// image this size: the most that any point of its pieces' meshes travels,
+// as the camera and the pieces move. For how many moments a shutter needs.
+double motion(const Scene &scene, AssetCache &assets, double from, double to, const QSize &size);
 
 // The picture a world layer wears: its own image, with the colour at its
 // edges spread out under the see-through part, so the GPU, shrinking it,

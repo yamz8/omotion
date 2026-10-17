@@ -273,8 +273,10 @@ QTransform chainTransform(const Scene &scene, AssetCache &assets, int index, dou
 QTransform parentTransform(const Scene &scene, AssetCache &assets, int index, double t);
 // Draws the scene's layers over its background. Over a world (drawn first,
 // by renderFrame or the window), the world's own layers and the background
-// are left out.
-void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld = false);
+// are left out. first and end draw only those layers (end -1 for the top);
+// the background goes under the bottom one.
+void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld = false,
+                 int first = 0, int end = -1);
 // What draws a scene's world for renderFrame: set by the program, which
 // links the 3D side; without it, or when it can't draw here, worlds are
 // drawn flat.

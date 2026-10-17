@@ -294,7 +294,8 @@ photo.omotion/
   behind a hill or a sign),
   its `scale`, the `dust` colour and the camera's `shutter` in degrees (180
   unless set; 0 for none): what moves fast smears across that much of each
-  frame, as on film. `haze` is the air: its `color` (from the farthest land
+  frame, as on film. Frames where little moves take fewer moments across
+  the shutter, so they export faster. `haze` is the air: its `color` (from the farthest land
   the picture shows) and `density`, how much of a piece it hides a meter
   farther than the picture has it (0.02). `grain` is the film grain over a
   world's frames (0.025; 0 for none). A shape's sides the picture never
@@ -327,7 +328,7 @@ photo.omotion/
   on every property's key is fine).
 - **`shutter`** (degrees, 0 unless set) blurs what moves fast in a flat
   scene's exports, as film does: 180 is a film camera's. Worlds blur by
-  default.
+  default. Layers that hold still under the shutter cost nothing extra.
 - **`background`** can be see-through: `#00000000`, as `#AARRGGBB`. WebM
   and GIF keep the transparency, MP4 can't.
 - **`links`** drive a property from another, so a scene says how things

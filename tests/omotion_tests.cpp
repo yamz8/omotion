@@ -711,6 +711,56 @@ private slots:
         QVERIFY(!scene.toJson()["layers"].toArray()[0].toObject().contains("blend"));
     }
 
+    void shutterBlursWhatMovesAsEveryMomentWould() {
+        // Drawing what holds still once and only what moves at each moment
+        // comes out as averaging whole frames across the shutter does.
+        QTemporaryDir dir;
+        AssetCache assets;
+        Scene scene = twoSquares(dir, assets);
+        const QImage still = renderFrame(scene, assets, .5);
+        scene.raw["shutter"] = 180;
+        QCOMPARE(renderFrame(scene, assets, .5), still);
+
+        for (const double t : {0.0, 1.0}) {
+            scene.keyProperty(1, "x", t);
+            scene.setValue(1, "x", t, 100 * t);
+        }
+        auto everyMoment = [&] {
+            Scene plain = scene;
+            plain.raw.remove("shutter");
+            std::vector<int> sum(100 * 100 * 4, 0);
+            for (int i = 0; i < 12; ++i) {
+                const QImage moment = renderFrame(plain, assets, .5 + 1.0 / 60 * (i / 11.0 - .5));
+                for (int y = 0; y < 100; ++y)
+                    for (int x = 0; x < 400; ++x)
+                        sum[y * 400 + x] += moment.constScanLine(y)[x];
+            }
+            QImage average(100, 100, QImage::Format_ARGB32_Premultiplied);
+            for (int y = 0; y < 100; ++y)
+                for (int x = 0; x < 400; ++x)
+                    average.scanLine(y)[x] = uchar((2 * sum[y * 400 + x] + 12) / 24);
+            return average;
+        };
+        auto mostApart = [](const QImage &a, const QImage &b) {
+            int most = 0;
+            for (int y = 0; y < a.height(); ++y)
+                for (int x = 0; x < a.width() * 4; ++x)
+                    most = std::max(most, std::abs(a.constScanLine(y)[x] - b.constScanLine(y)[x]));
+            return most;
+        };
+        const QImage blurred = renderFrame(scene, assets, .5);
+        QVERIFY(blurred != still);
+        QVERIFY(mostApart(blurred, everyMoment()) <= 1);
+        // Blends mix with what's below, so then whole moments are drawn.
+        scene.layers[1].blend = "add";
+        QVERIFY(mostApart(renderFrame(scene, assets, .5), everyMoment()) <= 1);
+        // And so is the bottom layer moving, over a see-through background.
+        scene.layers[1].blend.clear();
+        scene.background = QColor(0, 0, 0, 100);
+        std::swap(scene.layers[0], scene.layers[1]);
+        QVERIFY(mostApart(renderFrame(scene, assets, .5), everyMoment()) <= 1);
+    }
+
     void toneChangesColour() {
         QTemporaryDir dir;
         AssetCache assets;
@@ -1421,6 +1471,16 @@ private slots:
         const QVector3D pivot = World::pivot(scene, assets, piece);
         QVERIFY((place.position + place.rotation.rotatedVector(pivot) - (pivot + QVector3D(1, 0, 0))).length() < 1e-4);
         QVERIFY(std::abs(place.rotation.rotatedVector(QVector3D(1, 0, 0)).z() - 1) < 1e-4);
+        // A world that holds still doesn't move on screen; a moving camera
+        // moves it, further the longer it moves.
+        QCOMPARE(World::motion(scene, assets, 0, .1, QSize(400, 200)), 0.0);
+        for (const double t : {0.0, 1.0}) {
+            scene.keyProperty(Scene::CameraIndex, "worldX", t);
+            scene.setValue(Scene::CameraIndex, "worldX", t, t);
+        }
+        const double brief = World::motion(scene, assets, .5, .51, QSize(400, 200));
+        QVERIFY(brief > .5);
+        QVERIFY(World::motion(scene, assets, .5, .53, QSize(400, 200)) > 2 * brief);
     }
 
     void surfacesWrapSolidsFacingOut() {

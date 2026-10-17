@@ -18,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace {
 double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
@@ -1790,18 +1791,20 @@ WorldDrawer worldDrawer;
 
 void setWorldRenderer(WorldDrawer drawer) { worldDrawer = std::move(drawer); }
 
-void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld) {
+void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, double t, bool overWorld, int first,
+                 int end) {
     painter.save();
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.setRenderHint(QPainter::Antialiasing);
     const QTransform base = painter.transform();
     // Output pixels per canvas pixel: the view's zoom, or the export's size.
     const double outputScale = std::sqrt(std::abs(base.determinant()));
-    if (!overWorld)
+    if (!overWorld && first <= 0)
         painter.fillRect(QRectF(0, 0, scene.width, scene.height), scene.background);
     painter.setClipRect(QRectF(0, 0, scene.width, scene.height));
     const QList<int> inWorld = overWorld ? World::layers(scene) : QList<int>();
-    for (int i = 0; i < scene.layers.size(); ++i) {
+    const int last = end < 0 ? int(scene.layers.size()) : std::min(end, int(scene.layers.size()));
+    for (int i = std::max(0, first); i < last; ++i) {
         if (inWorld.contains(i))
             continue;
         const Layer &layer = scene.layers.at(i);
@@ -1884,6 +1887,88 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
     painter.restore();
 }
 
+namespace {
+// Sums of a shutter's moments, a channel at a time, and their average: in
+// integers, as 16 moments of 255 fit in 16 bits.
+struct Exposure {
+    QSize size;
+    std::vector<quint16> sum;
+    int moments = 0;
+    explicit Exposure(const QSize &size) : size(size), sum(size_t(size.width()) * size.height() * 4, 0) {}
+    void add(const QImage &moment) {
+        for (int y = 0; y < size.height(); ++y) {
+            const uchar *line = moment.constScanLine(y);
+            quint16 *into = sum.data() + size_t(y) * size.width() * 4;
+            for (int x = 0; x < size.width() * 4; ++x)
+                into[x] += line[x];
+        }
+        ++moments;
+    }
+    QImage average() const {
+        QImage image(size, QImage::Format_ARGB32_Premultiplied);
+        const int n = std::max(1, moments);
+        for (int y = 0; y < size.height(); ++y) {
+            uchar *line = image.scanLine(y);
+            const quint16 *from = sum.data() + size_t(y) * size.width() * 4;
+            // Rounded to the nearest, halves up.
+            for (int x = 0; x < size.width() * 4; ++x)
+                line[x] = uchar((2 * from[x] + n) / (2 * n));
+        }
+        return image;
+    }
+};
+
+// What a layer looks like at a moment, as numbers: the same at two moments
+// means it's drawn the same. Particles always move.
+QList<double> layerState(const Scene &scene, AssetCache &assets, int index, double t) {
+    const Layer &layer = scene.layers.at(index);
+    if (!layer.visible)
+        return {};
+    if (!layer.particles.isEmpty())
+        return {t};
+    const QTransform m = layerTransform(scene, assets, index, t);
+    QList<double> state{m.m11(), m.m12(), m.m13(), m.m21(), m.m22(), m.m23(), m.m31(), m.m32(), m.m33()};
+    for (const QString &property : Scene::propertiesOf(layer))
+        state << scene.value(layer, property, t);
+    return state;
+}
+
+// The bottom layer that changes across these moments; -1 if none does.
+int firstMoving(const Scene &scene, AssetCache &assets, const QList<double> &times) {
+    for (int i = 0; i < scene.layers.size(); ++i) {
+        const QList<double> start = layerState(scene, assets, i, times.first());
+        for (int k = 1; k < times.size(); ++k)
+            if (layerState(scene, assets, i, times.at(k)) != start)
+                return i;
+    }
+    return -1;
+}
+
+// Where layers from first up land on an output this size across the
+// moments; the whole of it for what's hard to bound (particles, bent,
+// blurred or glowing layers).
+QRect coverage(const Scene &scene, AssetCache &assets, int first, const QList<double> &times, const QSize &size) {
+    const QRect all(QPoint(), size);
+    const QTransform toOutput = QTransform::fromScale(double(size.width()) / scene.width, double(size.height()) / scene.height);
+    QRectF area;
+    for (int i = first; i < scene.layers.size(); ++i) {
+        const Layer &layer = scene.layers.at(i);
+        if (!layer.visible)
+            continue;
+        for (const double t : times) {
+            if (scene.value(layer, "opacity", t) <= 0)
+                continue;
+            if (!layer.particles.isEmpty() || (!layer.pins.isEmpty() && isBent(scene, layer, t)) ||
+                scene.value(layer, "blur", t) > 0 || scene.value(layer, "glow", t) > 0)
+                return all;
+            area |= (layerTransform(scene, assets, i, t) * toOutput).mapRect(QRectF(QPointF(), assets.size(layer.source)));
+        }
+    }
+    // A pixel more each side for smoothing at the edges.
+    return area.toAlignedRect().adjusted(-2, -2, 2, 2) & all;
+}
+}
+
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size) {
     const QSize target = size.isValid() ? size : QSize(scene.width, scene.height);
     QImage frame(target, QImage::Format_ARGB32_Premultiplied);
@@ -1896,35 +1981,26 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
         // fast smears along its way: several moments across the shutter,
         // averaged. 180° (half a frame) unless the world says otherwise.
         const double shutter = scene.raw.value("world").toObject().value("shutter").toDouble(180) / 360 / scene.fps;
-        const int samples = shutter > 0 ? 16 : 1;
-        std::vector<float> sum;
+        // As many as it takes for what moves most to leave no gaps wider
+        // than a pixel and a half, up to 16: one when nothing moves.
+        const double from = std::max(0.0, t - shutter / 2), to = std::max(0.0, t + shutter / 2);
+        const int samples =
+            shutter > 0 ? std::clamp(int(std::ceil(World::motion(scene, assets, from, to, target) / 1.5)) + 1, 1, 16) : 1;
+        std::optional<Exposure> exposure;
         for (int i = 0; i < samples; ++i) {
-            const double at = samples == 1 ? t : t + shutter * (double(i) / (samples - 1) - .5);
-            const QImage moment = worldDrawer(scene, assets, std::max(0.0, at), target);
+            const double at = samples == 1 ? t : std::max(0.0, t + shutter * (double(i) / (samples - 1) - .5));
+            const QImage moment = worldDrawer(scene, assets, at, target);
             if (moment.isNull())
                 break;
             if (samples == 1) {
                 world = moment;
                 break;
             }
-            const QImage argb = moment.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-            if (sum.empty())
-                sum.assign(size_t(argb.width()) * argb.height() * 4, 0);
-            for (int y = 0; y < argb.height(); ++y) {
-                const uchar *line = argb.constScanLine(y);
-                float *into = sum.data() + size_t(y) * argb.width() * 4;
-                for (int x = 0; x < argb.width() * 4; ++x)
-                    into[x] += line[x];
-            }
-            if (i == samples - 1) {
-                world = QImage(argb.size(), QImage::Format_ARGB32_Premultiplied);
-                for (int y = 0; y < world.height(); ++y) {
-                    uchar *line = world.scanLine(y);
-                    const float *from = sum.data() + size_t(y) * world.width() * 4;
-                    for (int x = 0; x < world.width() * 4; ++x)
-                        line[x] = uchar(std::lround(from[x] / samples));
-                }
-            }
+            if (!exposure)
+                exposure.emplace(moment.size());
+            exposure->add(moment.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+            if (i == samples - 1)
+                world = exposure->average();
         }
         static bool warned = false;
         if (world.isNull() && !warned) {
@@ -1942,26 +2018,49 @@ QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize
     const double flatShutter = world.isNull() ? scene.raw.value("shutter").toDouble(0) / 360 / scene.fps : 0;
     if (flatShutter > 0) {
         constexpr int samples = 12;
-        std::vector<float> sum(size_t(target.width()) * target.height() * 4, 0);
-        for (int i = 0; i < samples; ++i) {
-            QImage moment(target, QImage::Format_ARGB32_Premultiplied);
-            moment.fill(Qt::transparent);
-            QPainter into(&moment);
-            into.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
-            renderScene(into, scene, assets, std::max(0.0, t + flatShutter * (double(i) / (samples - 1) - .5)));
-            into.end();
-            for (int y = 0; y < moment.height(); ++y) {
-                const uchar *line = moment.constScanLine(y);
-                float *to = sum.data() + size_t(y) * moment.width() * 4;
-                for (int x = 0; x < moment.width() * 4; ++x)
-                    to[x] += line[x];
+        QList<double> times;
+        for (int i = 0; i < samples; ++i)
+            times << std::max(0.0, t + flatShutter * (double(i) / (samples - 1) - .5));
+        // Layers that hold still while the shutter is open come out the same
+        // in every moment: they're drawn once, and only from the first one
+        // that moves up is drawn for each moment.
+        const int first = firstMoving(scene, assets, times);
+        if (first < 0) {
+            renderScene(painter, scene, assets, times.first());
+        } else {
+            renderScene(painter, scene, assets, times.first(), false, 0, first);
+            // From the bottom layer up, each moment has the background too,
+            // so it's drawn whole.
+            bool plain = first > 0;
+            for (int i = first; i < scene.layers.size(); ++i)
+                plain = plain && compositionFor(scene.layers.at(i).blend) == QPainter::CompositionMode_SourceOver;
+            // Laid over what's below as they are, the moving layers can be
+            // averaged on their own and laid over it once: over is linear
+            // in what's on top. Just where they reach is drawn.
+            const QRect area = plain ? coverage(scene, assets, first, times, target) : frame.rect();
+            Exposure exposure(area.size());
+            for (const double at : times) {
+                if (area.isEmpty())
+                    break;
+                const bool fresh = plain || first == 0;
+                QImage moment = fresh ? QImage(area.size(), QImage::Format_ARGB32_Premultiplied) : frame.copy();
+                if (fresh)
+                    moment.fill(Qt::transparent);
+                QPainter into(&moment);
+                into.translate(-area.topLeft());
+                into.scale(double(target.width()) / scene.width, double(target.height()) / scene.height);
+                renderScene(into, scene, assets, at, false, first);
+                into.end();
+                exposure.add(moment);
             }
-        }
-        for (int y = 0; y < frame.height(); ++y) {
-            uchar *line = frame.scanLine(y);
-            const float *from = sum.data() + size_t(y) * frame.width() * 4;
-            for (int x = 0; x < frame.width() * 4; ++x)
-                line[x] = uchar(std::lround(from[x] / samples));
+            if (!area.isEmpty()) {
+                painter.save();
+                painter.resetTransform();
+                if (!plain)
+                    painter.setCompositionMode(QPainter::CompositionMode_Source);
+                painter.drawImage(area.topLeft(), exposure.average());
+                painter.restore();
+            }
         }
     } else {
         renderScene(painter, scene, assets, t, !world.isNull());
