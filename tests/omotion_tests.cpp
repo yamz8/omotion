@@ -1618,6 +1618,32 @@ private slots:
         QVERIFY((backend.view().position - shot.position).length() < 1e-3);
     }
 
+    void outlinerGroupsTheWorldAndItsPieces() {
+        QTemporaryDir dir;
+        Backend backend;
+        QVERIFY(backend.open(madeUpWorld(dir)));
+        backend.addParticles("snow");
+        QStringList seen;
+        for (const QVariant &row : backend.outliner()) {
+            const QVariantMap map = row.toMap();
+            seen << QString("%1 %2 %3").arg(map["kind"].toString(), map["name"].toString()).arg(map["depth"].toInt());
+        }
+        const QString picture = backend.scene().layers.at(0).name;
+        QCOMPARE(seen, QStringList({"camera Camera 0", "world World 0", "picture " + picture + " 1", "piece piece 2",
+                                    "particles " + backend.scene().layers.last().name + " 0"}));
+        // The world's look is set from there, and undone like any edit.
+        QCOMPARE(backend.worldInfo()["shutter"].toDouble(), 180.0);
+        backend.setWorldValue("shutter", 90);
+        backend.setWorldValue("hazeColor", "#102030");
+        backend.setWorldValue("dust", "not a colour");
+        QVERIFY(!backend.error().isEmpty());
+        QCOMPARE(backend.worldInfo()["shutter"].toDouble(), 90.0);
+        QCOMPARE(World::info(backend.scene()).haze, QColor("#102030"));
+        backend.undo();
+        QCOMPARE(backend.worldInfo()["hazeColor"].toString(), World::Info().haze.name());
+        QCOMPARE(backend.worldInfo()["shutter"].toDouble(), 90.0);
+    }
+
     void surfacesWrapSolidsFacingOut() {
         // A ball of radius 0.5: inside positive, as the shape model gives.
         const int n = 40;

@@ -160,6 +160,109 @@ QVariantList Backend::layers() const {
     return list;
 }
 
+QVariantList Backend::outliner() const {
+    QVariantList rows;
+    if (!hasProject())
+        return rows;
+    rows.append(QVariantMap{{"kind", "camera"}, {"index", Scene::CameraIndex}, {"name", "Camera"}, {"depth", 0},
+                            {"visible", true}, {"animated", !m_scene.keyTimes(Scene::CameraIndex).isEmpty()}});
+    const World::Info world = World::info(m_scene);
+    const QList<int> inWorld = world.valid ? World::layers(m_scene) : QList<int>();
+    // Each layer under what it was cut from (its parent), the top of the
+    // stack first among brothers, as the timeline has them.
+    auto add = [&](auto &&self, int index, int depth, const QList<int> &among) -> void {
+        const Layer &layer = m_scene.layers.at(index);
+        QString kind = "image", detail;
+        if (!layer.particles.isEmpty()) {
+            kind = "particles";
+            detail = layer.particles.value("kind").toString();
+        } else if (inWorld.contains(index)) {
+            const bool root = layer.name == world.picture;
+            kind = root ? "picture" : !layer.raw.value("shape").toObject().isEmpty() ? "shape" : "piece";
+            detail = root ? "the picture" : kind == "shape" ? "3D shape" : "flat";
+        }
+        rows.append(QVariantMap{{"kind", kind}, {"index", index}, {"name", layer.name}, {"depth", depth},
+                                {"visible", layer.visible}, {"animated", !m_scene.keyTimes(index).isEmpty()},
+                                {"detail", detail}});
+        for (int i = m_scene.layers.size() - 1; i >= 0; --i)
+            if (among.contains(i) && m_scene.layers.at(i).parent == layer.name && i != index)
+                self(self, i, depth + 1, among);
+    };
+    auto tree = [&](const QList<int> &among, int depth) {
+        for (int i = m_scene.layers.size() - 1; i >= 0; --i) {
+            if (!among.contains(i))
+                continue;
+            // Those whose parent is elsewhere (or nowhere) start a branch.
+            const int parent = m_scene.indexOf(m_scene.layers.at(i).parent);
+            if (parent < 0 || !among.contains(parent) || parent == i)
+                add(add, i, depth, among);
+        }
+    };
+    if (world.valid) {
+        rows.append(QVariantMap{{"kind", "world"}, {"index", -1}, {"name", "World"}, {"depth", 0}, {"visible", true},
+                                {"animated", false}, {"detail", QString("%1 pieces").arg(inWorld.size())}});
+        tree(inWorld, 1);
+    }
+    QList<int> rest;
+    for (int i = 0; i < m_scene.layers.size(); ++i)
+        if (!inWorld.contains(i))
+            rest << i;
+    tree(rest, 0);
+    return rows;
+}
+
+QVariantMap Backend::worldInfo() const {
+    const World::Info info = World::info(m_scene);
+    if (!info.valid)
+        return {};
+    const QJsonObject world = m_scene.raw.value("world").toObject();
+    return {{"hazeColor", info.haze.name()},
+            {"hazeDensity", info.hazeDensity},
+            {"grain", world.value("grain").toDouble(.025)},
+            {"shutter", world.value("shutter").toDouble(180)},
+            {"dust", world.value("dust").toString()},
+            {"scale", info.scale},
+            {"focal", info.focal},
+            {"height", info.height}};
+}
+
+void Backend::setWorldValue(const QString &name, const QVariant &value) {
+    if (!World::info(m_scene).valid)
+        return;
+    QJsonObject world = m_scene.raw.value("world").toObject();
+    const double number = value.toDouble();
+    if (name == "hazeColor" || name == "dust") {
+        const QColor colour(value.toString().trimmed());
+        if (!colour.isValid()) {
+            setError(QString("%1 isn't a colour; try #d9a08e.").arg(value.toString()));
+            return;
+        }
+        checkpoint();
+        if (name == "dust") {
+            world["dust"] = colour.name();
+        } else {
+            QJsonObject haze = world.value("haze").toObject();
+            haze["color"] = colour.name();
+            world["haze"] = haze;
+        }
+    } else if (name == "hazeDensity" && std::isfinite(number) && number >= 0) {
+        checkpoint();
+        QJsonObject haze = world.value("haze").toObject();
+        haze["density"] = std::min(number, 1.0);
+        world["haze"] = haze;
+    } else if (name == "grain" && std::isfinite(number) && number >= 0) {
+        checkpoint();
+        world["grain"] = std::min(number, .5);
+    } else if (name == "shutter" && std::isfinite(number) && number >= 0) {
+        checkpoint();
+        world["shutter"] = std::min(number, 360.0);
+    } else {
+        return;
+    }
+    m_scene.raw["world"] = world;
+    changed();
+}
+
 namespace {
 QVariantMap linkTexts(const Layer &layer) {
     QVariantMap map;

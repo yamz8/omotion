@@ -79,6 +79,12 @@ class Backend : public QObject {
     // A piece being moved by a handle or grabbed with G: 0 freely, 1 to 3
     // along x, y or z, 4 turning; -1 when nothing is.
     Q_PROPERTY(int handle READ handle NOTIFY viewChanged)
+    // The outliner: the camera, the world and its pieces (as they were cut
+    // from each other), then the layers over it, as a tree of rows.
+    Q_PROPERTY(QVariantList outliner READ outliner NOTIFY sceneChanged)
+    // The world's own settings (its look, as scene.json has them), empty
+    // without a world.
+    Q_PROPERTY(QVariantMap worldInfo READ worldInfo NOTIFY sceneChanged)
 
 public:
     explicit Backend(FilePicker *picker = nullptr, QObject *parent = nullptr);
@@ -136,6 +142,8 @@ public:
     bool exporting() const { return m_exporter.busy(); }
     double exportProgress() const { return m_exportProgress; }
     bool freeView() const { return m_freeView; }
+    QVariantList outliner() const;
+    QVariantMap worldInfo() const;
     int handle() const { return m_handle; }
 
     // What the world's view shows: the shot's camera at the playhead, or the
@@ -224,6 +232,9 @@ public:
     // "spring(3)", "bounce(2)", "arc(200)". False, with an error, if unknown.
     Q_INVOKABLE bool setEase(const QString &ease);
     Q_INVOKABLE void setSceneValue(const QString &name, const QVariant &value);
+    // A world setting: hazeColor, hazeDensity, grain, shutter (degrees) or
+    // dust (a colour).
+    Q_INVOKABLE void setWorldValue(const QString &name, const QVariant &value);
 
     // Selecting keyframe columns on the timeline, retiming them by dragging,
     // and copying them, onto the same layer or another.

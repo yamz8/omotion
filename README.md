@@ -94,6 +94,7 @@ layer it stands in, so it rides the camera move with its surroundings, and
 | Drag in a world | With the camera selected (`V`): turn it, Shift+drag moves it. A piece: move it in 3D, Shift+drag nearer / farther |
 | Click a piece of a world | Pick it where it is in 3D: a box shows round it, arrows drag it along x (red), y (green) and z (blue), its ring turns it |
 | `G` | Grab the selected piece of a world: it follows the mouse, `X` `Y` `Z` keep it to an axis, a click or `Enter` places it, right-click or `Esc` puts it back |
+| Outliner | Top right: the camera, the world with each piece under what it was cut from (▦ the picture, ▲ a 3D shape, ▱ flat), then the layers over it. Click selects, ● hides, double-click renames; World shows its haze, grain, shutter and dust colour |
 | `` ` `` | Free view: look at the world from anywhere (middle-drag or Alt+drag orbits, Shift pans, the wheel or `-` `=` comes closer, arrows orbit, `F` looks at the selected); the shot's camera shows in it and can be moved too. Nothing in the shot changes |
 | Click, drag | Select the layer under the mouse and move it (Shift+drag keeps the selection) |
 | Mouse wheel | Scale the selected layer (Shift+wheel turns it) |

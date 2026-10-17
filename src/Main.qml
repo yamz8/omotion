@@ -663,11 +663,26 @@ ApplicationWindow {
 
             Rectangle { Layout.fillHeight: true; width: 1; color: win.line; visible: backend.hasProject }
 
-            Inspector {
+            // The outliner over the selected thing's properties, as in Blender.
+            ColumnLayout {
                 Layout.preferredWidth: 270
+                Layout.maximumWidth: 270
+                Layout.fillWidth: false
                 Layout.fillHeight: true
                 visible: backend.hasProject
-                onDone: win.focusCanvas()
+                spacing: 0
+                Outliner {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(240, 34 + backend.outliner.length * 24)
+                    onDone: win.focusCanvas()
+                    onRename: function (index) { timeline.rename(index) }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: win.line }
+                Inspector {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    onDone: win.focusCanvas()
+                }
             }
         }
 

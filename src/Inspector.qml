@@ -136,6 +136,42 @@ Rectangle {
         }
     }
 
+    component WorldNumber: RowLayout {
+        id: wrow
+        property string name
+        property string label
+        property real value
+        property int decimals: 2
+        Layout.fillWidth: true
+        spacing: 8
+        Label { text: wrow.label; color: win.text; Layout.preferredWidth: 90 }
+        NumberField {
+            Layout.fillWidth: true
+            decimals: wrow.decimals
+            value: wrow.value
+            onCommitted: function (n) { backend.setWorldValue(wrow.name, n) }
+        }
+    }
+
+    component WorldColour: RowLayout {
+        id: crow
+        property string name
+        property string label
+        property string value
+        Layout.fillWidth: true
+        spacing: 8
+        Label { text: crow.label; color: win.text; Layout.preferredWidth: 90 }
+        Rectangle { width: 18; height: 18; radius: 3; color: crow.value || "transparent"; border.color: win.line }
+        SmallField {
+            id: colourField
+            Layout.fillWidth: true
+            onActiveFocusChanged: if (!activeFocus) text = crow.value
+            Component.onCompleted: text = crow.value
+            Connections { target: crow; function onValueChanged() { if (!colourField.activeFocus) colourField.text = crow.value } }
+            onAccepted: { backend.setWorldValue(crow.name, text); inspector.done() }
+        }
+    }
+
     component SceneRow: RowLayout {
         id: srow
         property string name
@@ -165,10 +201,10 @@ Rectangle {
             spacing: 6
 
             Label {
-                text: inspector.hasLayer ? (inspector.v.name || "") : "No layer selected"
-                color: inspector.hasLayer ? win.text : win.muted
+                text: inspector.hasLayer ? (inspector.v.name || "") : backend.world.active ? "World" : "No layer selected"
+                color: inspector.hasLayer || backend.world.active ? win.text : win.muted
                 font.pixelSize: 17
-                font.bold: inspector.hasLayer
+                font.bold: inspector.hasLayer || backend.world.active
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
@@ -180,8 +216,31 @@ Rectangle {
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
+            // The world's own look, with nothing else selected.
+            ColumnLayout {
+                visible: !inspector.hasLayer && backend.world.active
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                spacing: 4
+                readonly property var w: backend.worldInfo
+                WorldColour { name: "hazeColor"; label: "Haze colour"; value: parent.w.hazeColor || "" }
+                WorldNumber { name: "hazeDensity"; label: "Haze a meter"; value: parent.w.hazeDensity || 0; decimals: 3 }
+                WorldNumber { name: "grain"; label: "Grain"; value: parent.w.grain || 0; decimals: 3 }
+                WorldNumber { name: "shutter"; label: "Shutter°"; value: parent.w.shutter || 0; decimals: 0 }
+                WorldColour { name: "dust"; label: "Dust colour"; value: parent.w.dust || "" }
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    wrapMode: Text.Wrap
+                    color: win.muted
+                    font.pixelSize: 12
+                    text: "The camera stands " + Number(parent.w.height || 0).toFixed(2) + " m above the ground; the world is "
+                          + Number(parent.w.scale || 1).toFixed(2) + "× as the AI read it (a piece's Really tall sets it). "
+                          + "Haze hides what's moved farther off than the picture had it; the shutter blurs what moves (0 for none)."
+                }
+            }
             Label {
-                visible: !inspector.hasLayer
+                visible: !inspector.hasLayer && !backend.world.active
                 text: "Click a layer on the canvas, or Tab through them."
                 color: win.muted
                 wrapMode: Text.Wrap
