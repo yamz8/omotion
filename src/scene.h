@@ -312,8 +312,17 @@ bool isBent(const Scene &scene, const Layer &layer, double t);
 // "drag"; drawn on the canvas, so assets and the particle layer's own
 // transform to the output (toOutput) are needed for them.
 // Where an emitter's particles are in a world at a time, when it throws
-// them from one of the world's pieces (none otherwise).
+// them from one of the world's pieces (none otherwise); and each as the
+// world draws it, among its pieces (so nearer ones hide it): where, how
+// wide across its glow (meters), its colour.
+struct WorldSpark {
+    QVector3D position;
+    float radius = 0;
+    QColor colour;
+};
+bool throwsIntoWorld(const Scene &scene, const Layer &layer);
 QList<QVector3D> particlesInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t);
+QList<WorldSpark> sparksInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t);
 void drawParticles(QPainter &painter, const Scene &scene, const Layer &layer, double t, double follow = 1,
                    AssetCache *assets = nullptr, const QTransform &toOutput = {}, const QTransform &canvasToOutput = {});
 QImage renderFrame(const Scene &scene, AssetCache &assets, double t, const QSize &size = {});

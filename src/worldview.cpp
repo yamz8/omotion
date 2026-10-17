@@ -173,7 +173,11 @@ void WorldSource::update() {
             for (int k = 0; k < 4; ++k) {
                 *v++ = corners[k].x(), *v++ = corners[k].y(), *v++ = corners[k].z();
                 *v++ = uv[k][0], *v++ = uv[k][1];
-                *v++ = r, *v++ = g, *v++ = b, *v++ = puff.alpha;
+                if (puff.colour.isValid())
+                    *v++ = float(puff.colour.redF()), *v++ = float(puff.colour.greenF()), *v++ = float(puff.colour.blueF());
+                else
+                    *v++ = r, *v++ = g, *v++ = b;
+                *v++ = puff.alpha;
             }
             const quint32 base = quint32(n * 4);
             *i++ = base, *i++ = base + 1, *i++ = base + 2, *i++ = base, *i++ = base + 2, *i++ = base + 3;

@@ -2651,6 +2651,13 @@ private slots:
         };
         const QRect near = drawn(scene);
         QVERIFY(!near.isEmpty());
+        // Drawn in the world, among its pieces (so nearer ones hide them):
+        // as the frame's coloured puffs, and not again over it.
+        int sparked = 0;
+        for (const World::Puff &puff : World::frame(scene, assets, .5).puffs)
+            sparked += puff.colour.isValid();
+        QVERIFY(sparked > 10);
+        QVERIFY(throwsIntoWorld(scene, scene.layers.at(sparks)));
         const World::View shot = World::cameraView(World::frame(scene, assets, .5));
         QPointF pivot;
         QVERIFY(World::project(shot, QSizeF(scene.width, scene.height), World::pivot(scene, assets, scene.indexOf("piece")), &pivot));

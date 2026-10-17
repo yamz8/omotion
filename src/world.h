@@ -155,6 +155,7 @@ struct Puff {
     QVector3D position;
     float size = 1;   // Across, in meters.
     float alpha = 0;
+    QColor colour;    // The world's dust colour when not set.
 };
 // A light in the world: a layer with "light" (its colour, power, and how
 // far it reaches), where its world properties put it from the picture's
@@ -197,6 +198,8 @@ struct View {
     double fov = 40;
 };
 View cameraView(const Frame &frame);
+// The scene's camera at a time, without the rest of the frame.
+View cameraAt(const Scene &scene, AssetCache &assets, double t);
 // Where a world point lands on an image of this size seen through the view;
 // false when it's behind the view.
 bool project(const View &view, const QSizeF &size, const QVector3D &point, QPointF *onScreen);

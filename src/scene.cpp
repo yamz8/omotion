@@ -2162,7 +2162,7 @@ void drawOne(QPainter &painter, const QString &kind, const QPointF &at, double r
 // gravity, and seen through the world's camera, nearer ones bigger. Its
 // settings in pixels are taken as centimeters: a speed of 300 is 3 m/s.
 void drawEmitted3D(QPainter *painter, const Scene &scene, const QJsonObject &settings, double t, AssetCache &assets,
-                   const QTransform &canvasToOutput, int source, QList<QVector3D> *places = nullptr) {
+                   const QTransform &canvasToOutput, int source, QList<WorldSpark> *sparks = nullptr) {
     const Layer &from = scene.layers.at(source);
     const QString kind = settings.value("kind").toString();
     const double rate = std::max(0.0, settings.value("rate").toDouble(40));
@@ -2170,8 +2170,7 @@ void drawEmitted3D(QPainter *painter, const Scene &scene, const QJsonObject &set
     if (rate <= 0)
         return;
     const World::Info world = World::info(scene);
-    const World::Frame now = World::frame(scene, assets, t);
-    const World::View view = World::cameraView(now);
+    const World::View view = World::cameraAt(scene, assets, t);
     const QSizeF canvas(scene.width, scene.height);
     const QVector3D forward = view.rotation.rotatedVector(QVector3D(0, 0, -1)), right = view.rotation.rotatedVector(QVector3D(1, 0, 0)),
                     up = view.rotation.rotatedVector(QVector3D(0, 1, 0));
@@ -2233,8 +2232,22 @@ void drawEmitted3D(QPainter *painter, const Scene &scene, const QJsonObject &set
                 continue;
             place.setY(float(floor + r0));
         }
-        if (places)
-            *places << place;
+        if (sparks) {
+            // As the world draws it: as wide as it glows, as bright as it is.
+            const double grownNow = age / life;
+            QColor c = colour;
+            const double glow = 1 - twinkle * (.5 + .5 * std::sin(6 * age + flicker));
+            c.setAlphaF(std::clamp(c.alphaF() * glow * std::min(1.0, age / .08) * std::pow(1 - grownNow, 1.2), 0.0, 1.0));
+            const double radius = r0 * grow * (kind == "dust" ? 1 + 2.5 * grownNow : 1);
+            // Glowing kinds a brighter, tighter sprite than the soft puff's
+            // falling-off edge would give.
+            const bool glows = kind == "fireflies" || kind == "embers";
+            const double reach = kind == "dust" ? 1.5 : glows ? 2.4 : 1.2;
+            if (glows)
+                c.setAlphaF(std::min(1.0, c.alphaF() * 1.8));
+            *sparks << WorldSpark{place, float(radius * reach), c};
+            continue;
+        }
         const double depth = QVector3D::dotProduct(place - view.position, forward);
         QPointF onCanvas;
         if (depth < .05 || !World::project(view, canvas, place, &onCanvas))
@@ -2323,14 +2336,31 @@ void drawEmitted(QPainter &painter, const Scene &scene, const QJsonObject &setti
 }
 }
 
-QList<QVector3D> particlesInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t) {
+QList<WorldSpark> sparksInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t) {
+    QList<WorldSpark> sparks;
+    if (!throwsIntoWorld(scene, layer))
+        return sparks;
     QJsonObject settings = Scene::particleDefaults(layer.particles.value("kind").toString());
     for (auto it = layer.particles.begin(); it != layer.particles.end(); ++it)
         settings.insert(it.key(), it.value());
-    const int source = scene.indexOf(settings.value("from").toString());
+    drawEmitted3D(nullptr, scene, settings, t, assets, QTransform(), scene.indexOf(settings.value("from").toString()), &sparks);
+    return sparks;
+}
+
+bool throwsIntoWorld(const Scene &scene, const Layer &layer) {
+    if (layer.particles.isEmpty() || !World::info(scene).valid)
+        return false;
+    const QString kind = layer.particles.value("kind").toString();
+    if (kind == "smoke" || kind == "fire" || kind == "water")
+        return false;
+    const int source = scene.indexOf(layer.particles.value("from").toString());
+    return source >= 0 && World::layers(scene).contains(source) && source != scene.indexOf(World::info(scene).picture);
+}
+
+QList<QVector3D> particlesInWorld(const Scene &scene, AssetCache &assets, const Layer &layer, double t) {
     QList<QVector3D> places;
-    if (source >= 0 && World::info(scene).valid && World::layers(scene).contains(source))
-        drawEmitted3D(nullptr, scene, settings, t, assets, QTransform(), source, &places);
+    for (const WorldSpark &spark : sparksInWorld(scene, assets, layer, t))
+        places << spark.position;
     return places;
 }
 
@@ -2522,6 +2552,10 @@ void renderScene(QPainter &painter, const Scene &scene, AssetCache &assets, doub
         const Layer &layer = scene.layers.at(i);
         const double opacity = clamp01(scene.value(layer, "opacity", t));
         if (!layer.visible || opacity <= 0)
+            continue;
+        // Thrown from a world's piece, they're drawn in the world, among
+        // its pieces.
+        if (overWorld && throwsIntoWorld(scene, layer))
             continue;
         if (!layer.particles.isEmpty()) {
             // Particles live in the world, seen through the camera; their

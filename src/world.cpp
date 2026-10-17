@@ -954,15 +954,13 @@ QColor wrapColour(const Scene &scene, AssetCache &assets, int index) {
 }
 }
 
-Frame frame(const Scene &scene, AssetCache &assets, double t) {
-    Frame frame;
+View cameraAt(const Scene &scene, AssetCache &assets, double t) {
+    View view;
     const Info world = info(scene);
     if (!world.valid)
-        return frame;
-    const int root = scene.indexOf(world.picture);
-    const QSizeF picture = assets.size(pictureFile(scene, root));
+        return view;
+    const QSizeF picture = assets.size(pictureFile(scene, scene.indexOf(world.picture)));
     const QMatrix4x4 toWorld = pictureToWorld(world);
-
     // The picture's camera, turned to look as Qt Quick 3D's do (down -z, up
     // +y), then moved and turned by the camera's world properties.
     const Layer &camera = scene.camera;
@@ -974,13 +972,30 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
     const QQuaternion yaw = QQuaternion::fromAxisAndAngle(0, 1, 0, float(-scene.value(camera, "yaw", t)));
     const QQuaternion pitchRoll = QQuaternion::fromAxisAndAngle(1, 0, 0, float(scene.value(camera, "pitch", t))) *
                                   QQuaternion::fromAxisAndAngle(0, 0, 1, float(-scene.value(camera, "rotation", t)));
-    frame.cameraRotation = yaw * picturedTurn * pitchRoll;
-    frame.cameraPosition = toWorld.map(QVector3D(0, 0, 0)) +
+    view.rotation = yaw * picturedTurn * pitchRoll;
+    view.position = toWorld.map(QVector3D(0, 0, 0)) +
                            QVector3D(scene.value(camera, "worldX", t), scene.value(camera, "worldY", t),
                                      -scene.value(camera, "worldZ", t));
     const double zoom = std::max(1e-3, scene.value(camera, "zoom", t));
     const double half = std::atan(picture.height() / 2 / world.focal) ;
-    frame.fov = 2 * std::atan(std::tan(half) / zoom) * 180 / M_PI;
+    view.fov = 2 * std::atan(std::tan(half) / zoom) * 180 / M_PI;
+
+    return view;
+}
+
+Frame frame(const Scene &scene, AssetCache &assets, double t) {
+    Frame frame;
+    const Info world = info(scene);
+    if (!world.valid)
+        return frame;
+    const int root = scene.indexOf(world.picture);
+    const QSizeF picture = assets.size(pictureFile(scene, root));
+    const QMatrix4x4 toWorld = pictureToWorld(world);
+
+    const View camera = cameraAt(scene, assets, t);
+    frame.cameraRotation = camera.rotation;
+    frame.cameraPosition = camera.position;
+    frame.fov = camera.fov;
 
     frame.time = t;
     frame.haze = world.haze;
@@ -1174,6 +1189,22 @@ Frame frame(const Scene &scene, AssetCache &assets, double t) {
             puff.size = float((.35 + .3 * r1) * (1 + 2.2 * grown));
             puff.alpha = float(std::min(1.0, age / .12) * std::pow(1 - grown, 1.3) * .5 * burst.strength);
             frame.puffs.append(puff);
+        }
+    }
+    // Particles thrown from its pieces, drawn among them, so what's nearer
+    // hides them.
+    for (const Layer &layer : scene.layers) {
+        if (!layer.visible || !throwsIntoWorld(scene, layer))
+            continue;
+        const double opacity = std::clamp(scene.value(layer, "opacity", t), 0.0, 1.0);
+        for (const WorldSpark &spark : sparksInWorld(scene, assets, layer, t)) {
+            Puff puff;
+            puff.position = spark.position;
+            puff.size = spark.radius * 2;
+            puff.alpha = float(spark.colour.alphaF() * opacity);
+            puff.colour = spark.colour;
+            if (puff.alpha > .004f)
+                frame.puffs.append(puff);
         }
     }
     return frame;
