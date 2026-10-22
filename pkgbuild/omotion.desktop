@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=omotion
+Comment=Preview, review, and render motion scenes
+Comment[ar]=عاين مشاهد الحركة وراجعها وصيّرها
+Comment[da]=Se, gennemgå og render motion-scener
+Comment[de]=Motion-Szenen ansehen, prüfen und rendern
+Comment[es_MX]=Previsualiza, revisa y renderiza escenas de movimiento
+Comment[fr]=Prévisualiser, vérifier et rendre des scènes animées
+Comment[ja]=モーションシーンをプレビュー、確認、レンダリング
+Comment[pt_BR]=Visualize, revise e renderize cenas de animação
+Exec=omotion open %f
+Icon=omotion
+Terminal=false
+Categories=AudioVideo;Video;
+StartupWMClass=omotion
