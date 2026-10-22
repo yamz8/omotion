@@ -235,7 +235,7 @@ ApplicationWindow {
                     id: preview
                     anchors.fill: parent
                     anchors.margins: 24
-                    visible: !win.sheetVisible
+                    visible: !win.sheetVisible && backend.scenePath !== ""
                     component: win.sceneComponent
                     format: win.format
                     time: win.time
