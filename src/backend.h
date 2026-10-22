@@ -51,7 +51,7 @@ public:
 
     Q_INVOKABLE bool load(const QString &pathOrUrl);
     Q_INVOKABLE void openScene();
-    Q_INVOKABLE void newScene();
+    Q_INVOKABLE void newFilm();
     Q_INVOKABLE void reload();
     // Lets go of compiled components nothing uses any more, so the next load
     // compiles the scene's other files afresh too.
@@ -64,7 +64,7 @@ public:
     Q_INVOKABLE void clearMessage();
     void addWarning(const QString &warning);
 
-    bool createScene(const QString &path);
+    bool createFilm(const QString &folder);
 
 signals:
     void sceneChanged();

@@ -5,6 +5,6 @@ TEMPLATE = app
 
 INCLUDEPATH += ../src
 
-HEADERS += ../src/backend.h ../src/filepicker.h ../src/scene.h ../src/theme.h ../src/translator.h
-SOURCES += omotion_tests.cpp ../src/backend.cpp ../src/scene.cpp ../src/theme.cpp ../src/translator.cpp
+HEADERS += ../src/backend.h ../src/filepicker.h ../src/scene.h ../src/studio.h ../src/theme.h ../src/translator.h
+SOURCES += omotion_tests.cpp ../src/backend.cpp ../src/scene.cpp ../src/studio.cpp ../src/theme.cpp ../src/translator.cpp
 RESOURCES += ../src/resources.qrc

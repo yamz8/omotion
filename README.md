@@ -20,6 +20,42 @@ the scene, and omotion:
 - **renders each format from the source**: 16:9, 9:16, and 1:1 are composed
   by the scene, not cropped from one another, and encoded with ffmpeg.
 
+## Making a film
+
+```sh
+omotion new ~/Videos/launch
+```
+
+That creates the film's folder, its studio:
+
+```
+launch/
+  brief.md           what the film says, and the facts about the product
+  style-guide.md     palette, type, and motion rules
+  shotlist.md        beats, states, and every word on screen
+  assets/            the real logo, screens, and sound, listed in assets.md
+  scene.qml          the film, a starter until it's built
+  reviews/           contact sheets and defect notes
+  renders/           one video per format
+  gates.md           the six gates, and who approved each
+  AGENTS.md          points agents to the skill
+  .claude/skills/omotion/SKILL.md
+```
+
+Open your coding agent in that folder and ask for the film you want. The
+skill in it leads the agent through the six gates of [Motion
+Engineering](https://x.com/0xwhrrari/status/2105643919119696297), and the
+agent stops for your approval at three of them: the brief and assets, the
+style guide and shot list, and the finished film. Everything it decides goes
+into the folder's files, so a later session picks up from `gates.md`.
+
+The skill lives in the film's folder, not in your home folder, so it always
+matches the omotion that made the film. When omotion is updated, `omotion
+check` says so, and `omotion skill install` in the folder updates it.
+
+To watch the film as it's made, `omotion open ~/Videos/launch/scene.qml`. The
+window reloads every time the agent saves.
+
 ## A scene
 
 ```qml
@@ -47,8 +83,8 @@ Rectangle {
 }
 ```
 
-`omotion new film/scene.qml` writes a fuller starter, and `omotion help
-format` prints the whole format and the `Motion` helpers.
+`omotion help format` prints the whole format and the `Motion` helpers, and
+`omotion new scene.qml` writes a single starter scene, outside any studio.
 
 ## Shortcuts
 
@@ -64,7 +100,7 @@ format` prints the whole format and the `Motion` helpers.
 | E | Export this format |
 | Shift E | Export every format |
 | O | Open a scene |
-| N | New scene |
+| N | New film |
 | R | Reload the scene |
 | ? | Show shortcuts |
 | Q | Quit |
@@ -75,18 +111,14 @@ None of these need a display. Each takes `--json`, exits 0 or 1, and writes
 errors to stderr.
 
 ```sh
-omotion new film/scene.qml                   # start from the starter
+omotion new film                             # start a film's studio
 omotion check film/scene.qml                 # every problem, in every format
 omotion sheet film/scene.qml --format all    # contact sheets as PNG
 omotion frame film/scene.qml --at 3.5        # one frame as PNG
 omotion render film/scene.qml                # renders/scene-16x9.mp4, scene-9x16.mp4
 omotion open film/scene.qml                  # the window
-omotion skill install                        # teach your coding agent the workflow
+omotion skill install                        # update the film's agent skill (run in its folder)
 ```
-
-`omotion skill install` puts a short skill in `~/.agents/skills/omotion` and
-links it into `~/.claude/skills`. It walks an agent through brief, beats,
-check, contact sheet, then render, stopping at each gate.
 
 ## Building
 

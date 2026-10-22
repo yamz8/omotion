@@ -22,9 +22,14 @@ Every command takes `--json`, exits 0 or 1, and writes errors to stderr;
 
 ## The studio
 
-One folder per film, named for it (`jotter-sync/`; `film/` below stands for
-that name). Keep every decision in it, never only in the chat, so a later
-session can pick up where this one stopped.
+You're working in a film's folder, made by `omotion new <folder>`; it's the
+studio, and this skill came with it. Keep every decision in its files, never
+only in the chat, so a later session can pick up where this one stopped. Its
+files start as templates: fill them in, and keep their headings. (`film/`
+below stands for the folder's path.)
+
+If you were asked for a film and there's no studio yet, run `omotion new
+<folder>`, named for the film, and work in it.
 
 ```
 film/
@@ -32,11 +37,16 @@ film/
   style-guide.md    palette, type, motion rules, and banned defaults
   shotlist.md       beats with timestamps, entry and exit states, and purpose
   assets/           approved logos, screens, footage, and sound, listed in assets.md
-  scene.qml         the film (start it with: omotion new film/scene.qml)
+  scene.qml         the film; a starter until gate 3
   reviews/          contact sheets, stills, and defect notes
   renders/          the exports, one per format
   gates.md          which gates are passed, and who approved them
+  AGENTS.md         points agents to this skill
 ```
+
+`omotion check` reports when this skill is older than the installed
+omotion's; then tell the person, and `omotion skill install` in the folder
+updates it.
 
 **At every stop**, your message carries the proposals the person should
 approve and the questions only they can answer, with the files' paths for
@@ -55,48 +65,29 @@ waiting for:
 - [ ] 3 Representative stills
 - [ ] 4 Rough cut and contact sheet
 - [ ] 5 Three defects repaired
-- [ ] 6 Audio, formats, and deliverables: approved by the person
+- [ ] 6 Audio, formats, and deliverables (the person approves)
 ```
 
 ## Gate 1: References and assets (the person approves)
 
-Write `brief.md`. Separate the two kinds of line in it:
+Fill in `brief.md`. Separate the two kinds of line in it:
 
 - **Facts about the product** (what it does, which devices, the price, the
   launch date, the call to action and link): ask for each one you weren't
   told. Never guess them, and never let a guess reach the screen.
 - **Choices about the film** (the one sentence, the formats, the length):
   draft them yourself and mark them as proposals for the person to approve.
+  A proposal may only state facts the person gave you; leave a visible gap
+  for anything unconfirmed, such as when it's available.
   Propose formats from where the film will be posted, such as 16:9 and 1:1
   for an X feed, or 9:16 for Stories, Reels, and TikTok.
-
-```
-FILM
-One sentence: the idea the viewer should remember
-Audience:
-Duration: seconds
-Formats: 16:9 / 9:16 / 1:1
-
-ASSETS
-Real logo: path
-Real UI screenshots: paths
-Brand type and colors:
-Music or audio reference: path
-
-VISUAL RULES
-Keep: specific traits from the reference
-Avoid: specific clichés (big centered text on a gradient, everything fading in, logo only at the end)
-Never invent product screens, metrics, or logos
-
-DELIVERABLES
-Contact sheets, final videos, poster frames, source, asset list
-```
 
 Collect the real assets into `assets/` and list each in `assets/assets.md`
 with where it came from. List the ones you still need there too, marked
 missing, so the list is the request. **A missing product asset (a logo, a
 screen, a product photo) is a blocker:** stop and ask for it, and never draw
-a convincing fake. The film may invent camera moves and openings; it may not
+a convincing fake. Whether the film shows the product at all is a choice you
+can offer; once it does, every picture of the product is real. The film may invent camera moves and openings; it may not
 invent the dashboard or replace the logo. Brand colors and fonts aren't
 blockers: without them, you propose a style at gate 2. Without a logo, the
 product's name set in type can stand in for it, but say it's a stand-in, not
@@ -114,28 +105,8 @@ approval before going on.
 
 If you were given a reference (a frame, a film, or earlier work), look at it
 and write down what you learned in `style-guide.md`, in measurable terms:
-
-```
-REFERENCE ANALYSIS
-Palette: actual colors, not "premium"
-Typography: family, width, weight, scale
-Composition: where the eye goes first
-Pacing: average time between meaningful changes
-Motion: snap, glide, overshoot, cut, hold
-Texture: grain, paper, glass, none
-
-FONTS
-Family and weight for each use; a file in assets/, or installed (fc-list)
-
-MOTION RULES
-Micro UI: quick, minimal overshoot
-Panels: controlled settle
-Camera: smooth, almost invisible
-Headlines: strong entrance, stable hold
-
-DO NOT COPY
-Subjects, logos, copy, or product-specific imagery
-```
+actual colors, not "premium"; typefaces and weights; where the eye goes
+first; the time between meaningful changes.
 
 Without a reference, write "none provided" under REFERENCE ANALYSIS, fill
 the same headings with the style you propose, and say it's a proposal. If the
@@ -149,17 +120,12 @@ the same on another machine. Set `font.family` from the loader and the
 weight and style to match the file; the family alone can pick an installed
 face instead.
 
-Write `shotlist.md`: what the viewer knows at each moment, not a list of
+Fill in `shotlist.md`: what the viewer knows at each moment, not a list of
 effects. It holds **every word that will appear on screen**, verbatim; the
 person approves the copy here, word for word, and every claim in it must come
 from the brief's product facts. Every beat has an entry state, an exit state, and a reason to exist;
 if you can't say why a beat exists, it doesn't belong in the film. For UI
 motion, list the states first (SEARCH -> RESULT -> DETAIL -> ACTION).
-
-```
-00-02s   HOOK      enters: empty   exits: the claim is on screen   why: earn attention
-02-05s   PROBLEM   ...
-```
 
 Lay out each format on purpose: 16:9 has more spatial context, 9:16 fewer
 elements and a stronger vertical hierarchy, 1:1 tighter type and shorter
@@ -171,9 +137,9 @@ approval before writing the scene.
 
 ## Gate 3: Representative stills
 
-`omotion new film/scene.qml`, then run `omotion help format`, which prints
-the scene format and the Motion helpers for this version of omotion. Build
-the scene from the shot list. Its
+Run `omotion help format`, which prints the scene format and the Motion
+helpers for this version of omotion. `scene.qml` starts as a working starter
+film; replace it with yours, built from the shot list. Its
 `beats` match `shotlist.md` one for one, and its `formats` list every format
 in the brief. Use only files from `assets/`.
 

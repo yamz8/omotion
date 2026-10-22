@@ -100,7 +100,9 @@ void PortalFilePicker::openScene(const QUrl &folder) {
     requestFile(QStringLiteral("OpenFile"), tr("Open Scene"), options, Action::Open);
 }
 
-void PortalFilePicker::newScene(const QUrl &suggestedUrl) {
+// A save dialog names the new folder: the portal has no "new folder" chooser,
+// and the name typed there is the film's name anyway.
+void PortalFilePicker::newFilm(const QUrl &suggestedUrl) {
     const QFileInfo target(suggestedUrl.toLocalFile());
 
     QVariantMap options;
@@ -108,10 +110,8 @@ void PortalFilePicker::newScene(const QUrl &suggestedUrl) {
     options.insert(QStringLiteral("modal"), true);
     options.insert(QStringLiteral("current_folder"), portalPathBytes(target.absolutePath()));
     options.insert(QStringLiteral("current_name"), target.fileName());
-    options.insert(QStringLiteral("filters"), QVariant::fromValue(PortalFileFilters{sceneFilter()}));
-    options.insert(QStringLiteral("current_filter"), QVariant::fromValue(sceneFilter()));
 
-    requestFile(QStringLiteral("SaveFile"), tr("New Scene"), options, Action::New);
+    requestFile(QStringLiteral("SaveFile"), tr("New Film"), options, Action::New);
 }
 
 bool PortalFilePicker::connectToRequestPath(const QString &path) {

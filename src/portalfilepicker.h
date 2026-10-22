@@ -14,7 +14,7 @@ public:
     explicit PortalFilePicker(QObject *parent = nullptr);
 
     void openScene(const QUrl &folder) override;
-    void newScene(const QUrl &suggestedUrl) override;
+    void newFilm(const QUrl &suggestedUrl) override;
 
 private slots:
     void handleResponse(uint response, const QVariantMap &results);

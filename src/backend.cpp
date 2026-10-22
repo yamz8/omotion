@@ -2,6 +2,7 @@
 
 #include "filepicker.h"
 #include "scene.h"
+#include "studio.h"
 
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -12,7 +13,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlEngine>
-#include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrlQuery>
 
@@ -28,8 +28,11 @@ Backend::Backend(FilePicker *picker, const QString &renderer, QObject *parent)
     if (m_picker) {
         connect(m_picker, &FilePicker::openSelected, this, [this](const QUrl &url) { load(url.toString()); });
         connect(m_picker, &FilePicker::newSelected, this, [this](const QUrl &url) {
-            if (createScene(url.toLocalFile()))
-                load(url.toLocalFile());
+            QString folder = url.toLocalFile();
+            if (folder.endsWith(".qml", Qt::CaseInsensitive))
+                folder.chop(4);
+            if (createFilm(folder))
+                load(QDir(folder).filePath("scene.qml"));
         });
         connect(m_picker, &FilePicker::failed, this, [this](const QString &message) { setMessage(message, true); });
     }
@@ -107,25 +110,32 @@ void Backend::openScene() {
         m_picker->openScene(QUrl::fromLocalFile(m_path.isEmpty() ? QDir::homePath() : QFileInfo(m_path).absolutePath()));
 }
 
-void Backend::newScene() {
+// New films go beside the open one's folder, or in Videos.
+void Backend::newFilm() {
     if (!m_picker)
         return;
-    const QString folder = m_path.isEmpty() ? QDir::homePath() : QFileInfo(m_path).absolutePath();
-    m_picker->newScene(QUrl::fromLocalFile(QDir(folder).filePath("scene.qml")));
+    const QString studio = Studio::rootOf(m_path);
+    QString parent = !studio.isEmpty() ? QFileInfo(studio).absolutePath()
+                     : !m_path.isEmpty() ? QFileInfo(m_path).absolutePath()
+                     : QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    if (!QFileInfo(parent).isDir())
+        parent = QDir::homePath();
+    m_picker->newFilm(QUrl::fromLocalFile(QDir(parent).filePath("new-film")));
 }
 
-bool Backend::createScene(const QString &path) {
-    // The portal asks before replacing a file, but a scene someone already
-    // wrote is never overwritten with the starter.
-    if (QFileInfo::exists(path)) {
-        setMessage(tr("%1 already exists; pick a new name.").arg(QFileInfo(path).fileName()), true);
+bool Backend::createFilm(const QString &folder) {
+    // The portal asks before replacing a file, but a folder with someone's
+    // work in it is never filled with templates.
+    const QDir directory(folder);
+    if (QFileInfo::exists(folder) &&
+        (!QFileInfo(folder).isDir() || !directory.isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden))) {
+        setMessage(tr("%1 already has files in it; pick a new folder for the film.").arg(QFileInfo(folder).fileName()),
+                   true);
         return false;
     }
-    QFile starter(":/starter.qml");
-    QSaveFile file(path);
-    if (!starter.open(QIODevice::ReadOnly) || !file.open(QIODevice::WriteOnly) ||
-        file.write(starter.readAll()) < 0 || !file.commit()) {
-        setMessage(tr("Could not write %1: %2").arg(path, file.errorString()), true);
+    QString error;
+    if (!Studio::create(folder, &error)) {
+        setMessage(tr("Could not create the film: %1").arg(error), true);
         return false;
     }
     return true;

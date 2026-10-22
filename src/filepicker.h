@@ -12,7 +12,8 @@ public:
     virtual ~FilePicker() = default;
 
     virtual void openScene(const QUrl &folder) = 0;
-    virtual void newScene(const QUrl &suggestedUrl) = 0;
+    // suggestedUrl is the folder to create; the name chosen becomes the film's folder.
+    virtual void newFilm(const QUrl &suggestedUrl) = 0;
 
 signals:
     void openSelected(const QUrl &url);

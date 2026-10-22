@@ -17,6 +17,7 @@
 #include "cli.h"
 #include "portalfilepicker.h"
 #include "scene.h"
+#include "studio.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -40,7 +41,7 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("omotion");
     app.setOrganizationName("omotion");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion(omotionVersion);
 
     // Matches the window to omotion.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.

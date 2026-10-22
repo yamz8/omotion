@@ -202,7 +202,7 @@ ApplicationWindow {
     Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; onActivated: win.exportFormats(false) }
     Shortcut { sequence: "Shift+E"; context: Qt.ApplicationShortcut; onActivated: win.exportFormats(true) }
     Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; onActivated: backend.openScene() }
-    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; onActivated: backend.newScene() }
+    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; onActivated: backend.newFilm() }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; onActivated: backend.reload() }
     Shortcut {
         sequence: "Escape"
@@ -290,10 +290,10 @@ ApplicationWindow {
                         }
                         Button {
                             Material.roundedScale: theme.radius
-                            text: qsTr("New Scene…")
+                            text: qsTr("New Film…")
                             flat: true
                             focusPolicy: Qt.NoFocus
-                            onClicked: backend.newScene()
+                            onClicked: backend.newFilm()
                         }
                     }
                     Label {
@@ -301,7 +301,8 @@ ApplicationWindow {
                         Layout.topMargin: 16
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        text: qsTr("Agents write scenes. Run %1 to teach yours how.").arg("omotion skill install")
+                        // The command stays left to right inside right-to-left text.
+                        text: qsTr("Start a film with %1, then open your coding agent in its folder.").arg("\u2066omotion new <folder>\u2069")
                         color: "#7d7d85"
                         font.pixelSize: 13
                     }

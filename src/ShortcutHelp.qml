@@ -21,7 +21,7 @@ Rectangle {
         { keys: ["E"], what: qsTr("Export this format") },
         { keys: ["Shift E"], what: qsTr("Export every format") },
         { keys: ["O"], what: qsTr("Open a scene") },
-        { keys: ["N"], what: qsTr("New scene") },
+        { keys: ["N"], what: qsTr("New film") },
         { keys: ["R"], what: qsTr("Reload the scene") },
         { keys: ["?"], what: qsTr("Show shortcuts") },
         { keys: ["Q"], what: qsTr("Quit") }

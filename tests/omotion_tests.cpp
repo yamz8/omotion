@@ -15,6 +15,7 @@
 #include "backend.h"
 #include "filepicker.h"
 #include "scene.h"
+#include "studio.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -33,7 +34,7 @@ QByteArray sceneSource(const QByteArray &extra = {}, const QByteArray &declarati
 class FakePicker : public FilePicker {
 public:
     void openScene(const QUrl &) override {}
-    void newScene(const QUrl &) override {}
+    void newFilm(const QUrl &) override {}
 };
 }
 
@@ -203,20 +204,81 @@ private slots:
         QVERIFY(backend.resolve("track.wav").toLocalFile() == dir.filePath("track.wav"));
     }
 
-    void backendNeverOverwritesAScene()
+    void backendNeverFillsAFolderWithWork()
     {
         QTemporaryDir dir;
-        const QString path = dir.filePath("mine.qml");
-        write(path, "keep me");
+        QDir(dir.path()).mkpath("mine");
+        write(dir.filePath("mine/notes.txt"), "keep me");
         FakePicker picker;
         Backend backend(&picker);
-        QVERIFY(!backend.createScene(path));
+        QVERIFY(!backend.createFilm(dir.filePath("mine")));
         QVERIFY(backend.messageIsError());
-        QFile file(path);
-        QVERIFY(file.open(QIODevice::ReadOnly));
-        QCOMPARE(file.readAll(), QByteArray("keep me"));
-        QVERIFY(backend.createScene(dir.filePath("new.qml")));
-        QVERIFY(!backend.load(dir.filePath("notes.txt")));
+        QCOMPARE(QDir(dir.filePath("mine")).entryList(QDir::Files), QStringList{"notes.txt"});
+        QVERIFY(backend.createFilm(dir.filePath("launch")));
+        QVERIFY(backend.load(dir.filePath("launch/scene.qml")));
+        QVERIFY(!backend.load(dir.filePath("mine/notes.txt")));
+    }
+
+    void newFilmIsAWholeStudio()
+    {
+        QTemporaryDir dir;
+        const QString root = dir.filePath("jotter-sync");
+        QString error;
+        QStringList created;
+        QVERIFY2(Studio::create(root, &error, &created), qPrintable(error));
+        for (const auto &file : {"brief.md", "style-guide.md", "shotlist.md", "assets/assets.md", "gates.md",
+                                 "scene.qml", "AGENTS.md", ".claude/skills/omotion/SKILL.md"})
+            QVERIFY2(QFileInfo(QDir(root).filePath(file)).isFile(), file);
+        QVERIFY(QFileInfo(QDir(root).filePath("reviews")).isDir());
+        QVERIFY(QFileInfo(QDir(root).filePath("renders")).isDir());
+        QVERIFY(created.contains(".claude/skills/omotion/SKILL.md"));
+        // A folder with anything in it is never filled with templates.
+        QVERIFY(!Studio::create(root, &error));
+        QVERIFY(error.contains("already has files"));
+
+        // The studio is found from inside it, and the starter scene in it is clean.
+        QDir(root).mkpath("reviews/old");
+        QCOMPARE(Studio::rootOf(QDir(root).filePath("reviews/old")), QFileInfo(root).absoluteFilePath());
+        QCOMPARE(Studio::rootOf(dir.path()), QString());
+        Scene scene;
+        QVERIFY(scene.load(QDir(root).filePath("scene.qml"), "16:9", &error));
+        QCOMPARE(scene.check().size(), 0);
+    }
+
+    void skillInAStudioStaysCurrent()
+    {
+        QTemporaryDir dir;
+        const QString root = dir.filePath("film");
+        QString error;
+        QVERIFY(Studio::create(root, &error));
+        QCOMPARE(Studio::skillProblem(root), QString());
+        const QString skill = QDir(root).filePath(".claude/skills/omotion/SKILL.md");
+
+        // One written by another omotion is reported, and install replaces it.
+        write(skill, "old skill\n<!-- omotion 0.0.1 skill 000000000000 -->\n");
+        QVERIFY(Studio::skillProblem(root).contains("omotion 0.0.1"));
+        Scene scene;
+        QVERIFY(scene.load(QDir(root).filePath("scene.qml"), "16:9", &error));
+        bool reported = false;
+        for (const auto &problem : scene.check())
+            reported = reported || problem.message.contains("agent skill");
+        QVERIFY(reported);
+        QVERIFY(Studio::installSkill(root, &error));
+        QCOMPARE(Studio::skillProblem(root), QString());
+
+        // Without the stamp it's the person's own, and left alone; AGENTS.md they wrote is kept too.
+        write(skill, "my own skill\n");
+        QCOMPARE(Studio::skillProblem(root), QString());
+        write(QDir(root).filePath("AGENTS.md"), "mine");
+        QStringList written;
+        QVERIFY(Studio::installSkill(root, &error, &written));
+        QCOMPARE(written, QStringList{".claude/skills/omotion/SKILL.md"});
+        QFile agents(QDir(root).filePath("AGENTS.md"));
+        QVERIFY(agents.open(QIODevice::ReadOnly));
+        QCOMPARE(agents.readAll(), QByteArray("mine"));
+
+        QVERIFY(QFile::remove(skill));
+        QVERIFY(Studio::skillProblem(root).contains("no agent skill"));
     }
 
     void themeFallsBack()

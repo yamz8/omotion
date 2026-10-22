@@ -10,6 +10,7 @@ HEADERS += \
     src/filepicker.h \
     src/portalfilepicker.h \
     src/scene.h \
+    src/studio.h \
     src/theme.h \
     src/translator.h
 
@@ -19,6 +20,7 @@ SOURCES += \
     src/cli.cpp \
     src/portalfilepicker.cpp \
     src/scene.cpp \
+    src/studio.cpp \
     src/theme.cpp \
     src/translator.cpp
 

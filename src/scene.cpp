@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "studio.h"
 
 #include <QDir>
 #include <QFile>
@@ -359,6 +360,14 @@ QImage Scene::contactSheet(const QList<double> &times, int columns) {
 
 QList<Problem> Scene::check() {
     QList<Problem> problems = m_declarationProblems;
+    // A film made with omotion new carries the skill its agent follows; an
+    // outdated one leads the agent through an older workflow.
+    const QString studio = Studio::rootOf(m_path);
+    if (!studio.isEmpty()) {
+        const QString skill = Studio::skillProblem(studio);
+        if (!skill.isEmpty())
+            problems << Problem{false, skill, {}, -1};
+    }
     for (const auto &warning : m_warnings)
         problems << Problem{false, warning, m_format.name, -1};
 

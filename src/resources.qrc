@@ -9,6 +9,12 @@
         <file alias="starter.qml">starter.qml</file>
         <file alias="format.md">format.md</file>
         <file alias="skill.md">skill.md</file>
+        <file alias="studio/AGENTS.md">studio/AGENTS.md</file>
+        <file alias="studio/assets.md">studio/assets.md</file>
+        <file alias="studio/brief.md">studio/brief.md</file>
+        <file alias="studio/gates.md">studio/gates.md</file>
+        <file alias="studio/shotlist.md">studio/shotlist.md</file>
+        <file alias="studio/style-guide.md">studio/style-guide.md</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/ar.json">i18n/ar.json</file>
         <file alias="i18n/da.json">i18n/da.json</file>

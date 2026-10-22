@@ -1,5 +1,6 @@
 #include "cli.h"
 #include "scene.h"
+#include "studio.h"
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -83,28 +84,48 @@ struct Command {
 };
 
 int create(const QStringList &arguments) {
-    Command command("new", "Start a scene from the starter, which shows every part of the format.");
+    Command command("new", "Start a film: a folder with the brief, style guide, shot list, assets, gates, a "
+                           "starter scene, and the agent skill. Name a .qml file instead for a lone scene.", false);
+    command.parser.addPositionalArgument("folder", "New folder for the film, or a .qml file", "<folder>");
     command.json();
     command.parser.process(arguments);
-    QString path = command.scene();
+    const QString path = command.argument(1);
     if (path.isEmpty())
-        return fail("Name the scene file to create, such as launch/scene.qml.");
-    if (QFileInfo(path).suffix().isEmpty())
-        path += ".qml";
-    if (QFileInfo::exists(path))
-        return fail(path + " already exists.");
-    QFile starter(":/starter.qml");
-    if (!starter.open(QIODevice::ReadOnly))
-        return 1;
-    if (!QDir().mkpath(QFileInfo(path).absolutePath()))
-        return fail("Could not create " + QFileInfo(path).absolutePath());
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(starter.readAll()) < 0 || !file.commit())
-        return fail(path + ": " + file.errorString());
-    if (command.parser.isSet("json"))
-        print({{"scene", QFileInfo(path).absoluteFilePath()}});
-    else
-        print(stdout, "Created " + path);
+        return fail("Name the folder for the film, such as ~/Videos/launch.");
+
+    if (QFileInfo(path).suffix().compare("qml", Qt::CaseInsensitive) == 0) {
+        if (QFileInfo::exists(path))
+            return fail(path + " already exists.");
+        QFile starter(":/starter.qml");
+        if (!starter.open(QIODevice::ReadOnly))
+            return 1;
+        if (!QDir().mkpath(QFileInfo(path).absolutePath()))
+            return fail("Could not create " + QFileInfo(path).absolutePath());
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(starter.readAll()) < 0 || !file.commit())
+            return fail(path + ": " + file.errorString());
+        if (command.parser.isSet("json"))
+            print({{"scene", QFileInfo(path).absoluteFilePath()}});
+        else
+            print(stdout, "Created " + path);
+        return 0;
+    }
+
+    QString error;
+    QStringList created;
+    if (!Studio::create(path, &error, &created))
+        return fail(error);
+    const QString root = QFileInfo(path).absoluteFilePath();
+    if (command.parser.isSet("json")) {
+        print({{"studio", root}, {"scene", QDir(root).filePath("scene.qml")},
+               {"files", QJsonArray::fromStringList(created)}});
+        return 0;
+    }
+    print(stdout, "Created the film " + path + ":");
+    for (const auto &file : created)
+        print(stdout, "  " + file);
+    print(stdout, "\nNext, open your coding agent in " + path + " and ask it for the film you want.\n"
+                  "To watch it as it's made: omotion open " + QDir(path).filePath("scene.qml"));
     return 0;
 }
 
@@ -317,39 +338,30 @@ int render(const QStringList &arguments) {
     return 0;
 }
 
-// As Hype does: one shared copy, linked into Claude Code, found directly by Codex.
+// The skill lives in each film's folder, so it always matches the omotion that
+// wrote it and travels with the film; nothing is installed in the home folder.
 int skill(const QStringList &arguments) {
-    Command command("skill", "Print the agent skill, or install it for your coding agents with: skill install.", false);
-    command.parser.addPositionalArgument("install", "Copy to ~/.agents/skills/omotion and link into ~/.claude/skills",
-                                         "[install]");
+    Command command("skill", "Print the agent skill, or write it into a film's folder with: skill install.", false);
+    command.parser.addPositionalArgument("install", "Write .claude/skills/omotion/SKILL.md (and AGENTS.md if missing) "
+                                                    "into the film's folder", "[install]");
+    command.parser.addPositionalArgument("folder", "The film's folder (default: the one you're in)", "[folder]");
     command.parser.process(arguments);
-    QFile bundled(":/skill.md");
-    if (!bundled.open(QIODevice::ReadOnly))
-        return 1;
-    const QByteArray text = bundled.readAll();
     if (command.argument(1).isEmpty()) {
-        fputs(text.constData(), stdout);
+        fputs(Studio::stampedSkill().constData(), stdout);
         return 0;
     }
     if (command.argument(1) != "install")
-        return fail("Use omotion skill to print the skill, or omotion skill install.");
-    const QDir home = QDir::home();
-    const QString directory = home.filePath(".agents/skills/omotion");
-    QSaveFile file(directory + "/SKILL.md");
-    if (!QDir().mkpath(directory) || !file.open(QIODevice::WriteOnly) || file.write(text) < 0 || !file.commit())
-        return fail("Could not write " + file.fileName());
-    print(stdout, "Installed " + file.fileName());
-    if (!home.exists(".claude"))
-        return 0;
-    const QString link = home.filePath(".claude/skills/omotion");
-    const QFileInfo existing(link);
-    if (existing.isSymLink())
-        QFile::remove(link);
-    else if (existing.exists())
-        return fail(link + " exists and is not a link; leaving it alone.");
-    if (!home.mkpath(".claude/skills") || !QFile::link("../../.agents/skills/omotion", link))
-        return fail("Could not link " + link);
-    print(stdout, "Linked " + link);
+        return fail("Use omotion skill to print the skill, or omotion skill install in a film's folder.");
+    const QString from = command.argument(2).isEmpty() ? QDir::currentPath() : command.argument(2);
+    const QString root = Studio::rootOf(from);
+    if (root.isEmpty())
+        return fail(from + " isn't inside a film made by omotion. Start one with: omotion new <folder>");
+    QString error;
+    QStringList written;
+    if (!Studio::installSkill(root, &error, &written))
+        return fail(error);
+    for (const auto &file : written)
+        print(stdout, "Wrote " + QDir(root).filePath(file));
     return 0;
 }
 
@@ -373,13 +385,13 @@ QString cliSummary() {
     return "Window:\n"
            "  open [scene]              Preview a scene, on the last one by default\n\n"
            "Commands that need no display (omotion help <command> for options):\n"
-           "  new <scene>               Start a scene from the starter\n"
+           "  new <folder>              Start a film: brief, shot list, gates, scene, agent skill\n"
            "  check <scene>             Report every problem, in every format\n"
            "  frame <scene> --at <s>    Render one frame to PNG\n"
            "  sheet <scene>             Render a contact sheet of the beats to PNG\n"
            "  render <scene>            Encode MP4s, one per format\n"
            "  help format               How to write a scene\n"
-           "  skill [install]           Print the skill for coding agents, or install it";
+           "  skill [install]           Print the agent skill, or write it into this film's folder";
 }
 
 bool isCliCommand(const QString &word) {

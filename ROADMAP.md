@@ -68,11 +68,15 @@ its milestone is scheduled, and is cut or redesigned if the prototype fails.
 Closes the largest gap: today an agent can go from prompt to MP4 without a
 person approving anything.
 
-- **`omotion new <dir>` scaffolds the studio** from the article's §9:
+- ✅ **`omotion new <dir>` scaffolds the studio** from the article's §9:
   `brief.md`, `style-guide.md`, `shotlist.md`, `assets/` with `assets.md`,
   `scene.qml`, `reviews/`, `renders/`, and `gates.md`. Each file starts as the
-  article's template (§1 brief, §2 reference analysis, §3 beat sheet), as the
-  skill already describes.
+  article's template (§1 brief, §2 reference analysis, §3 beat sheet).
+- ✅ **The agent skill lives in the studio**, at `.claude/skills/omotion/SKILL.md`
+  with an `AGENTS.md` pointing to it, rather than in the home folder. It's
+  stamped with the omotion that wrote it, so it travels with the film and
+  always matches it; `check` reports a stale one, and `omotion skill install`
+  in the folder updates it.
 - **Beats become a contract.** Each beat gains `purpose`, `enter`, and `exit`.
   `check` makes a missing purpose an error, and checks that `shotlist.md` and
   the scene's `beats` agree.
@@ -95,7 +99,8 @@ person approving anything.
   irreversible brand decision on its own.
 
 **Done when:** an agent given only a brief and a folder of real assets stops
-for approval at gates 1 and 2 before writing a frame. A second agent session,
+for approval at gates 1 and 2 before writing a frame (✅ shown with two test
+agents on the skill alone). A second agent session,
 started cold, can resume from `omotion status` alone.
 
 ### Checkpoint: prove the loop, then choose the renderer · S
@@ -194,6 +199,8 @@ recognizably the same across states.
   content, and position across states.
 - **Style tokens**: palette and type from `style-guide.md` exposed as a `Style`
   object, so a film can't drift from its own guide.
+- **4:5**, the Instagram feed's format (1080×1350), beside 16:9, 9:16, and 1:1;
+  the first test agent asked for an Instagram film couldn't offer it.
 - **First-class formats**: per-format timing (1:1 gets "tighter typography and
   shorter holds", §8), layout helpers, and a starter composed for all three.
 - **A global seed** (`render --seed`) for repeatable variations.
