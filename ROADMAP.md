@@ -91,6 +91,26 @@ person approving anything.
 for approval at gates 1 and 2 before writing a frame. A second agent session,
 started cold, can resume from `omotion status` alone.
 
+### Checkpoint: prove the loop, then choose the renderer
+
+Before v0.3, test whether the studio works, because everything after it is
+a bet on the answer.
+
+- **A five-film test.** An agent makes five short films in a row in one
+  studio, through the v0.2 gates, from five different briefs. Score each
+  against the checklist, and record where the agent struggled: the gates, the
+  checks, or writing QML.
+- **The renderer decision.** If agents write good QML scenes after the format
+  guide and `check` feedback, stay QML-only and continue with v0.3 as
+  planned. If they keep struggling with QML, make the studio layers (gates,
+  checks, reviews, sheets) work with other renderers first, starting with
+  HTML or React rendered through a headless browser, and put the QML-only
+  features in v0.5 on hold.
+
+**Done when:** the five films and their scores are in the repository, the
+decision is written down with its reasons, and the milestones below are
+revised to match it.
+
 ### v0.3: Evidence (Verification)
 
 Turns the article's §7 checklist and critique into tooling.
@@ -227,10 +247,8 @@ The claim is about getting better, so measure exactly that:
   components at known frame numbers) and HyperFrames (an HTML composition). An
   agent is likelier to write good Remotion code on the first try.
   Mitigations: a strong format guide, worked examples, and `check` feedback
-  that teaches. Open question: whether omotion should also accept HTML or
-  React scenes rendered through a headless browser, so the studio layers
-  (gates, checks, reviews) work with any renderer. That could matter more than
-  the renderer.
+  that teaches. Whether omotion should also accept HTML or React scenes is
+  decided at the checkpoint after v0.2, from evidence rather than guesswork.
 - **"Number one" may need reach beyond Omarchy.** omotion is Qt and runs on
   other Linux distributions and macOS, but packaging, the portal file picker,
   and theme following are Omarchy-specific today. A decision for after v1.0.
@@ -254,3 +272,5 @@ The three cheapest changes with the most effect, in order:
 2. **`omotion new <dir>` scaffolds the studio** with the article's templates.
 3. **Overlap and safe-area checks**, so the defect we found by eye is found
    automatically.
+
+Then the checkpoint: the five-film test, and the renderer decision.
