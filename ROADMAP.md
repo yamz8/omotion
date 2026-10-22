@@ -147,8 +147,9 @@ Turns the article's §7 checklist and critique into tooling.
   affected frames again").
 
 **Done when:** the defects found by hand in the launch film are reported
-automatically, with timestamps. A fix-and-recheck cycle takes seconds, not a
-full render.
+automatically, with timestamps. After a patch to one beat, re-rendering
+touches only that beat's frames, and checking and rendering a sheet for a
+15-second film take under 10 seconds.
 
 ### v0.4: Sound on the same timeline
 
@@ -190,8 +191,9 @@ recognizably the same across states.
 - **A global seed** (`render --seed`) for repeatable variations.
 
 **Done when:** the article's five-beat example film (hook, problem, reveal,
-proof, close) can be written using only rules, states, and tokens, with no
-hand-tuned curves, and passes every v0.3 check in all three formats.
+proof, close) is written using only rules, states, and tokens: `check` finds
+no spring outside a rule and no color or font outside the style guide. It
+passes every v0.3 check in all three formats.
 
 ### v0.6: References and footage (Specification)
 
@@ -207,10 +209,10 @@ From §2: "If you do not supply a visual grammar, the model supplies its own."
   for the photoreal and organic shots the article says code-made motion
   can't do.
 
-**Done when:** given a reference film, omotion produces a style guide whose
-measured values (palette, average shot length) match the reference within
-tolerance, and a film made from it is judged closer to the reference than one
-made without it.
+**Done when:** for three reference films, the style guide's measured palette
+is within ΔE 5 of colors sampled from the reference, and its average time
+between scene changes is within 20% of the reference's. A film made from that
+guide also lands within those same tolerances when measured the same way.
 
 ### v1.0: Production
 
@@ -226,6 +228,11 @@ made without it.
   contract and checklist.
 - **Release**: tagged releases, the `omacom/omarchy-pkgs` package, all 50 Omarchy
   languages, and a gallery of films with their studios.
+
+**Done when:** one command produces every deliverable for a template studio.
+The same studio renders on a second machine with every frame matching within
+the seek check's tolerance. omotion installs from `omarchy-pkgs` on a fresh
+Omarchy machine.
 
 ## How we'll know it's number one
 
