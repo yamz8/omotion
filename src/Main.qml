@@ -282,12 +282,14 @@ ApplicationWindow {
                         Layout.topMargin: 10
                         spacing: 12
                         Button {
+                            Material.roundedScale: theme.radius
                             text: qsTr("Open Scene…")
                             highlighted: true
                             focusPolicy: Qt.NoFocus
                             onClicked: backend.openScene()
                         }
                         Button {
+                            Material.roundedScale: theme.radius
                             text: qsTr("New Scene…")
                             flat: true
                             focusPolicy: Qt.NoFocus
@@ -400,6 +402,7 @@ ApplicationWindow {
                             color: backend.messageIsError ? "#ff8a95" : "#e6e6ea"
                         }
                         Button {
+                            Material.roundedScale: theme.radius
                             visible: backend.outputs.length > 0
                             text: qsTr("Show in Folder")
                             flat: true
@@ -518,6 +521,8 @@ ApplicationWindow {
                     }
 
                     Button {
+
+                        Material.roundedScale: theme.radius
                         text: win.format
                         flat: true
                         focusPolicy: Qt.NoFocus
@@ -529,6 +534,8 @@ ApplicationWindow {
                     }
 
                     Button {
+
+                        Material.roundedScale: theme.radius
                         text: qsTr("Contact Sheet")
                         flat: true
                         checkable: true
@@ -539,6 +546,8 @@ ApplicationWindow {
                     }
 
                     Button {
+
+                        Material.roundedScale: theme.radius
                         id: exportButton
                         visible: !backend.exporting
                         text: qsTr("Export")
@@ -581,6 +590,7 @@ ApplicationWindow {
                             }
                         }
                         Button {
+                            Material.roundedScale: theme.radius
                             text: qsTr("Cancel")
                             flat: true
                             focusPolicy: Qt.NoFocus
@@ -624,11 +634,13 @@ ApplicationWindow {
         footer: DialogButtonBox {
             background: null
             Button {
+                Material.roundedScale: theme.radius
                 text: qsTr("Keep Rendering")
                 flat: true
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             }
             Button {
+                Material.roundedScale: theme.radius
                 text: qsTr("Stop and Quit")
                 flat: true
                 DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
