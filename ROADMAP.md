@@ -69,9 +69,10 @@ Closes the largest gap: today an agent can go from prompt to MP4 without a
 person approving anything.
 
 - **`omotion new <dir>` scaffolds the studio** from the article's §9:
-  `brief.md`, `style-guide.md`, `shotlist.md`, `assets/`, `scene.qml`,
-  `reviews/`, `out/`. Each file starts as the article's template (§1 brief, §2
-  reference analysis, §3 beat sheet).
+  `brief.md`, `style-guide.md`, `shotlist.md`, `assets/` with `assets.md`,
+  `scene.qml`, `reviews/`, `renders/`, and `gates.md`. Each file starts as the
+  article's template (§1 brief, §2 reference analysis, §3 beat sheet), as the
+  skill already describes.
 - **Beats become a contract.** Each beat gains `purpose`, `enter`, and `exit`.
   `check` makes a missing purpose an error, and checks that `shotlist.md` and
   the scene's `beats` agree.
@@ -79,9 +80,10 @@ person approving anything.
   image or font loaded from outside it. A file named in the brief but missing
   from `assets/` is a blocking error, not a warning.
 - **`omotion status`** reports which gate the project has reached, what each
-  gate is missing, and whether each gate was approved. Approval is recorded in
-  a file (`gates.json`), so a new run resumes where the last one stopped.
-- **The skill is rewritten around the article's six gates**, with real stops:
+  gate is missing, and whether each gate was approved. It reads `gates.md`,
+  the plain checklist the skill already keeps and a person can edit, so a new
+  run resumes where the last one stopped.
+- ✅ **The skill is rewritten around the article's six gates**, with real stops:
   1. Approve references and product assets
   2. Approve the style guide and shot list
   3. Inspect representative stills
