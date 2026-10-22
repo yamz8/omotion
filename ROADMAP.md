@@ -58,7 +58,12 @@ covers only named beats, and there is no **Direction** layer.
 
 Each milestone ends with a **done when** that can be demonstrated, not argued.
 
-### v0.2: The studio, not the scene (Direction and gates)
+Sizes are relative guesses for one person working with an agent: **S** is
+days, **M** about a week, **L** several weeks. Items marked **(spike)** haven't
+been shown to be buildable well. Each gets a prototype of a day or two before
+its milestone is scheduled, and is cut or redesigned if the prototype fails.
+
+### v0.2: The studio, not the scene (Direction and gates) · M
 
 Closes the largest gap: today an agent can go from prompt to MP4 without a
 person approving anything.
@@ -91,7 +96,7 @@ person approving anything.
 for approval at gates 1 and 2 before writing a frame. A second agent session,
 started cold, can resume from `omotion status` alone.
 
-### Checkpoint: prove the loop, then choose the renderer
+### Checkpoint: prove the loop, then choose the renderer · S
 
 Before v0.3, test whether the studio works, because everything after it is
 a bet on the answer.
@@ -111,7 +116,7 @@ a bet on the answer.
 decision is written down with its reasons, and the milestones below are
 revised to match it.
 
-### v0.3: Evidence (Verification)
+### v0.3: Evidence (Verification) · L
 
 Turns the article's §7 checklist and critique into tooling.
 
@@ -119,7 +124,7 @@ Turns the article's §7 checklist and critique into tooling.
 
   | Checklist item | How |
   | --- | --- |
-  | Text readable at phone size | Measured: rendered glyph height at phone scale for each format |
+  | Text readable at phone size | Measured: rendered glyph height at phone scale for each format **(spike)**: what size counts as readable, and measuring it reliably from the item tree |
   | No element crossing the safe area | Measured: every visible item against a per-format safe margin |
   | Real product assets | Measured: manifest check (v0.2) |
   | Consistent type and color | Measured: fonts and colors used per beat, compared with the style-guide tokens |
@@ -151,7 +156,7 @@ automatically, with timestamps. After a patch to one beat, re-rendering
 touches only that beat's frames, and checking and rendering a sheet for a
 15-second film take under 10 seconds.
 
-### v0.4: Sound on the same timeline
+### v0.4: Sound on the same timeline · L
 
 From §6: "If it has no shape without the picture, the sound design is
 probably not finished."
@@ -160,7 +165,8 @@ probably not finished."
   the timeline beside the beats.
 - **`omotion beats track.wav`** measures a track's tempo and beats (onset
   detection on ffmpeg-decoded audio) and writes a beat grid the scene can cut
-  against.
+  against. **(spike)**: whether simple onset detection is accurate enough on
+  real music without a dedicated library.
 - **A waveform on the timeline**, scrubbed audio, and an offset and trim for the track.
 - **Synthesized cues**: deterministic clicks and hits placed at cue times and
   mixed at render, for films without a licensed track.
@@ -171,7 +177,7 @@ probably not finished."
 **Done when:** a film's declared cues land within one frame of their visual
 events, verified by `check`, and audio playback in the window is covered by a test.
 
-### v0.5: Craft (motion, continuity, style)
+### v0.5: Craft (motion, continuity, style) · M–L
 
 From §3 and §5: motion that carries mass and intent, and objects that stay
 recognizably the same across states.
@@ -195,7 +201,7 @@ proof, close) is written using only rules, states, and tokens: `check` finds
 no spring outside a rule and no color or font outside the style guide. It
 passes every v0.3 check in all three formats.
 
-### v0.6: References and footage (Specification)
+### v0.6: References and footage (Specification) · L
 
 From §2: "If you do not supply a visual grammar, the model supplies its own."
 
@@ -204,17 +210,19 @@ From §2: "If you do not supply a visual grammar, the model supplies its own."
   energy. It writes the numbers into `style-guide.md` for the agent to
   complete, with the article's "do not copy" section.
 - **Asset capture** from a real product site into `assets/`, using a browser
-  if one is installed, then listed for approval at gate 1.
+  if one is installed, then listed for approval at gate 1. **(spike)**:
+  driving a headless browser from omotion, and handling sites that need a login.
 - **Seekable footage**: a `Clip` item that shows a video file's frame at t,
   for the photoreal and organic shots the article says code-made motion
-  can't do.
+  can't do. **(spike)**: exact frame-accurate seeking, and whether decoding
+  each frame on demand is fast enough to render.
 
 **Done when:** for three reference films, the style guide's measured palette
 is within ΔE 5 of colors sampled from the reference, and its average time
 between scene changes is within 20% of the reference's. A film made from that
 guide also lands within those same tolerances when measured the same way.
 
-### v1.0: Production
+### v1.0: Production · L
 
 - **Deliverables from §1 and the final prompt**: final videos, poster frames,
   contact sheets, storyboard PDF, source, asset list, and a short "what still
