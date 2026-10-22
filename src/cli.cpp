@@ -24,6 +24,8 @@ int fail(const QString &message) {
     return 1;
 }
 QString seconds(double t) { return QString::number(t, 'f', 2) + "s"; }
+// A path ending in a slash, or naming a folder that exists, is where the file goes.
+bool namesDirectory(const QString &path) { return path.endsWith('/') || QFileInfo(path).isDir(); }
 
 QJsonObject toJson(const Problem &problem) {
     return {{"severity", problem.error ? "error" : "warning"},
@@ -169,7 +171,7 @@ int check(const QStringList &arguments) {
 int frame(const QStringList &arguments) {
     Command command("frame", "Render the frame at one moment to a PNG.");
     command.parser.addOption({"at", "Time in seconds", "seconds"});
-    command.parser.addOption({{"o", "output"}, "PNG file (default: <scene>-<format>-<seconds>.png)", "path"});
+    command.parser.addOption({{"o", "output"}, "PNG file, or a folder for it (default: <scene>-<format>-<seconds>.png)", "path"});
     command.parser.addOption({"width", "Scale the image to this width", "pixels"});
     command.format("the scene's first format");
     command.json();
@@ -197,10 +199,13 @@ int frame(const QStringList &arguments) {
             return fail("Width must be between 16 and 7680.");
         image = image.scaledToWidth(width, Qt::SmoothTransformation);
     }
+    const QString name = QString("%1-%2-%3.png").arg(QFileInfo(scene.path()).completeBaseName(),
+                                                     scene.format().slug(), QString::number(at, 'f', 2));
     QString output = command.parser.value("output");
     if (output.isEmpty())
-        output = QString("%1-%2-%3.png").arg(QFileInfo(scene.path()).completeBaseName(), scene.format().slug(),
-                                             QString::number(at, 'f', 2));
+        output = name;
+    else if (namesDirectory(output))
+        output = QDir(output).filePath(name);
     QDir().mkpath(QFileInfo(output).absolutePath());
     if (!image.save(output, "PNG"))
         return fail("Could not save " + output);
@@ -217,7 +222,7 @@ int sheet(const QStringList &arguments) {
     Command command("sheet", "Render a contact sheet: one frame from the middle of every beat, or the moments "
                              "named with --times, labelled with beat, time, and frame.");
     command.parser.addOption({"times", "Comma-separated seconds to show instead of the beats", "list"});
-    command.parser.addOption({{"o", "output"}, "PNG file (default: <scene>-<format>-sheet.png)", "path"});
+    command.parser.addOption({{"o", "output"}, "PNG file, or a folder for one per format (default: <scene>-<format>-sheet.png beside the scene)", "path"});
     command.parser.addOption({"columns", "Tiles per row", "count"});
     command.format("the scene's first format");
     command.json();
@@ -245,10 +250,15 @@ int sheet(const QStringList &arguments) {
         }
         if (times.isEmpty())
             return fail("No moments to show.");
+        const QString file = QString("%1-%2-sheet.png").arg(QFileInfo(scene.path()).completeBaseName(),
+                                                            scene.format().slug());
         QString output = command.parser.value("output");
-        if (output.isEmpty() || formats.size() > 1)
-            output = QFileInfo(output.isEmpty() ? scene.path() : output).absoluteDir().filePath(
-                QString("%1-%2-sheet.png").arg(QFileInfo(scene.path()).completeBaseName(), scene.format().slug()));
+        if (output.isEmpty())
+            output = QFileInfo(scene.path()).absoluteDir().filePath(file);
+        else if (namesDirectory(output))
+            output = QDir(output).filePath(file);
+        else if (formats.size() > 1)
+            output = QFileInfo(output).absoluteDir().filePath(file);
         QDir().mkpath(QFileInfo(output).absolutePath());
         if (!scene.contactSheet(times, command.parser.value("columns").toInt()).save(output, "PNG"))
             return fail("Could not save " + output);
@@ -287,7 +297,7 @@ int render(const QStringList &arguments) {
             return fail(error);
         QString target = Scene::defaultOutput(scene.path(), formats[i]);
         if (!output.isEmpty())
-            target = formats.size() == 1 && !QFileInfo(output).isDir()
+            target = formats.size() == 1 && !namesDirectory(output)
                          ? output : QDir(output).filePath(QFileInfo(target).fileName());
         const QString format = formats[i];
         const int count = formats.size();
