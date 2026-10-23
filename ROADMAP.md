@@ -319,7 +319,7 @@ asked for out of order in under 2 s, decoding included.
   video starts with a real base": swap the brief and assets, keep the render
   contract and checklist.
 - **Release**: tagged releases, the `omacom/omarchy-pkgs` package, all 50 Omarchy
-  languages, and a gallery of films with their studios.
+  languages, and a gallery of films with their studios (✅ `examples/`).
 
 **So far:** the window speaks all 50 Omarchy languages; 42 of the catalogs
 are drafts that a native speaker should review, especially the words for

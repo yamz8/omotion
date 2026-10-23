@@ -142,11 +142,11 @@ guide's tokens, `Camera` for pans and zooms, `Clip` for footage, and cues.
 | ? | Show shortcuts |
 | Q | Quit |
 
-## An example film
+## Example films
 
-`examples/launch/` is a whole studio: a 15-second launch film for omotion in
-four formats, with its brief, style guide, shot list, assets, review, and
-renders. Open it with `omotion open examples/launch/scene.qml`.
+`examples/` holds three whole studios, a launch film, a walkthrough, and a
+data story, each 15 seconds in four formats with its brief, style guide,
+shot list, assets, review, and renders; see [examples/README.md](examples/README.md).
 
 ## Commands
 

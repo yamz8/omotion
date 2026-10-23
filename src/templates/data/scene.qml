@@ -88,7 +88,8 @@ Rectangle {
     Column {
         id: chart
         x: scene.side
-        y: scene.head + (scene.wide ? 2 : 3) * 1.25 * scene.headlineSize + 40 * scene.u
+        // Under the headline: two lines in the wide frame, three in the tall ones.
+        y: scene.head + (scene.wide ? 2 : 3) * (1.2 * scene.headlineSize + 22 * scene.u) + 50 * scene.u
         width: scene.across
         spacing: 0.7 * scene.labelSize
         opacity: Motion.progress(scene.t, 3, 3.3)
@@ -105,7 +106,8 @@ Rectangle {
                 height: scene.labelSize * 1.3
                 Text {
                     id: label
-                    width: chart.width * 0.3
+                    // Labels take more of a narrow frame.
+                    width: chart.width * (scene.wide ? 0.3 : 0.45)
                     anchors.verticalCenter: parent.verticalCenter
                     text: row.modelData.label
                     elide: Text.ElideRight
@@ -118,7 +120,7 @@ Rectangle {
                     x: label.width + 20 * scene.u
                     anchors.verticalCenter: parent.verticalCenter
                     height: parent.height * 0.7
-                    width: Math.max(0, (chart.width * 0.55) * row.modelData.value / scene.highest * Motion.clamp(row.grow, 0, 1.05))
+                    width: Math.max(0, (chart.width * (scene.wide ? 0.55 : 0.36)) * row.modelData.value / scene.highest * Motion.clamp(row.grow, 0, 1.05))
                     radius: 6 * scene.u
                     color: scene.t >= 7 && row.index === scene.answer ? Style.colors.accent
                            : row.lit ? Style.colors.ink : Style.colors.line

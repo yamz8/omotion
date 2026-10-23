@@ -1,0 +1,6 @@
+- [x] 1 References and assets: approved by the person, 2026-10-23
+- [ ] 2 Style guide and shot list (the person approves)
+- [ ] 3 Representative stills
+- [ ] 4 Rough cut and contact sheet
+- [ ] 5 Three defects repaired
+- [ ] 6 Audio, formats, and deliverables (the person approves)
