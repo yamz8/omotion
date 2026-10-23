@@ -1,5 +1,6 @@
 #include "cli.h"
 #include "measure.h"
+#include "reference.h"
 #include "review.h"
 #include "sound.h"
 #include "scene.h"
@@ -13,6 +14,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QRegularExpression>
+#include <QUrl>
 #include <QSaveFile>
 #include <cmath>
 #include <cstdio>
@@ -552,6 +555,82 @@ int review(const QStringList &arguments) {
     return 0;
 }
 
+int reference(const QStringList &arguments) {
+    Command command("reference", "Measure a reference film or images: the palette, the time between scene changes, "
+                                 "and how much moves. With --write, put the numbers in the style guide's REFERENCE "
+                                 "ANALYSIS, for the agent to complete.", false);
+    command.parser.addPositionalArgument("inputs", "A video, or one or more images", "<video or images...>");
+    command.parser.addOption({"write", "The style guide to write the measured lines into", "style-guide.md"});
+    command.json();
+    command.parser.process(arguments);
+    const QStringList inputs = command.parser.positionalArguments().mid(1);
+    Reference::Analysis analysis;
+    QString error;
+    if (!Reference::analyze(inputs, &analysis, &error))
+        return fail(error);
+    if (command.parser.isSet("write") && !Reference::writeInto(command.parser.value("write"), analysis, &error))
+        return fail(error);
+    if (command.parser.isSet("json")) {
+        QJsonArray palette, cuts;
+        for (const auto &swatch : analysis.palette)
+            palette << QJsonObject{{"color", swatch.color.name()}, {"share", std::round(swatch.share * 1000) / 1000}};
+        for (double cut : analysis.cuts)
+            cuts << cut;
+        print({{"palette", palette}, {"cuts", cuts}, {"shot_length", analysis.shotLength},
+               {"energy", analysis.energy}, {"duration", analysis.duration}, {"frames", analysis.frames}});
+        return 0;
+    }
+    for (const auto &line : Reference::guideLines(analysis))
+        print(stdout, line);
+    if (command.parser.isSet("write"))
+        print(stdout, "Wrote these into " + command.parser.value("write") +
+                          ". Complete the rest of REFERENCE ANALYSIS, and list what not to copy.");
+    return 0;
+}
+
+int capture(const QStringList &arguments) {
+    Command command("capture", "Capture a web page as a PNG with Chromium, for a film's assets: in a film's folder it "
+                               "goes in assets/screens/ and assets.md lists it with its address, for the person to "
+                               "approve. Pages behind a login need the person's own screenshot.", false);
+    command.parser.addPositionalArgument("url", "The page's address", "<url>");
+    command.parser.addOption({{"o", "output"}, "PNG file (default: assets/screens/<host>.png in a film's folder)", "path"});
+    command.parser.addOption({"size", "Window size, such as 1440x900 (default) or 390x844 for a phone", "WxH"});
+    command.json();
+    command.parser.process(arguments);
+    const QString url = command.argument(1);
+    if (url.isEmpty())
+        return fail("Name the page, such as https://example.com.");
+    QSize size(1440, 900);
+    if (command.parser.isSet("size")) {
+        const QStringList parts = command.parser.value("size").split('x');
+        size = QSize(parts.value(0).toInt(), parts.value(1).toInt());
+        if (size.width() < 200 || size.height() < 200 || size.width() > 7680 || size.height() > 7680)
+            return fail("Give the size as WxH, such as 1440x900.");
+    }
+    const QString root = Studio::rootOf(QDir::currentPath());
+    QString output = command.parser.value("output");
+    if (output.isEmpty()) {
+        QString host = QUrl(url).host().remove(QRegularExpression("^www\\.")).replace('.', '-');
+        if (host.isEmpty())
+            host = QFileInfo(QUrl(url).path()).completeBaseName();
+        const QString folder = root.isEmpty() ? QDir::currentPath() : QDir(root).filePath("assets/screens");
+        output = QDir(folder).filePath((host.isEmpty() ? "page" : host) + ".png");
+        for (int n = 2; QFileInfo::exists(output); ++n)
+            output = QDir(folder).filePath(QString("%1-%2.png").arg(host.isEmpty() ? "page" : host).arg(n));
+    }
+    // Listed only when it lands among the studio's assets.
+    const bool listed = !root.isEmpty() &&
+                        QFileInfo(output).absoluteFilePath().startsWith(QDir(root).filePath("assets") + "/");
+    QString error;
+    if (!Studio::capture(url, output, size, listed ? root : QString(), &error))
+        return fail(error);
+    if (command.parser.isSet("json"))
+        print({{"image", QFileInfo(output).absoluteFilePath()}, {"listed", listed}});
+    else
+        print(stdout, "Captured " + output + (listed ? ", listed in assets/assets.md for the person to approve" : ""));
+    return 0;
+}
+
 int beats(const QStringList &arguments) {
     Command command("beats", "Measure a track's tempo and beats, and write them beside it as <track>.beats.json, "
                              "where check finds them to hold the film's cuts to the music.", false);
@@ -650,12 +729,14 @@ QString cliSummary() {
            "  review <scene>            Write the next review: sheets, measures, scores, defects\n"
            "  render <scene>            Encode MP4s, one per format\n"
            "  beats <track>             Measure a track's tempo and beats for cutting to it\n"
+           "  reference <video|images>  Measure a reference's palette, pacing, and motion\n"
+           "  capture <url>             Capture a page into the film's assets\n"
            "  help format               How to write a scene\n"
            "  skill [install]           Print the agent skill, or write it into this film's folder";
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "reference", "capture", "skill", "help"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
@@ -668,6 +749,8 @@ int runCli(const QStringList &arguments) {
            : command == "review" ? review(arguments)
            : command == "render" ? render(arguments)
            : command == "beats"  ? beats(arguments)
+           : command == "reference" ? reference(arguments)
+           : command == "capture" ? capture(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
 }

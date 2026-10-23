@@ -17,6 +17,7 @@
 #include "backend.h"
 #include "filepicker.h"
 #include "measure.h"
+#include "reference.h"
 #include "review.h"
 #include "sound.h"
 #include "style.h"
@@ -478,6 +479,95 @@ private slots:
         // The band at depth 0 doesn't pan: it stays at the top of the frame.
         QCOMPARE(scene.frame(0).pixelColor(960, 20), QColor(Qt::white));
         QCOMPARE(closeUp.pixelColor(960, 20), QColor(Qt::white));
+    }
+
+    // The v0.6 done-when: three reference films, with colors and shot
+    // lengths known, measured within ΔE 5 and 20%; and a film made from what
+    // was measured lands within the same tolerances.
+    void referenceMeasuresPaletteAndPacing()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        // A film that cuts between backgrounds every shot seconds, with a
+        // square of the last color drifting across, or (graphics) a headline
+        // bar replaced on one ground.
+        auto film = [&](const QString &name, const QStringList &colors, double shot, bool graphics) {
+            QString shots;
+            for (int i = 0; i < colors.size() - 1; ++i)
+                shots += "\"" + colors[i] + "\",";
+            QByteArray source =
+                "import QtQuick\nimport Omotion\nRectangle {\n    property real t\n    property real duration: 9\n"
+                "    property int fps: 10\n";
+            if (graphics)
+                source += QString("    color: \"%1\"\n    readonly property int shot: Math.floor(t / %2)\n"
+                                  "    Rectangle { x: 200 + (parent.shot % 3) * 300; y: 300 + (parent.shot % 2) * 300;"
+                                  " width: 700; height: 220; color: \"%3\"; opacity: 1 - Motion.progress(parent.t % %2,"
+                                  " %2 - 0.2, %2) }\n}\n").arg(colors[0]).arg(shot).arg(colors[1]).toUtf8();
+            else
+                source += QString("    readonly property var grounds: [%1]\n"
+                                  "    color: grounds[Math.floor(t / %2) % grounds.length]\n"
+                                  "    Rectangle { x: 200 + parent.t * 120; y: 380; width: 360; height: 360; color: \"%3\" }\n}\n")
+                              .arg(shots).arg(shot).arg(colors.last()).toUtf8();
+            write(dir.filePath(name + ".qml"), source);
+            Scene scene;
+            QString error;
+            if (!scene.load(dir.filePath(name + ".qml"), "16:9", &error) ||
+                !scene.render(dir.filePath(name + ".mp4"), &error))
+                qWarning().noquote() << error;
+            Reference::Analysis analysis;
+            if (!Reference::analyze({dir.filePath(name + ".mp4")}, &analysis, &error))
+                qWarning().noquote() << error;
+            return analysis;
+        };
+        auto within = [](const Reference::Analysis &analysis, const QStringList &colors, double shot) {
+            for (const auto &color : colors) {
+                double nearest = 1e9;
+                for (const auto &swatch : analysis.palette)
+                    nearest = qMin(nearest, Reference::deltaE(swatch.color, QColor(color)));
+                if (nearest > 5) {
+                    qWarning().noquote() << color << "is" << nearest << "from the nearest measured color";
+                    return false;
+                }
+            }
+            if (std::abs(analysis.shotLength - shot) > shot * 0.2) {
+                qWarning().noquote() << "shot length" << analysis.shotLength << "against" << shot;
+                return false;
+            }
+            return true;
+        };
+        const QList<QPair<QStringList, QPair<double, bool>>> references{
+            {{"#1d3557", "#e63946", "#f1faee", "#a8dadc"}, {1.5, false}},
+            {{"#0b0b0e", "#ffd60a"}, {2.25, true}},
+            {{"#2a9d8f", "#264653", "#e9c46a"}, {3.0, false}},
+        };
+        for (int i = 0; i < references.size(); ++i) {
+            const auto &[colors, how] = references[i];
+            const Reference::Analysis measured = film(QString("ref%1").arg(i), colors, how.first, how.second);
+            QVERIFY2(within(measured, colors, how.first), qPrintable(QString("reference %1").arg(i)));
+            // A film made from the measured guide: its colors, its pacing.
+            QStringList guide;
+            for (const auto &swatch : measured.palette)
+                guide << swatch.color.name();
+            const Reference::Analysis made = film(QString("made%1").arg(i), guide, measured.shotLength, how.second);
+            QVERIFY2(within(made, colors, how.first), qPrintable(QString("made from reference %1").arg(i)));
+        }
+
+        // The measured lines go into the guide in place of the template's.
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        Reference::Analysis analysis;
+        analysis.palette = {{QColor("#112233"), 0.8}};
+        analysis.duration = 9;
+        analysis.shotLength = 1.5;
+        QVERIFY(Reference::writeInto(dir.filePath("film/style-guide.md"), analysis, &error));
+        QFile guide(dir.filePath("film/style-guide.md"));
+        QVERIFY(guide.open(QIODevice::ReadOnly));
+        const QString text = QString::fromUtf8(guide.readAll());
+        QVERIFY(text.contains("Palette (measured): #112233 80%"));
+        QVERIFY(text.contains("Pacing (measured): a scene change every 1.5 s"));
+        QVERIFY(!text.contains("Palette: actual colors"));
+        QVERIFY(text.contains("TOKENS"));
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

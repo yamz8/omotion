@@ -10,6 +10,7 @@ HEADERS += \
     engine.h \
     filepicker.h \
     measure.h \
+    reference.h \
     review.h \
     sound.h \
     style.h \
@@ -23,6 +24,7 @@ SOURCES += \
     engine.cpp \
     measure.cpp \
     render.cpp \
+    reference.cpp \
     review.cpp \
     sound.cpp \
     style.cpp \

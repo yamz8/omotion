@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -538,6 +539,29 @@ private slots:
         const Run times = run({"sheet", "s.qml", "--times", "0.5", "--json"}, dir.path());
         QCOMPARE(QJsonDocument::fromJson(times.out).object()["sheets"].toArray()[0].toObject()["fast_changes"]
                      .toArray().size(), 0);
+    }
+
+    void cliCapturesAPageIntoTheFilmsAssets() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        if (QStandardPaths::findExecutable("chromium").isEmpty())
+            QSKIP("Chromium is not installed");
+        QTemporaryDir dir;
+        QCOMPARE(run({"new", "film"}, dir.path()).code, 0);
+        QVERIFY(write(dir.filePath("page.html"),
+                      "<html><body style=\"margin:0;background:#e63946\"></body></html>"));
+        const QString url = QUrl::fromLocalFile(dir.filePath("page.html")).toString();
+        const Run capture = run({"capture", url, "--size", "640x480", "--json"}, dir.filePath("film"));
+        QCOMPARE(capture.code, 0);
+        const QImage page(dir.filePath("film/assets/screens/page.png"));
+        QCOMPARE(page.size(), QSize(640, 480));
+        QCOMPARE(page.pixelColor(320, 240), QColor("#e63946"));
+        QFile manifest(dir.filePath("film/assets/assets.md"));
+        QVERIFY(manifest.open(QIODevice::ReadOnly));
+        QVERIFY(manifest.readAll().contains("| screens/page.png | " + url.toUtf8()));
+        // A second capture of the same page never replaces the first.
+        QCOMPARE(run({"capture", url, "--size", "640x480"}, dir.filePath("film")).code, 0);
+        QVERIFY(QFileInfo(dir.filePath("film/assets/screens/page-2.png")).isFile());
     }
 
     void cliRendersTheInstagramFeedFormat() {

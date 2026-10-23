@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QPoint>
+#include <QSize>
 #include <QString>
 #include <QStringList>
 
@@ -92,6 +93,12 @@ QStringList listedAssetFiles(const QString &root);
 bool isListedAsset(const QString &root, const QString &relative);
 // Listed files that aren't in assets/, each as assets.md writes it.
 QStringList listedAssetsNotFound(const QString &root);
+
+// Captures a web page as a PNG with the installed Chromium, at size, and in
+// a studio lists it in assets.md with where it came from, for the person to
+// approve. A page behind a login can't be captured this way; the person
+// takes that screenshot.
+bool capture(const QString &url, const QString &output, const QSize &size, const QString &root, QString *error);
 
 // Assets that assets.md lists as missing.
 QStringList missingAssets(const QString &root);

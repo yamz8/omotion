@@ -2,7 +2,11 @@
 #include "scene.h"
 
 #include <QCryptographicHash>
+#include <QDate>
 #include <QDir>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -444,6 +448,58 @@ QStringList Studio::listedAssetsNotFound(const QString &root) {
             notFound << listed;
     }
     return notFound;
+}
+
+bool Studio::capture(const QString &url, const QString &output, const QSize &size, const QString &root,
+                     QString *error) {
+    QString browser;
+    for (const char *name : {"chromium", "google-chrome-stable", "google-chrome", "chromium-browser", "brave"})
+        if (browser.isEmpty())
+            browser = QStandardPaths::findExecutable(name);
+    if (browser.isEmpty()) {
+        *error = "Capturing a page needs Chromium; install it with: omarchy-pkg-add chromium";
+        return false;
+    }
+    if (!QDir().mkpath(QFileInfo(output).absolutePath())) {
+        *error = "Could not create " + QFileInfo(output).absolutePath();
+        return false;
+    }
+    // A profile of its own, so the capture never sees the person's logins or
+    // history, and is thrown away after.
+    QTemporaryDir profile;
+    const QString partial = QFileInfo(output).absoluteDir().filePath("." + QFileInfo(output).fileName() + ".part.png");
+    QProcess process;
+    process.start(browser, {"--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
+                            "--user-data-dir=" + profile.path(),
+                            QString("--window-size=%1,%2").arg(size.width()).arg(size.height()),
+                            "--virtual-time-budget=5000", "--screenshot=" + partial, url});
+    if (!process.waitForFinished(60000) || !QFileInfo(partial).isFile() || QFileInfo(partial).size() == 0) {
+        process.kill();
+        QFile::remove(partial);
+        *error = "Could not capture " + url + ": " + QString::fromUtf8(process.readAllStandardError()).trimmed().section('\n', -1);
+        return false;
+    }
+    QFile::remove(output);
+    if (!QFile::rename(partial, output)) {
+        *error = "Could not save " + output;
+        return false;
+    }
+    if (root.isEmpty())
+        return true;
+    // Listed with where it came from, for the person to approve at gate 1.
+    const QString manifest = QDir(root).filePath("assets/assets.md");
+    QFile file(manifest);
+    QByteArray text;
+    if (file.open(QIODevice::ReadOnly))
+        text = file.readAll();
+    file.close();
+    if (!text.isEmpty() && !text.endsWith('\n'))
+        text += '\n';
+    const QString relative = QDir(QDir(root).filePath("assets")).relativeFilePath(QFileInfo(output).absoluteFilePath());
+    text += QString("| Page %1 | %2 | %1, captured %3 at %4x%5 by omotion capture | captured; the person approves it |\n")
+                .arg(url, relative, QDate::currentDate().toString(Qt::ISODate))
+                .arg(size.width()).arg(size.height()).toUtf8();
+    return write(manifest, text, error);
 }
 
 QStringList Studio::missingAssets(const QString &root) {

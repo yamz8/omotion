@@ -280,11 +280,11 @@ judge it: its gates 1, 2, and 6 wait.
 
 From §2: "If you do not supply a visual grammar, the model supplies its own."
 
-- **`omotion reference <video or images>`** extracts frames and measures what
+- ✅ **`omotion reference <video or images>`** extracts frames and measures what
   can be measured: palette, pacing (time between scene changes), and motion
   energy. It writes the numbers into `style-guide.md` for the agent to
   complete, with the article's "do not copy" section.
-- **Asset capture** from a real product site into `assets/`, using a browser
+- ✅ **Asset capture** from a real product site into `assets/`, using a browser
   if one is installed, then listed for approval at gate 1. **(spike)**:
   driving a headless browser from omotion, and handling sites that need a login.
 - **Seekable footage**: a `Clip` item that shows a video file's frame at t,

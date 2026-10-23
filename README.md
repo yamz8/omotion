@@ -145,6 +145,8 @@ omotion review film/scene.qml                # reviews/NNN.md: measures, scores,
 omotion frame film/scene.qml --at 3.5        # one frame as PNG
 omotion render film/scene.qml                # renders/scene-16x9.mp4, scene-9x16.mp4
 omotion beats film/assets/track.wav          # the track's tempo and beats, to cut to
+omotion reference ref.mp4 --write film/style-guide.md  # a reference's palette and pacing
+omotion capture https://example.com          # a page's screenshot into the film's assets
 omotion open film/scene.qml                  # the window
 omotion skill install                        # update the film's agent skill (run in its folder)
 ```
