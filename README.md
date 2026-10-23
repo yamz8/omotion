@@ -125,6 +125,12 @@ Rectangle {
 | ? | Show shortcuts |
 | Q | Quit |
 
+## An example film
+
+`examples/launch/` is a whole studio: a 15-second launch film for omotion in
+four formats, with its brief, style guide, shot list, assets, review, and
+renders. Open it with `omotion open examples/launch/scene.qml`.
+
 ## Commands
 
 None of these need a display. Each takes `--json`, exits 0 or 1, and writes

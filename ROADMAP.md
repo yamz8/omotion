@@ -247,27 +247,34 @@ soft attacks and tempo changes, are still to test.
 From §3 and §5: motion that carries mass and intent, and objects that stay
 recognizably the same across states.
 
-- **Motion rules per class**, defined in the style guide (micro UI, panels,
+- ✅ **Motion rules per class**, defined in the style guide (micro UI, panels,
   camera, headlines, mascot) and used as `Motion.rule("panel", t, start)`.
   `check` warns about springs that ignore the rules.
-- **A `Camera`**: deterministic pan, zoom, and parallax over the scene, slow
+- ✅ **A `Camera`**: deterministic pan, zoom, and parallax over the scene, slow
   enough to keep the viewer oriented.
-- **States and continuity**: a state list (`SEARCH -> RESULT -> DETAIL`) with
+- ✅ **States and continuity**: a state list (`SEARCH -> RESULT -> DETAIL`) with
   `Motion.between(states, t)`, interpolating one object's size, color,
   content, and position across states.
-- **Style tokens**: palette and type from `style-guide.md` exposed as a `Style`
+- ✅ **Style tokens**: palette and type from `style-guide.md` exposed as a `Style`
   object, so a film can't drift from its own guide.
 - ✅ **4:5**, the Instagram feed's format (1080×1350), beside 16:9, 9:16, and 1:1;
   the first test agent asked for an Instagram film couldn't offer it. Moved
   ahead of the checkpoint after a second agent hit the same gap.
-- **First-class formats**: per-format timing (1:1 gets "tighter typography and
+- ✅ **First-class formats**: per-format timing (1:1 gets "tighter typography and
   shorter holds", §8), layout helpers, and a starter composed for all three.
-- **A global seed** (`render --seed`) for repeatable variations.
+- ✅ **A global seed** (`render --seed`) for repeatable variations.
 
 **Done when:** the article's five-beat example film (hook, problem, reveal,
 proof, close) is written using only rules, states, and tokens: `check` finds
 no spring outside a rule and no color or font outside the style guide. It
 passes every v0.3 check in all three formats.
+
+**Status:** built. `examples/launch/` is that film: hook, problem, reveal,
+proof, and close, 15 seconds in 16:9, 9:16, 1:1, and 4:5, using only the
+guide's tokens, `Motion.rule`, `Motion.between`, and `Camera`. `check`
+reports no errors and no warnings in all four formats; on the way, it caught
+the headline running into the card in 1:1 and 4:5. A person still has to
+judge it: its gates 1, 2, and 6 wait.
 
 ### v0.6: References and footage (Specification) · L
 

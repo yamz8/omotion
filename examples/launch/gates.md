@@ -1,0 +1,6 @@
+- [ ] 1 References and assets: an example; no person approved it
+- [ ] 2 Style guide and shot list: an example; no person approved it
+- [x] 3 Representative stills: reviews/001/ sheets (2026-10-23)
+- [x] 4 Rough cut and contact sheet: reviews/001/scene-*-sheet.png (2026-10-23)
+- [x] 5 Three defects repaired: in tall formats, the stack filled only the top third and the proof window was a strip; the three-line headline ran into the card in 1:1 and 4:5 (found by check); the camera's view ran past the screenshot's edge. Fixed before reviews/001.md (2026-10-23)
+- [ ] 6 Audio, formats, and deliverables: rendered to renders/, waiting for a person's approval

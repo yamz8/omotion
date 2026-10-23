@@ -291,11 +291,12 @@ QList<Problem> Measure::text(Scene &scene) {
             continue;
         QQuickItem *a = it.key().first;
         QQuickItem *b = it.key().second;
+        // Read both as they were when they met.
+        scene.seek(run.first / fps);
         const QString other = isText(b) ? "text " + quoted(b->property("text").toString())
                               : b->inherits("QQuickImage")
                                   ? "the image " + b->property("source").toUrl().fileName()
                                   : QString("a %1 x %2 rectangle").arg(qRound(b->width())).arg(qRound(b->height()));
-        scene.seek(run.first / fps);
         const QRectF area = a->mapRectToScene(a->boundingRect()) | b->mapRectToScene(QRectF(0, 0, b->width(), b->height()));
         problems << Problem{false,
                             QString("Text %1 runs into %2 from %3 to %4.")
