@@ -153,6 +153,15 @@ a bet on the answer.
 decision is written down with its reasons, and the milestones below are
 revised to match it.
 
+**So far** (`docs/checkpoint/films.md`, `docs/checkpoint/renderer.md`): films
+1 and 2 are scored. Neither agent struggled with QML; what they missed was
+judgment and process: text size at phone width and a blank first frame
+(film 1), and in film 2 a price inside a demo slide, an approved shot built
+differently without a word, a one-frame ghost at a cut, and gates logged all
+at once at the end. Each now has a rule in the skill or a check
+(`status`, the beat contract, the asset manifest), except the ghost frame,
+which waits for automatic transition strips in v0.3.
+
 ### v0.3: Evidence (Verification) · L
 
 Turns the article's §7 checklist and critique into tooling.
