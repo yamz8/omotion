@@ -457,8 +457,10 @@ QList<Problem> Measure::sync(Scene &scene) {
     if (!scene.audio().isEmpty() && file.open(QIODevice::ReadOnly)) {
         const QJsonObject grid = QJsonDocument::fromJson(file.readAll()).object();
         QList<double> music;
+        // The beats the trim keeps, where they play in the film.
         for (const auto &value : grid["beats"].toArray())
-            music << scene.filmTime(value.toDouble());
+            if (value.toDouble() >= scene.audioTrim())
+                music << scene.filmTime(value.toDouble());
         const double period = grid["tempo"].toDouble() > 0 ? 60.0 / grid["tempo"].toDouble() : 0;
         for (const auto &beat : scene.beats()) {
             if (beat.at <= 0 || music.isEmpty())

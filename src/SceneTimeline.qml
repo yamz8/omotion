@@ -10,6 +10,8 @@ Item {
     property real time: 0
     property real duration: 0
     property var beats: []
+    property var cues: []
+    property var waveform: [] // The track's loudness over the film, 0 to 1.
     property int current: -1
     property var notes: []
     property string selectedNote: ""
@@ -55,6 +57,43 @@ Item {
                     color: index === timeline.current ? "#f2f2f2" : "#9a9aa2"
                 }
             }
+        }
+    }
+
+    // The track along the bottom of the beats, so a cut can be seen against it.
+    Row {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 12
+        visible: timeline.waveform.length > 0
+        Repeater {
+            model: timeline.waveform
+            delegate: Rectangle {
+                required property real modelData
+                width: timeline.width / timeline.waveform.length
+                height: Math.max(1, modelData * 12)
+                anchors.bottom: parent.bottom
+                color: "#5a5a64"
+            }
+        }
+    }
+
+    // Cues as ticks along the top, named on hover.
+    Repeater {
+        model: timeline.cues
+        delegate: Rectangle {
+            required property var modelData
+            objectName: "cue"
+            x: timeline.xFor(modelData.at) - width / 2
+            y: 0
+            width: 3
+            height: 12
+            color: "#7fd1ff"
+            z: 1
+            HoverHandler { id: cueHover }
+            ToolTip.visible: cueHover.hovered
+            ToolTip.text: modelData.sound ? modelData.name + " · " + modelData.sound : modelData.name
         }
     }
 

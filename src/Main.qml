@@ -51,6 +51,14 @@ ApplicationWindow {
     readonly property var sceneFormats: ready && scene.formats && scene.formats.length
                                         ? Array.from(scene.formats).filter(f => backend.formatNames.indexOf(f) >= 0)
                                         : ["16:9"]
+    // The sound: the track, trimmed and delayed as the render does, and the
+    // cues' sounds, made as the render makes them.
+    readonly property string audio: ready && scene.audio ? String(scene.audio) : ""
+    readonly property real audioTrim: ready && scene.audioTrim > 0 ? scene.audioTrim : 0
+    readonly property real audioDelay: ready && scene.audioDelay > 0 ? scene.audioDelay : 0
+    readonly property var cues: ready && scene.cues ? validCues(scene.cues) : []
+    readonly property url cueTrack: cues.length > 0 ? backend.cueTrack(cues, duration) : ""
+    readonly property var waveform: audio !== "" ? backend.waveform(audio, audioTrim, audioDelay, duration, 240) : []
     readonly property real lastTime: duration > 0 ? Math.max(0, (Math.round(duration * fps) - 1) / fps) : 0
     readonly property int currentBeat: beatIndexAt(time)
     readonly property var sheetTimes: {
@@ -74,6 +82,58 @@ ApplicationWindow {
         return valid
     }
 
+    function validCues(list) {
+        const valid = []
+        for (let i = 0; i < list.length; ++i) {
+            const cue = list[i]
+            if (cue && typeof cue.at === "number" && cue.name && cue.at >= 0 && cue.at < scene.duration)
+                valid.push({ at: cue.at, name: String(cue.name), sound: cue.sound ? String(cue.sound) : "" })
+        }
+        return valid
+    }
+
+    // Where the track is at film time t, in milliseconds; -1 before it starts.
+    function trackPosition(t) {
+        return t < audioDelay ? -1 : Math.round((t - audioDelay + audioTrim) * 1000)
+    }
+
+    // Plays or stops the sound from where the film is.
+    function syncSound() {
+        if (player.source != "") {
+            const at = trackPosition(time)
+            if (playing && at >= 0) {
+                player.position = at
+                player.play()
+            } else {
+                player.pause()
+            }
+        }
+        if (cuePlayer.source != "") {
+            if (playing) {
+                cuePlayer.position = Math.round(time * 1000)
+                cuePlayer.play()
+            } else {
+                cuePlayer.pause()
+            }
+        }
+    }
+
+    // A moment of sound where the playhead lands, so a scrub can be heard.
+    function scrub() {
+        if (playing)
+            return
+        const at = trackPosition(time)
+        if (player.source != "" && at >= 0) {
+            player.position = at
+            player.play()
+        }
+        if (cuePlayer.source != "") {
+            cuePlayer.position = Math.round(time * 1000)
+            cuePlayer.play()
+        }
+        scrubStop.restart()
+    }
+
     function beatIndexAt(t) {
         let index = -1
         for (let i = 0; i < beats.length; ++i)
@@ -85,7 +145,9 @@ ApplicationWindow {
     function seek(t) {
         time = Math.max(0, Math.min(lastTime, t))
         if (playing)
-            player.position = time * 1000
+            syncSound()
+        else
+            scrub()
     }
 
     function step(frames) {
@@ -218,14 +280,7 @@ ApplicationWindow {
             time = lastTime
     }
 
-    onPlayingChanged: {
-        if (playing && player.source != "") {
-            player.position = time * 1000
-            player.play()
-        } else {
-            player.pause()
-        }
-    }
+    onPlayingChanged: syncSound()
 
     FrameAnimation {
         running: win.playing && win.ready
@@ -236,14 +291,37 @@ ApplicationWindow {
                 win.playing = false
             } else {
                 win.time = next
+                // A delayed track starts when the film reaches it.
+                if (player.source != "" && player.playbackState !== MediaPlayer.PlayingState
+                        && win.trackPosition(next) >= 0)
+                    win.syncSound()
             }
         }
     }
 
     MediaPlayer {
         id: player
-        source: win.ready && win.scene.audio ? backend.resolve(win.scene.audio) : ""
+        objectName: "trackPlayer"
+        source: win.audio !== "" ? backend.resolve(win.audio) : ""
         audioOutput: AudioOutput {}
+    }
+
+    MediaPlayer {
+        id: cuePlayer
+        objectName: "cuePlayer"
+        source: win.cueTrack
+        audioOutput: AudioOutput {}
+    }
+
+    Timer {
+        id: scrubStop
+        interval: 90
+        onTriggered: {
+            if (!win.playing) {
+                player.pause()
+                cuePlayer.pause()
+            }
+        }
     }
 
     // "?" is Shift+/ on most layouts, and arrives either way.
@@ -747,6 +825,8 @@ ApplicationWindow {
         time: win.time
         duration: win.duration
         beats: win.beats
+        cues: win.cues
+        waveform: win.waveform
         current: win.currentBeat
         notes: backend.notes
         selectedNote: win.selectedNote

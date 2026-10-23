@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QFileSystemWatcher>
+#include <QHash>
+#include <QTemporaryDir>
 #include <QObject>
 #include <QProcess>
 #include <QSize>
@@ -78,6 +80,12 @@ public:
     Q_INVOKABLE void trimCache();
     Q_INVOKABLE QSize formatSize(const QString &format) const;
     Q_INVOKABLE QUrl resolve(const QString &relative) const;
+    // The track's loudness over the film, count slices from 0 to 1, with its
+    // trim and delay applied, for drawing under the beats.
+    Q_INVOKABLE QVariantList waveform(const QString &track, double trim, double delay, double duration, int count);
+    // The cues' sounds as a WAV the window plays beside the track, made as
+    // render makes them; empty when no cue has a sound.
+    Q_INVOKABLE QUrl cueTrack(const QVariantList &cues, double duration);
     Q_INVOKABLE void exportVideo(const QStringList &formats);
     Q_INVOKABLE void cancelExport();
     Q_INVOKABLE void showOutputs();
@@ -146,4 +154,7 @@ private:
     QString m_message;
     bool m_messageIsError = false;
     QStringList m_outputs;
+
+    QHash<QString, QList<float>> m_tracks; // Decoded for waveforms, by path and modification time.
+    QTemporaryDir m_cueFolder;
 };

@@ -84,7 +84,8 @@ public:
     // starts.
     double audioTrim() const { return m_audioTrim; }
     double audioDelay() const { return m_audioDelay; }
-    // The film time at which the track plays the given second of itself.
+    // The film time at which the track plays the given second of itself, for
+    // a second the trim keeps.
     double filmTime(double trackTime) const { return trackTime - m_audioTrim + m_audioDelay; }
     QList<SceneCue> cues() const { return m_cues; }
 

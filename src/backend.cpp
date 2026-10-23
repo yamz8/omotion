@@ -2,6 +2,7 @@
 
 #include "filepicker.h"
 #include "scene.h"
+#include "sound.h"
 #include "studio.h"
 
 #include <QClipboard>
@@ -12,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -88,6 +90,57 @@ QUrl Backend::resolve(const QString &relative) const {
     if (QFileInfo(relative).isAbsolute())
         return QUrl::fromLocalFile(relative);
     return QUrl::fromLocalFile(QFileInfo(m_path).absoluteDir().filePath(relative));
+}
+
+QVariantList Backend::waveform(const QString &track, double trim, double delay, double duration, int count) {
+    const QString path = resolve(track).toLocalFile();
+    if (path.isEmpty() || !QFileInfo(path).isFile() || duration <= 0 || count <= 0)
+        return {};
+    // 8 kHz is plenty for the shape of a track.
+    constexpr int rate = 8000;
+    const QString key = path + "@" + QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    if (!m_tracks.contains(key)) {
+        QString error;
+        m_tracks.insert(key, Sound::decode(path, rate, &error));
+    }
+    const QList<float> &samples = m_tracks[key];
+    QList<float> peaks(count, 0.0f);
+    float loudest = 0;
+    for (int i = 0; i < count; ++i) {
+        // The slice of film, as seconds of the track.
+        const double from = i * duration / count - delay + trim, to = (i + 1) * duration / count - delay + trim;
+        const qsizetype first = qMax<qsizetype>(0, qsizetype(from * rate));
+        const qsizetype last = qMin<qsizetype>(samples.size(), qsizetype(to * rate));
+        for (qsizetype j = first; j < last; ++j)
+            peaks[i] = qMax(peaks[i], std::abs(samples[j]));
+        loudest = qMax(loudest, peaks[i]);
+    }
+    QVariantList result;
+    for (float peak : peaks)
+        result << (loudest > 0 ? peak / loudest : 0.0);
+    return result;
+}
+
+QUrl Backend::cueTrack(const QVariantList &cues, double duration) {
+    QList<Sound::Cue> sounds;
+    QByteArray signature = QByteArray::number(duration);
+    for (const auto &value : cues) {
+        const QVariantMap cue = value.toMap();
+        const QString sound = cue.value("sound").toString();
+        if (!Sound::names().contains(sound))
+            continue;
+        sounds << Sound::Cue{cue.value("at").toDouble(), sound};
+        signature += "|" + QByteArray::number(sounds.last().at) + sound.toUtf8();
+    }
+    if (sounds.isEmpty() || duration <= 0 || !m_cueFolder.isValid())
+        return {};
+    // Named by what's in it, so a changed cue is a new file the player loads.
+    const QString path = m_cueFolder.filePath(
+        QString::fromLatin1(QCryptographicHash::hash(signature, QCryptographicHash::Sha1).toHex().left(12)) + ".wav");
+    QString error;
+    if (!QFileInfo::exists(path) && !Sound::writeCues(sounds, duration, path, &error))
+        return {};
+    return QUrl::fromLocalFile(path);
 }
 
 bool Backend::load(const QString &pathOrUrl) {

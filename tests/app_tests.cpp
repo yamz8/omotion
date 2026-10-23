@@ -28,6 +28,7 @@
 #include "engine.h"
 #include "filepicker.h"
 #include "scene.h"
+#include "sound.h"
 #include "studio.h"
 #include "theme.h"
 #include "translator.h"
@@ -116,6 +117,17 @@ public:
         return nullptr;
     }
     QObject *object(const char *name) const { return window->findChild<QObject *>(name); }
+    // Whether any item of that name is on screen, where the window keeps
+    // more than one, such as a timeline for each transport.
+    bool anyShown(const char *name) const { return findShown(window->contentItem(), QString::fromLatin1(name)); }
+    static bool findShown(QQuickItem *from, const QString &name) {
+        if (from->objectName() == name && from->isVisible() && from->width() > 0)
+            return true;
+        for (QQuickItem *child : from->childItems())
+            if (findShown(child, name))
+                return true;
+        return false;
+    }
     bool shown(const char *name) const {
         QQuickItem *found = item(name);
         return found && found->isVisible() && found->width() > 0;
@@ -308,6 +320,48 @@ private slots:
     }
 
     // A scene's runtime errors reach the window, where its author is looking.
+    // The window plays what the render will: the track, trimmed and
+    // delayed, and the cues' sounds, which show on the timeline.
+    void windowPlaysTheTrackAndCuesAsTheRenderWill() {
+        App app;
+        const QString track = app.dir.filePath("track.wav");
+        QString error;
+        QVERIFY(Sound::writeCues({{0.5, "hit"}, {1.5, "hit"}}, 4, track, &error));
+        const QString scene = app.dir.filePath("s.qml");
+        QVERIFY(write(scene, QByteArray(tinyScene).replace(
+                                 "color: \"black\"\n",
+                                 "color: \"black\"\n    property string audio: \"track.wav\"\n"
+                                 "    property real audioTrim: 0.5\n    property real audioDelay: 0.25\n"
+                                 "    property var cues: [{ at: 0.5, name: \"pop\", sound: \"click\" }]\n")));
+        QVERIFY(app.open(scene, {1280, 820}));
+        QObject *window = app.window;
+        // The track's second 0.5 plays at 0.25 s of the film.
+        QVariant position;
+        QVERIFY(QMetaObject::invokeMethod(window, "trackPosition", Q_RETURN_ARG(QVariant, position),
+                                          Q_ARG(QVariant, 0.25)));
+        QCOMPARE(position.toDouble(), 500.0);
+        QVERIFY(QMetaObject::invokeMethod(window, "trackPosition", Q_RETURN_ARG(QVariant, position),
+                                          Q_ARG(QVariant, 0.0)));
+        QVERIFY(position.toDouble() < 0);
+
+        const QUrl cues = window->property("cueTrack").toUrl();
+        QVERIFY(QFileInfo(cues.toLocalFile()).size() > 44);
+        QCOMPARE(app.object("cuePlayer")->property("source").toUrl(), cues);
+        QCOMPARE(app.object("trackPlayer")->property("source").toUrl(), QUrl::fromLocalFile(track));
+        QVERIFY(app.anyShown("cue"));
+        // The hit at 0.5 s of the track, a quarter second into the film.
+        const QVariantList waveform = window->property("waveform").toList();
+        QCOMPARE(waveform.size(), 240);
+        QCOMPARE(waveform[int(0.25 / 1.0 * 240)].toDouble(), 1.0);
+        QCOMPARE(waveform[5].toDouble(), 0.0);
+
+        // Playing starts both, from where the film is.
+        app.key(Qt::Key_Space, Qt::NoModifier, " ");
+        QTRY_COMPARE(app.object("cuePlayer")->property("playbackState").toInt(), 1);
+        app.key(Qt::Key_Space, Qt::NoModifier, " ");
+        QTRY_VERIFY(app.object("cuePlayer")->property("playbackState").toInt() != 1);
+    }
+
     void sceneErrorsShowInTheWindow() {
         App app;
         const QString scene = app.dir.filePath("broken.qml");

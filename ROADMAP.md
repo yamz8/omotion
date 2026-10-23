@@ -217,21 +217,30 @@ an idle machine. Not measured: words inside pictures, and the price in film
 From §6: "If it has no shape without the picture, the sound design is
 probably not finished."
 
-- **Cues** declared in the scene (`{ at: 1.5, name: "click" }`) and shown on
+- ✅ **Cues** declared in the scene (`{ at: 1.5, name: "click" }`) and shown on
   the timeline beside the beats.
-- **`omotion beats track.wav`** measures a track's tempo and beats (onset
+- ✅ **`omotion beats track.wav`** measures a track's tempo and beats (onset
   detection on ffmpeg-decoded audio) and writes a beat grid the scene can cut
   against. **(spike)**: whether simple onset detection is accurate enough on
   real music without a dedicated library.
-- **A waveform on the timeline**, scrubbed audio, and an offset and trim for the track.
-- **Synthesized cues**: deterministic clicks and hits placed at cue times and
+- ✅ **A waveform on the timeline**, scrubbed audio, and an offset and trim for the track.
+- ✅ **Synthesized cues**: deterministic clicks and hits placed at cue times and
   mixed at render, for films without a licensed track.
-- **Sync check**: each cue paired with the visual event it belongs to (a beat,
+- ✅ **Sync check**: each cue paired with the visual event it belongs to (a beat,
   or a named moment), with drift reported in frames.
-- Loudness normalized on export.
+- ✅ Loudness normalized on export.
 
 **Done when:** a film's declared cues land within one frame of their visual
 events, verified by `check`, and audio playback in the window is covered by a test.
+
+**Status:** built. `check` reports a cue more than a frame from its beat or
+from the change on screen nearest it, and a cut more than a frame from the
+music's beat; the window plays the track, trimmed and delayed, with the
+cues' sounds, as the render mixes them, and a test plays it. The spike's
+answer so far: on a drum pattern at 97 BPM with off-beat ticks, energy-onset
+detection finds the tempo within a beat a minute and every kick within a
+frame. There's no music on this machine to try it on, so real tracks, with
+soft attacks and tempo changes, are still to test.
 
 ### v0.5: Craft (motion, continuity, style) · M–L
 
