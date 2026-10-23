@@ -91,6 +91,8 @@ and then hold. If everything overshoots, nothing feels precise.
   with strips of the film's fastest changes and any frame unlike its
   neighbors below the beats; `--times 1.2,1.25,1.3` shows those moments instead.
 - `omotion frame scene.qml --at 3.5 --format 9:16` renders one frame.
+- `omotion review scene.qml` writes the next `reviews/NNN.md`: sheets,
+  measures, scores, and the three largest defects with cropped evidence.
 - `omotion render scene.qml` writes `renders/<scene>-16x9.mp4` and one file per
   other format, encoded with ffmpeg (H.264, with AAC audio when `audio` is set).
 - `omotion open scene.qml` previews it, reloading whenever the file is saved.

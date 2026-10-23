@@ -188,7 +188,7 @@ Turns the article's §7 checklist and critique into tooling.
   being asked.
 - ✅ **`check --thorough`** asks for every frame in a shuffled order, not just
   sampled moments.
-- **`omotion review`** writes `reviews/NNN.md`: contact sheets, measured
+- ✅ **`omotion review`** writes `reviews/NNN.md`: contact sheets, measured
   results, and the article's critique format, with **the three largest
   defects, each with a timestamp, a cropped image as evidence, and a local
   fix**. It also scores hook, readability, continuity, motion, and sound sync,

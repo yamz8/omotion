@@ -16,6 +16,7 @@
 #include "backend.h"
 #include "filepicker.h"
 #include "measure.h"
+#include "review.h"
 #include "scene.h"
 #include "studio.h"
 #include "theme.h"
@@ -259,6 +260,43 @@ private slots:
         const QList<Problem> off = Measure::style(scene, QDir(root).filePath("style-guide.md"));
         QCOMPARE(off.size(), 1);
         QVERIFY(off[0].message.startsWith("Colors that style-guide.md's palette doesn't name: #ff0000 (beat \"One\")"));
+    }
+
+    void reviewWritesTheNextRoundWithItsEvidence()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString scene = dir.filePath("film/scene.qml");
+        write(scene, sceneSource("    Text { x: 300; y: 300; text: \"Small\"; font.pixelSize: 20; color: \"white\" }\n"));
+        QJsonObject result;
+        QVERIFY2(Review::write(scene, {"16:9", "9:16"}, &result, &error), qPrintable(error));
+        QCOMPARE(result["number"].toString(), QString("001"));
+        QVERIFY(result["sent_back"].toBool());
+        QCOMPARE(result["scores"].toObject()["readability"].toInt(), 3);
+        const QJsonObject defect = result["defects"].toArray()[0].toObject();
+        QVERIFY(defect["message"].toString().startsWith("Text at 20 px"));
+        QCOMPARE(defect["evidence"].toString(), QString("reviews/001/defect-1-16x9.png"));
+        // The crop holds the text, not the whole frame.
+        const QImage crop(dir.filePath("film/" + defect["evidence"].toString()));
+        QVERIFY(!crop.isNull() && crop.width() < 1920);
+        for (const auto &file : {"001.md", "001/scene-16x9-sheet.png", "001/scene-9x16-sheet.png", "001/poster-16x9.png",
+                                 "001/poster-9x16.png"})
+            QVERIFY2(QFileInfo(dir.filePath(QString("film/reviews/") + file)).isFile(), file);
+        QFile text(dir.filePath("film/reviews/001.md"));
+        QVERIFY(text.open(QIODevice::ReadOnly));
+        const QString markdown = QString::fromUtf8(text.readAll());
+        QVERIFY(markdown.contains("**Verdict:** Sent back"));
+        QVERIFY(markdown.contains("Local fix: ✎"));
+
+        // The next round never writes over the last.
+        write(scene, sceneSource().replace("{ at: 0, name: \"One\" }, { at: 1, name: \"Two\" }",
+                                           "{ at: 0, name: \"One\", purpose: \"a\", enter: \"b\", exit: \"c\" }, "
+                                           "{ at: 1, name: \"Two\", purpose: \"a\", enter: \"b\", exit: \"c\" }"));
+        QVERIFY(Review::write(scene, {"16:9"}, &result, &error));
+        QCOMPARE(result["number"].toString(), QString("002"));
+        QVERIFY(!result["sent_back"].toBool());
+        QVERIFY(QFileInfo(dir.filePath("film/reviews/001/defect-1-16x9.png")).isFile());
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

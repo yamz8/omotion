@@ -173,15 +173,20 @@ after each move, the viewer knows where to look.
 
 ## Gate 5: Repair the three largest defects
 
-The person's open notes come first. Then write `reviews/NNN.md` (001, 002,
-...): score hook, readability, continuity, motion, and sound sync from 1 to
-5, and list **the three largest defects**, each with a timestamp and format,
-the evidence that shows it (the sheet, strip, or still), and a local fix.
+The person's open notes come first. Then run `omotion review
+film/scene.qml --json`. It writes the next `reviews/NNN.md` with its
+evidence in `reviews/NNN/`: sheets with strips, everything `check` measures,
+scores as a floor, and the three largest measured defects with cropped
+frames. It sends the film back while `check` has errors. Complete each ✎:
+your own scores, where judgment is lower; **the three largest defects** you
+see, which may outrank the measured ones, each with a timestamp, format,
+evidence, and a local fix.
 
 Patch only those sections, run `check`, and render the affected moments again
-to show each fix. Put each round's new sheet in its own folder
-(`-o film/reviews/round2/`), so it never replaces the evidence it's fixing.
-Repeat gates 4 and 5 until no defect is worth fixing. No new
+to show each fix, into a folder of the round's own (`-o
+film/reviews/round2/`), so it never replaces the evidence it's fixing. The
+next `review` starts the next round. Repeat gates 4 and 5 until no defect is
+worth fixing. No new
 evidence, no new attempt: never re-render to "see if it's better" without a
 defect to fix.
 

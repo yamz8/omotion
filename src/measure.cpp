@@ -489,3 +489,24 @@ QList<double> Measure::fastestChanges(const QList<double> &changes, int fps, int
     std::sort(times.begin(), times.end());
     return times;
 }
+
+QList<Measure::Moment> Measure::moments(const QString &scenePath, const QString &format, int count, QString *error) {
+    Scene small;
+    if (!small.load(scenePath, format, error, 0.125))
+        return {};
+    error->clear();
+    QList<double> flashes;
+    const QList<double> change = changes(small, &flashes);
+    QList<double> strays;
+    for (double t : fastestChanges(flashes, small.fps(), 2))
+        if (flashes[int(std::lround(t * small.fps()))] > 0.004)
+            strays << t;
+    QList<Moment> found;
+    for (double t : fastestChanges(change, small.fps(), count))
+        if (std::none_of(strays.cbegin(), strays.cend(), [&](double s) { return std::abs(s - t) < 0.2; }))
+            found << Moment{t, false};
+    for (double t : strays)
+        found << Moment{t, true};
+    std::sort(found.begin(), found.end(), [](const Moment &a, const Moment &b) { return a.at < b.at; });
+    return found;
+}

@@ -40,4 +40,14 @@ QList<double> changes(Scene &small, QList<double> *flashes = nullptr);
 // The fastest changes in a film, as times where a strip should look: at most
 // count of them, each the peak of its own moment, at least gap seconds apart.
 QList<double> fastestChanges(const QList<double> &changes, int fps, int count = 3, double gap = 0.5);
+
+// The moments in a film worth a strip: its count fastest changes, and up to
+// two frames unlike both their neighbors, which take the place of the
+// changes they cause as they come and go. Found by rendering every frame of
+// the scene at an eighth of its size.
+struct Moment {
+    double at = 0;
+    bool stray = false;
+};
+QList<Moment> moments(const QString &scenePath, const QString &format, int count, QString *error);
 }

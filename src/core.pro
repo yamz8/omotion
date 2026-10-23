@@ -10,6 +10,7 @@ HEADERS += \
     engine.h \
     filepicker.h \
     measure.h \
+    review.h \
     scene.h \
     studio.h \
     theme.h \
@@ -19,6 +20,7 @@ SOURCES += \
     backend.cpp \
     engine.cpp \
     measure.cpp \
+    review.cpp \
     scene.cpp \
     studio.cpp \
     theme.cpp \

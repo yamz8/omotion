@@ -1,5 +1,6 @@
 #include "cli.h"
 #include "measure.h"
+#include "review.h"
 #include "scene.h"
 #include "studio.h"
 
@@ -318,27 +319,12 @@ int sheet(const QStringList &arguments) {
         QJsonArray stripList;
         const int stripCount = command.parser.isSet("strips") ? command.parser.value("strips").toInt() : 3;
         if (!command.parser.isSet("times") && stripCount > 0) {
-            Scene small;
-            if (!small.load(command.scene(), name, &error, 0.125))
+            const QList<Measure::Moment> moments = Measure::moments(command.scene(), name, stripCount, &error);
+            if (!error.isEmpty())
                 return fail(error);
-            QList<double> flashes;
-            const QList<double> changes = Measure::changes(small, &flashes);
-            // A frame unlike both its neighbors is worth a strip even when it
-            // isn't among the largest changes, which cuts usually are.
-            // A stray frame also makes the largest changes, as it comes and
-            // goes, so it takes their place.
-            QList<double> strays;
-            for (double t : Measure::fastestChanges(flashes, scene.fps(), 2))
-                if (flashes[int(std::lround(t * scene.fps()))] > 0.004)
-                    strays << t;
-            QList<QPair<double, QString>> moments;
-            for (double t : Measure::fastestChanges(changes, scene.fps(), stripCount))
-                if (std::none_of(strays.cbegin(), strays.cend(), [&](double f) { return std::abs(f - t) < 0.2; }))
-                    moments << qMakePair(t, QString("Fast change"));
-            for (double t : strays)
-                moments << qMakePair(t, QString("A frame unlike its neighbors"));
-            std::sort(moments.begin(), moments.end());
-            for (const auto &[t, kind] : moments) {
+            for (const auto &moment : moments) {
+                const double t = moment.at;
+                const QString kind = moment.stray ? "A frame unlike its neighbors" : "Fast change";
                 const int at = int(std::lround(t * scene.fps()));
                 Scene::Strip strip;
                 for (int f = qMax(0, at - 2); f <= qMin(scene.frameCount() - 1, at + 2); ++f)
@@ -350,7 +336,7 @@ int sheet(const QStringList &arguments) {
                 QJsonArray frames;
                 for (double s : strip.times)
                     frames << s;
-                stripList << QJsonObject{{"at", t}, {"frame", at}, {"kind", kind == "Fast change" ? "change" : "flash"},
+                stripList << QJsonObject{{"at", t}, {"frame", at}, {"kind", moment.stray ? "flash" : "change"},
                                          {"times", frames}};
             }
         }
@@ -507,6 +493,33 @@ int status(const QStringList &arguments) {
     return problems.isEmpty() ? 0 : 1;
 }
 
+int review(const QStringList &arguments) {
+    Command command("review", "Write the next review, reviews/NNN.md: contact sheets with strips of the fastest "
+                              "changes, everything check measures, scores, and the three largest defects with "
+                              "cropped evidence, leaving the judgments to complete.");
+    command.format("all of the scene's formats");
+    command.json();
+    command.parser.process(arguments);
+    QStringList formats;
+    if (!command.formats(true, &formats))
+        return 1;
+    QJsonObject result;
+    QString error;
+    if (!Review::write(command.scene(), formats, &result, &error))
+        return fail(error);
+    if (command.parser.isSet("json")) {
+        print(result);
+        return 0;
+    }
+    print(stdout, "Wrote " + result["review"].toString());
+    print(stdout, result["verdict"].toString());
+    for (const auto &defect : result["defects"].toArray())
+        print(stdout, QString("  %1 at %2: %3").arg(defect.toObject()["format"].toString(),
+                                                     seconds(defect.toObject()["at"].toDouble()),
+                                                     defect.toObject()["message"].toString()));
+    return 0;
+}
+
 // The skill lives in each film's folder, so it always matches the omotion that
 // wrote it and travels with the film; nothing is installed in the home folder.
 int skill(const QStringList &arguments) {
@@ -559,13 +572,14 @@ QString cliSummary() {
            "  check <scene>             Report every problem, in every format\n"
            "  frame <scene> --at <s>    Render one frame to PNG\n"
            "  sheet <scene>             Render a contact sheet of the beats to PNG\n"
+           "  review <scene>            Write the next review: sheets, measures, scores, defects\n"
            "  render <scene>            Encode MP4s, one per format\n"
            "  help format               How to write a scene\n"
            "  skill [install]           Print the agent skill, or write it into this film's folder";
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "status", "check", "frame", "sheet", "render", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "skill", "help"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
@@ -575,6 +589,7 @@ int runCli(const QStringList &arguments) {
            : command == "check"  ? check(arguments)
            : command == "frame"  ? frame(arguments)
            : command == "sheet"  ? sheet(arguments)
+           : command == "review" ? review(arguments)
            : command == "render" ? render(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
