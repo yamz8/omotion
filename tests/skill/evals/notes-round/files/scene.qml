@@ -10,9 +10,12 @@ Rectangle {
     property string format: "16:9"
     property var formats: ["16:9"]
     property var beats: [
-        { at: 0.0, name: "Hook" },
-        { at: 3.0, name: "Detail" },
-        { at: 5.5, name: "Close" }
+        { at: 0.0, name: "Hook", purpose: "the news, first",
+          enter: "empty paper", exit: "the claim is on screen" },
+        { at: 3.0, name: "Detail", purpose: "the two facts a viewer needs",
+          enter: "the claim clears", exit: "where it syncs, and that it's free" },
+        { at: 5.5, name: "Close", purpose: "what to do next",
+          enter: "the detail clears", exit: "the end card, held as the poster" }
     ]
     readonly property real unit: Math.min(width, height) / 1080
     width: 1920

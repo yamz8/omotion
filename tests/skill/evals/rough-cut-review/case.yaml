@@ -4,7 +4,8 @@ expected_outcome: |
   The agent renders the rough cut and contact sheet, measures it, and writes reviews/001.md.
   It catches the planted defects (a badge on screen too briefly, a caption too small for a
   phone, a screenshot that doesn't fill the right half as the approved shot list says, and a
-  price inside the screenshot that the brief doesn't make), fixes or raises each, logs its
-  steps in activity.md as it goes, and stops short of gate 6.
+  price inside the screenshot that the brief doesn't make), fixes or raises each, renders the
+  proof of each round into its own folder without overwriting earlier evidence, logs its steps
+  in activity.md as it goes, and stops short of gate 6.
 context:
   scaffold_script: place-files.sh
