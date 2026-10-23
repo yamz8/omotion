@@ -95,4 +95,7 @@ and then hold. If everything overshoots, nothing feels precise.
   measures, scores, and the three largest defects with cropped evidence.
 - `omotion render scene.qml` writes `renders/<scene>-16x9.mp4` and one file per
   other format, encoded with ffmpeg (H.264, with AAC audio when `audio` is set).
+  Each beat is encoded on its own and kept in `renders/.cache`, so after a
+  patch only the beats whose frames changed are encoded again (`--fresh`
+  encodes them all).
 - `omotion open scene.qml` previews it, reloading whenever the file is saved.

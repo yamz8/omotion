@@ -193,7 +193,7 @@ Turns the article's §7 checklist and critique into tooling.
   defects, each with a timestamp, a cropped image as evidence, and a local
   fix**. It also scores hook, readability, continuity, motion, and sound sync,
   then accepts or sends back.
-- **Partial re-render.** Cache frames by a hash of the scene and its inputs,
+- ✅ **Partial re-render.** Cache frames by a hash of the scene and its inputs,
   and re-render only the ranges a patch changed, as §7 asks ("render the
   affected frames again").
 

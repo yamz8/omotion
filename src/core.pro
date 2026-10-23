@@ -20,6 +20,7 @@ SOURCES += \
     backend.cpp \
     engine.cpp \
     measure.cpp \
+    render.cpp \
     review.cpp \
     scene.cpp \
     studio.cpp \

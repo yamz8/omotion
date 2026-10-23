@@ -97,11 +97,21 @@ public:
 
     // Encodes every frame through ffmpeg into output, written beside it first
     // and renamed into place, so a failed render never leaves a broken file.
+    // Each beat is encoded on its own and kept in renders/.cache, so a render
+    // after a patch encodes again only the beats whose frames changed; fresh
+    // encodes every beat.
     bool render(const QString &output, QString *error,
-                const std::function<void(int frame, int frames)> &progress = {});
+                const std::function<void(int frame, int frames)> &progress = {}, bool fresh = false);
+    // Frames the last render took from the cache.
+    int reusedFrames() const { return m_reusedFrames; }
+    // The state of every visible item at t, hashed: frames with the same key
+    // look the same. Empty when something on screen paints in a way its
+    // properties don't show, such as a Canvas.
+    QByteArray frameKey(double t);
 
     static QString defaultOutput(const QString &scenePath, const QString &format);
     static QString partialPath(const QString &output);
+    QString cachePath(const QString &output) const;
 
 private:
     bool readDeclarations(QString *error);
@@ -112,6 +122,7 @@ private:
     std::unique_ptr<QQuickWindow> m_window;
     QQuickItem *m_root = nullptr;
     double m_scale = 1;
+    int m_reusedFrames = 0;
     double m_duration = 0;
     int m_fps = 30;
     QList<Beat> m_beats;

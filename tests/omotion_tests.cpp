@@ -339,6 +339,52 @@ private slots:
         QCOMPARE(stream["nb_read_frames"].toString(), QString("20"));
     }
 
+    // A patch to one beat encodes that beat again and keeps the rest.
+    void renderEncodesOnlyTheBeatsThatChanged()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        // Beats at 0 and 1 s, ten frames each; the caption shows only in the second.
+        auto source = [](const QByteArray &caption) {
+            return sceneSource("    Text { x: 300; y: 300; font.pixelSize: 60; color: \"white\"; text: \"" + caption +
+                               "\"; visible: parent.t >= 1 }\n    property var captions: [\"" + caption + "\"]\n");
+        };
+        write(dir.filePath("scene.qml"), source("First"));
+        const QString output = dir.filePath("renders/scene-16x9.mp4");
+        auto render = [&](bool fresh = false) {
+            Scene scene;
+            QString error;
+            if (!scene.load(dir.filePath("scene.qml"), "16:9", &error) || !scene.render(output, &error, {}, fresh)) {
+                qWarning().noquote() << error;
+                return -1;
+            }
+            return scene.reusedFrames();
+        };
+        QCOMPARE(render(), 0);
+        QCOMPARE(render(), 20);
+        write(dir.filePath("scene.qml"), source("Second"));
+        QCOMPARE(render(), 10);
+        QCOMPARE(render(true), 0);
+
+        // A file the scene loads may change without its name changing.
+        write(dir.filePath("scene.qml"), source("Second") + "\n");
+        QCOMPARE(render(), 20);
+        write(dir.filePath("logo.svg"), "<svg/>");
+        QCOMPARE(render(), 0);
+
+        // What paints by itself is encoded every time.
+        write(dir.filePath("scene.qml"), sceneSource("    AnimatedImage { source: \"logo.gif\"; playing: false }\n"));
+        QCOMPARE(render(), 0);
+        QCOMPARE(render(), 0);
+
+        QProcess probe;
+        probe.start("ffprobe", {"-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                                "stream=nb_read_frames", "-of", "csv=p=0", output});
+        QVERIFY(probe.waitForFinished());
+        QCOMPARE(probe.readAllStandardOutput().trimmed(), QByteArray("20"));
+    }
+
     void backendReloadsWhenTheSceneIsReplaced()
     {
         QTemporaryDir dir;

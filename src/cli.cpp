@@ -371,6 +371,7 @@ int render(const QStringList &arguments) {
     command.parser.addOption({{"o", "output"}, "MP4 file (with the format added when there are several), or a folder "
                                                "(default: renders/<scene>-<format>.mp4 beside the scene)", "path"});
     command.parser.addOption({"progress", "Print a JSON line per frame"});
+    command.parser.addOption({"fresh", "Encode every beat again, rather than only the beats whose frames changed"});
     command.format("all of the scene's formats");
     command.json();
     command.parser.process(arguments);
@@ -397,12 +398,16 @@ int render(const QStringList &arguments) {
             if (progress)
                 print({{"format", format}, {"index", i}, {"count", count}, {"frame", frame}, {"frames", frames}}, true);
         };
-        if (!scene.render(target, &error, report))
+        if (!scene.render(target, &error, report, command.parser.isSet("fresh")))
             return fail(error);
         outputs << QJsonObject{{"format", format}, {"video", QFileInfo(target).absoluteFilePath()},
-                               {"frames", scene.frameCount()}, {"duration", scene.frameCount() / double(scene.fps())}};
+                               {"frames", scene.frameCount()}, {"duration", scene.frameCount() / double(scene.fps())},
+                               {"reused_frames", scene.reusedFrames()}};
         if (!command.parser.isSet("json") && !progress)
-            print(stdout, "Rendered " + target);
+            print(stdout, scene.reusedFrames() == 0
+                              ? "Rendered " + target
+                              : QString("Rendered %1, encoding %2 of %3 frames again")
+                                    .arg(target).arg(scene.frameCount() - scene.reusedFrames()).arg(scene.frameCount()));
     }
     if (command.parser.isSet("json") || progress)
         print({{"outputs", outputs}}, progress);
