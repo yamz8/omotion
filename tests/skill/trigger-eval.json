@@ -1,0 +1,22 @@
+[
+  {"query": "make me a 15 second launch video for our new habit tracker app, we post on tiktok and instagram mostly", "should_trigger": true},
+  {"query": "the logo animation at the end of scene.qml feels floaty, can you make it land harder around 12s", "should_trigger": true},
+  {"query": "check my notes", "should_trigger": true},
+  {"query": "render the film in 9:16 too, my boss wants a reels version by friday", "should_trigger": true},
+  {"query": "i dropped a screenshot of our dashboard in assets/screens, can you build a ui walkthrough showing how someone sets up a report? three steps max", "should_trigger": true},
+  {"query": "can you do a short animated chart for linkedin showing our churn went from 9% to 4% over 2025? numbers are in brief.md", "should_trigger": true},
+  {"query": "kinetic typography piece for the conference opener, just the words 'build in public' hitting on the beat of track.wav", "should_trigger": true},
+  {"query": "whats left before this film is done? which gate are we on", "should_trigger": true},
+  {"query": "the text at 4.2s is unreadable on my phone, fix it and show me a new contact sheet", "should_trigger": true},
+  {"query": "here's a reference clip from a launch I liked (ref.mp4), make ours feel like that but for our CLI tool", "should_trigger": true},
+  {"query": "trim the first 3 seconds off ~/Videos/demo-recording.mp4 and cut it down to under a minute", "should_trigger": false},
+  {"query": "turn my talk notes in talk.md into slides I can present tomorrow with hype", "should_trigger": false},
+  {"query": "convert all the .mov files in ~/Videos/raw to mp4 with ffmpeg, keep the audio", "should_trigger": false},
+  {"query": "the omotion window's timeline labels overlap when the window is tiled; fix Main.qml and SceneTimeline.qml", "should_trigger": false},
+  {"query": "record my screen while I demo the feature and save it as a gif", "should_trigger": false},
+  {"query": "write the launch blog post for our sourdough subscription, about 600 words, friendly tone", "should_trigger": false},
+  {"query": "set up a remotion project in ~/Work/promo with react and typescript so our frontend team can make videos", "should_trigger": false},
+  {"query": "design a youtube thumbnail for my video about rust async, 1280x720, bold text", "should_trigger": false},
+  {"query": "add a fade animation when the settings dialog opens in my qt app's Settings.qml", "should_trigger": false},
+  {"query": "what's the best bitrate for uploading 1080p video to x without it getting crushed", "should_trigger": false}
+]
