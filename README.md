@@ -138,6 +138,7 @@ errors to stderr.
 
 ```sh
 omotion new film                             # start a film's studio
+omotion new film --template launch           # ...from a launch, walkthrough, or data film
 omotion status film                          # the gate it's at, and what each gate lacks
 omotion check film/scene.qml                 # every problem, in every format
 omotion sheet film/scene.qml --format all    # contact sheets as PNG

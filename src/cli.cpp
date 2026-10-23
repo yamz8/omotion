@@ -133,6 +133,7 @@ int create(const QStringList &arguments) {
     Command command("new", "Start a film: a folder with the brief, style guide, shot list, assets, gates, a "
                            "starter scene, and the agent skill. Name a .qml file instead for a lone scene.", false);
     command.parser.addPositionalArgument("folder", "New folder for the film, or a .qml file", "<folder>");
+    command.parser.addOption({"template", "Start from a film's structure: " + Studio::templates().join(", "), "name"});
     command.json();
     command.parser.process(arguments);
     const QString path = command.argument(1);
@@ -159,7 +160,7 @@ int create(const QStringList &arguments) {
 
     QString error;
     QStringList created;
-    if (!Studio::create(path, &error, &created))
+    if (!Studio::create(path, &error, &created, command.parser.value("template")))
         return fail(error);
     const QString root = QFileInfo(path).absoluteFilePath();
     if (command.parser.isSet("json")) {

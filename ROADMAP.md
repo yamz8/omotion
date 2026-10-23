@@ -315,7 +315,7 @@ asked for out of order in under 2 s, decoding included.
   cancellation in the window and the CLI.
 - ✅ **Reproducibility**: fonts and assets bundled with the project, so a film
   renders identically on another machine.
-- **Studio templates** (product launch, UI walkthrough, data story) so "the next
+- ✅ **Studio templates** (product launch, UI walkthrough, data story) so "the next
   video starts with a real base": swap the brief and assets, keep the render
   contract and checklist.
 - **Release**: tagged releases, the `omacom/omarchy-pkgs` package, all 50 Omarchy

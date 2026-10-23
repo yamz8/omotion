@@ -27,7 +27,8 @@ skill came with it. Keep every decision in its files, never only in the chat,
 so a later session can pick up where this one stopped. The files start as
 templates: fill them in and keep their headings. If you were asked for a film
 and there's no studio yet, run `omotion new <folder>`, named for the film, and
-work in it. (`film/` below stands for the folder's path.)
+work in it; `--template launch`, `walkthrough`, or `data` starts it from that
+film's structure, every placeholder in [brackets] to fill from the brief. (`film/` below stands for the folder's path.)
 
 ```
 film/

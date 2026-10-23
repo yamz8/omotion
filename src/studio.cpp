@@ -49,7 +49,13 @@ QByteArray Studio::stampedSkill() {
     return text + QString("\n<!-- omotion %1 skill %2 -->\n").arg(omotionVersion, skillHash(text)).toUtf8();
 }
 
-bool Studio::create(const QString &folder, QString *error, QStringList *created) {
+QStringList Studio::templates() { return {"launch", "walkthrough", "data"}; }
+
+bool Studio::create(const QString &folder, QString *error, QStringList *created, const QString &kind) {
+    if (!kind.isEmpty() && !templates().contains(kind)) {
+        *error = QString("There's no %1 template; use %2.").arg(kind, templates().join(", "));
+        return false;
+    }
     const QDir directory(folder);
     if (directory.exists() && !directory.isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden)) {
         *error = folder + " already has files in it; pick a new folder for the film.";
@@ -72,10 +78,20 @@ bool Studio::create(const QString &folder, QString *error, QStringList *created)
     };
     QStringList written;
     for (const auto &[name, source] : files) {
-        if (!write(QDir(root).filePath(name), resource(source), error))
+        // A template's own version of the file, where it has one.
+        const QString own = ":/templates/" + kind + "/" + QFileInfo(name).fileName();
+        const bool templated = !kind.isEmpty() && QFileInfo::exists(own);
+        if (!write(QDir(root).filePath(name), resource(templated ? own : source), error))
             return false;
         written << name;
     }
+    if (!kind.isEmpty())
+        for (const auto &font : {"AdwaitaSans-Regular.ttf", "LiberationMono-Regular.ttf"}) {
+            if (!write(QDir(root).filePath(QString("assets/") + font), resource(QString(":/templates/fonts/") + font),
+                       error))
+                return false;
+            written << QString("assets/") + font;
+        }
     for (const auto &name : {"reviews", "renders"}) {
         if (!QDir(root).mkpath(name)) {
             *error = "Could not create " + QDir(root).filePath(name);
@@ -276,8 +292,12 @@ QString unfilled(const QString &root, const QString &name, const QString &templa
     QFile file(QDir(root).filePath(name));
     if (!file.open(QIODevice::ReadOnly))
         return name + " is missing";
-    if (file.readAll() == resource(templatePath))
+    const QByteArray text = file.readAll();
+    if (text == resource(templatePath))
         return name + " is still the template";
+    for (const auto &kind : Studio::templates())
+        if (text == resource(":/templates/" + kind + "/" + QFileInfo(name).fileName()))
+            return name + " is still the template";
     return {};
 }
 
@@ -389,7 +409,7 @@ QStringList Studio::missingEvidence(const QString &root, int gate, const QString
     return missing;
 }
 
-QStringList Studio::listedAssetFiles(const QString &root) {
+QStringList Studio::listedAssetFiles(const QString &root, bool withMissing) {
     QStringList files;
     QFile file(QDir(root).filePath("assets/assets.md"));
     if (!file.open(QIODevice::ReadOnly))
@@ -409,7 +429,8 @@ QStringList Studio::listedAssetFiles(const QString &root) {
             continue;
         }
         const QString status = cells.mid(3).join('|');
-        if (status.contains("missing", Qt::CaseInsensitive) || status.contains("not needed", Qt::CaseInsensitive))
+        if (status.contains("not needed", Qt::CaseInsensitive) ||
+            (!withMissing && status.contains("missing", Qt::CaseInsensitive)))
             continue;
         for (QString token : cells[2].split(QRegularExpression(R"([,+\s]+)"), Qt::SkipEmptyParts)) {
             token.remove('`');
@@ -423,7 +444,7 @@ QStringList Studio::listedAssetFiles(const QString &root) {
 }
 
 bool Studio::isListedAsset(const QString &root, const QString &relative) {
-    for (const auto &listed : listedAssetFiles(root)) {
+    for (const auto &listed : listedAssetFiles(root, true)) {
         if (listed.endsWith('/') ? relative.startsWith(listed)
                                  : QRegularExpression(QRegularExpression::wildcardToRegularExpression(
                                                           listed))

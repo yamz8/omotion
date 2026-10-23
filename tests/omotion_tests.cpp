@@ -829,6 +829,33 @@ private slots:
         QCOMPARE(scene.check().size(), 0);
     }
 
+    // Each template is a film's structure that already passes check, waiting
+    // only for the person's facts and assets.
+    void templatesStartAFilmThatChecks()
+    {
+        for (const auto &kind : Studio::templates()) {
+            QTemporaryDir dir;
+            QString error;
+            QStringList created;
+            QVERIFY2(Studio::create(dir.filePath("film"), &error, &created, kind), qPrintable(error));
+            const QString root = dir.filePath("film");
+            QVERIFY(created.contains("assets/AdwaitaSans-Regular.ttf"));
+            QCOMPARE(Studio::missingEvidence(root, 2, {}),
+                     QStringList({"style-guide.md is still the template", "shotlist.md is still the template"}));
+            for (const auto &format : {"16:9", "9:16"}) {
+                Scene scene;
+                QVERIFY2(scene.load(QDir(root).filePath("scene.qml"), format, &error), qPrintable(error));
+                for (const auto &problem : scene.check())
+                    QVERIFY2(!problem.error && (problem.message.contains("Cannot open") || problem.message.contains("skill")),
+                             qPrintable(kind + ": " + problem.message));
+            }
+        }
+        QString error;
+        QTemporaryDir dir;
+        QVERIFY(!Studio::create(dir.filePath("film"), &error, nullptr, "musical"));
+        QVERIFY(error.contains("use launch, walkthrough, data"));
+    }
+
     void skillInAStudioStaysCurrent()
     {
         QTemporaryDir dir;

@@ -15,7 +15,11 @@ inline constexpr char omotionVersion[] = "0.1.0";
 namespace Studio {
 // Creates the studio in an empty or new folder; never writes into a folder
 // that already has files.
-bool create(const QString &folder, QString *error, QStringList *created = nullptr);
+// With a template ("launch", "walkthrough", "data"), the brief, style guide,
+// shot list, and scene give the film that structure, with placeholders for
+// everything the person supplies, and fonts the film can carry with it.
+bool create(const QString &folder, QString *error, QStringList *created = nullptr, const QString &kind = {});
+QStringList templates();
 
 // The studio a path is in: the nearest folder at or above it holding gates.md.
 QString rootOf(const QString &path);
@@ -88,9 +92,10 @@ QStringList missingEvidence(const QString &root, int gate, const QStringList &fo
 
 // The files assets.md lists for the assets the studio has, relative to
 // assets/ ("screens/editor.png"); a name may hold * or ?, and one ending in /
-// is a folder.
-QStringList listedAssetFiles(const QString &root);
-// Whether a path relative to assets/ is one assets.md lists.
+// is a folder. withMissing includes the ones marked missing, which are listed
+// but not there yet.
+QStringList listedAssetFiles(const QString &root, bool withMissing = false);
+// Whether a path relative to assets/ is one assets.md lists, there or missing.
 bool isListedAsset(const QString &root, const QString &relative);
 // Listed files that aren't in assets/, each as assets.md writes it.
 QStringList listedAssetsNotFound(const QString &root);
