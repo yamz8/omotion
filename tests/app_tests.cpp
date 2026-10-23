@@ -1,0 +1,477 @@
+// The whole app, driven the way a person and an agent use it: the real
+// Main.qml offscreen, asserted on what's on screen, and the built omotion
+// binary run as a command, asserted on the files it writes. Each test names
+// the bug it guards against where there was one.
+//
+// Window tests need nothing else. CLI tests and evidence frames need the
+// built binary in OMOTION_BINARY, which bin/test sets; without it they skip.
+// OMOTION_SCREENS=<dir> makes the screens() case write the screenshot set
+// that bin/screens produces for looking at.
+
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickItem>
+#include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QtTest>
+#include <memory>
+
+#include "backend.h"
+#include "filepicker.h"
+#include "scene.h"
+#include "studio.h"
+#include "theme.h"
+#include "translator.h"
+
+namespace {
+class FakePicker : public FilePicker {
+public:
+    void openScene(const QUrl &) override {}
+    void newFilm(const QUrl &) override {}
+};
+
+void write(const QString &path, const QByteArray &contents) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(contents);
+}
+
+QString binary() { return qEnvironmentVariable("OMOTION_BINARY"); }
+
+// A scene small enough to render in a moment.
+const QByteArray tinyScene =
+    "import QtQuick\nimport Omotion\nRectangle {\n"
+    "    property real t\n    property real duration: 1\n    property int fps: 10\n"
+    "    property var formats: [\"16:9\", \"1:1\"]\n"
+    "    property var beats: [{ at: 0, name: \"One\" }, { at: 0.5, name: \"Two\" }]\n"
+    "    color: \"black\"\n"
+    "    Rectangle { width: 200; height: 200; color: \"white\"; x: Motion.progress(parent.t, 0, 1) * 600; y: 300 }\n"
+    "}\n";
+
+// The app as main.cpp assembles it, around a temporary studio, with the
+// default accent and a language of the test's choosing.
+class App {
+public:
+    explicit App(const QString &language = "en") {
+        write(dir.filePath("language"), language.toUtf8() + "\n");
+        translator = std::make_unique<Translator>(dir.filePath("language"));
+        QCoreApplication::installTranslator(translator.get());
+        theme = std::make_unique<Theme>(dir.filePath("no-omarchy"));
+        backend = std::make_unique<Backend>(&picker, binary());
+    }
+    ~App() {
+        engine.reset();
+        QCoreApplication::removeTranslator(translator.get());
+    }
+
+    QString studio(const QString &name = "film") {
+        QString error;
+        const QString root = dir.filePath(name);
+        if (!Studio::create(root, &error))
+            qWarning() << error;
+        return root;
+    }
+
+    // Opens the scene the way main.cpp does: loaded before the window exists.
+    bool open(const QString &scene, const QSize &size, double at = 0) {
+        backend->load(scene);
+        engine = std::make_unique<QQmlApplicationEngine>();
+        backend->setEngine(engine.get());
+        engine->rootContext()->setContextProperty("translator", translator.get());
+        engine->rootContext()->setContextProperty("theme", theme.get());
+        engine->rootContext()->setContextProperty("backend", backend.get());
+        engine->rootContext()->setContextProperty("startTime", at);
+        engine->rootContext()->setContextProperty("startFormat", QString());
+        engine->rootContext()->setContextProperty("startSheet", false);
+        engine->load(QUrl("qrc:/Main.qml"));
+        if (engine->rootObjects().isEmpty())
+            return false;
+        window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
+        window->resize(size);
+        return QTest::qWaitFor([this] { return window->property("ready").toBool(); }, 5000);
+    }
+
+    // Searches the visual tree, which reaches list delegates that findChild
+    // can't, since a view isn't their QObject parent.
+    QQuickItem *item(const char *name) const { return find(window->contentItem(), QString::fromLatin1(name)); }
+    static QQuickItem *find(QQuickItem *from, const QString &name) {
+        if (from->objectName() == name)
+            return from;
+        for (QQuickItem *child : from->childItems())
+            if (QQuickItem *found = find(child, name))
+                return found;
+        return nullptr;
+    }
+    QObject *object(const char *name) const { return window->findChild<QObject *>(name); }
+    bool shown(const char *name) const {
+        QQuickItem *found = item(name);
+        return found && found->isVisible() && found->width() > 0;
+    }
+    void key(int key, Qt::KeyboardModifiers modifiers = Qt::NoModifier, const QString &text = {}) {
+        QKeyEvent press(QEvent::KeyPress, key, modifiers, text), release(QEvent::KeyRelease, key, modifiers, text);
+        QCoreApplication::sendEvent(window, &press);
+        QCoreApplication::sendEvent(window, &release);
+        QTest::qWait(30);
+    }
+    void settle() { QTest::qWait(150); }
+
+    QTemporaryDir dir;
+    FakePicker picker;
+    std::unique_ptr<Translator> translator;
+    std::unique_ptr<Theme> theme;
+    std::unique_ptr<Backend> backend;
+    std::unique_ptr<QQmlApplicationEngine> engine;
+    QQuickWindow *window = nullptr;
+};
+
+struct Run {
+    int code = -1;
+    QByteArray out, err;
+};
+
+Run run(const QStringList &arguments, const QString &folder) {
+    QProcess process;
+    process.setWorkingDirectory(folder);
+    process.start(binary(), arguments);
+    process.waitForFinished(120000);
+    return {process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1,
+            process.readAllStandardOutput(), process.readAllStandardError()};
+}
+
+QStringList filesIn(const QString &folder) {
+    QStringList files;
+    QDirIterator it(folder, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+        files << QDir(folder).relativeFilePath(it.next());
+    files.sort();
+    return files;
+}
+}
+
+class AppTests : public QObject {
+    Q_OBJECT
+
+private slots:
+    void initTestCase() {
+        QQuickStyle::setStyle("Material");
+        registerSceneTypes();
+    }
+
+    // --- The window -------------------------------------------------------
+
+    void wideWindowShowsThreeColumns() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
+        app.settle();
+        QVERIFY(app.shown("studioPanel"));
+        QVERIFY(app.shown("notesPanel"));
+        QVERIFY(app.shown("preview"));
+        QVERIFY(!app.shown("viewTabs"));
+    }
+
+    // Found on the desktop: Omarchy tiled the window to 621 px and both panels vanished.
+    void tiledHalfScreenTakesTurnsAsTabs() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {621, 670}));
+        app.settle();
+        QVERIFY(app.shown("viewTabs"));
+        QVERIFY(app.shown("preview"));
+        QVERIFY(!app.shown("studioPanel"));
+        QVERIFY(!app.shown("notesPanel"));
+
+        app.key(Qt::Key_P, Qt::NoModifier, "p");
+        QTRY_VERIFY(app.shown("studioPanel"));
+        QVERIFY(!app.shown("preview"));
+        app.key(Qt::Key_P, Qt::NoModifier, "p");
+        QTRY_VERIFY(app.shown("notesPanel"));
+        QVERIFY(!app.shown("studioPanel"));
+        app.key(Qt::Key_P, Qt::NoModifier, "p");
+        QTRY_VERIFY(app.shown("preview"));
+    }
+
+    // Found on the desktop: at 621 px the timeline was squeezed to 70 px and lost its beats.
+    void narrowTimelineKeepsItsBeatsReadable() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {621, 670}));
+        app.settle();
+        QList<QQuickItem *> shown;
+        for (QQuickItem *timeline : app.window->findChildren<QQuickItem *>("timeline"))
+            if (timeline->isVisible())
+                shown << timeline;
+        QCOMPARE(shown.size(), 1);
+        QVERIFY2(shown.first()->width() > app.window->width() * 0.8, qPrintable(QString::number(shown.first()->width())));
+    }
+
+    void questionMarkShowsTheShortcuts() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
+        QVERIFY(!app.shown("help"));
+        app.key(Qt::Key_Question, Qt::ShiftModifier, "?");
+        QTRY_VERIFY(app.shown("help"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.shown("help"));
+    }
+
+    // The loop: a click on the film, typed text, and Enter make a note in
+    // notes.md, at that moment, with a ringed frame as evidence. Typing "q"
+    // must not quit the app while the note is being written.
+    void clickingTheFilmPinsANote() {
+        App app;
+        const QString root = app.studio();
+        QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1480, 900}, 6.0));
+        app.settle();
+        QSignalSpy quits(app.engine.get(), &QQmlEngine::quit);
+
+        QQuickItem *preview = app.item("preview");
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier,
+                          preview->mapToScene(QPointF(preview->width() / 2, preview->height() / 2)).toPoint());
+        QTRY_VERIFY(app.object("noteEditor")->property("opened").toBool());
+        for (const QChar c : QString("quiet here"))
+            app.key(0, Qt::NoModifier, QString(c));
+        app.key(Qt::Key_Return);
+
+        QTRY_COMPARE(Studio::readNotes(root).size(), 1);
+        const auto note = Studio::readNotes(root).first();
+        QCOMPARE(note.text, QString("quiet here"));
+        QCOMPARE(note.format, QString("16:9"));
+        QCOMPARE(note.beat, QString("Review"));
+        QVERIFY(qAbs(note.at - 6.0) < 1 / 30.0);
+        QVERIFY(qAbs(note.point.x() - 960) < 4 && qAbs(note.point.y() - 540) < 4);
+        QCOMPARE(quits.count(), 0);
+        QVERIFY(!app.object("noteEditor")->property("opened").toBool());
+
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to check the evidence frame.");
+        const QString evidence = QDir(root).filePath(note.evidence);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(evidence).size() > 0, 20000);
+        const QImage frame(evidence);
+        QCOMPARE(frame.size(), QSize(1920, 1080));
+    }
+
+    // Found on the desktop: the agent's reply sat under a full-width evidence
+    // frame, below the part of the card anyone could see.
+    void agentAnswerShowsWithoutScrolling() {
+        App app;
+        const QString root = app.studio();
+        QImage evidence(1920, 1080, QImage::Format_RGB32);
+        evidence.fill(Qt::darkGray);
+        QDir(root).mkpath("reviews/notes");
+        QVERIFY(evidence.save(QDir(root).filePath("reviews/notes/001.png")));
+        QFile notes(QDir(root).filePath("notes.md"));
+        QVERIFY(notes.open(QIODevice::Append));
+        notes.write("\n- [ ] 001 · 0.10s · 16:9 · Hook · (960, 540)\n  evidence: reviews/notes/001.png\n"
+                    "  note: Is the black opening intentional? Reply under this note.\n"
+                    "  reply: Half yes. The approved shot list opens on an empty dark frame, but its length falls "
+                    "out of the first word's timing at 0.15 s and its fade-in; frames 0-4 are empty.\n");
+        notes.close();
+
+        // The size the window had on the desktop when the reply went missing.
+        QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1256, 670}));
+        QTRY_VERIFY(app.item("noteAnswer"));
+        app.settle();
+        QQuickItem *answer = app.item("noteAnswer");
+        QQuickItem *list = app.item("noteList");
+        const QRectF placed = answer->mapRectToItem(list, QRectF(0, 0, answer->width(), answer->height()));
+        QVERIFY2(placed.bottom() <= list->height(),
+                 qPrintable(QString("answer ends at %1, list shows %2").arg(placed.bottom()).arg(list->height())));
+    }
+
+    // Found by review: picking a note in the panel cut the panel off from the window's selection.
+    void panelAndWindowShareTheSelectedNote() {
+        App app;
+        const QString root = app.studio();
+        for (const auto &text : {"first", "second"}) {
+            Studio::Note note;
+            note.at = 1;
+            note.format = "16:9";
+            note.text = text;
+            QString error;
+            QVERIFY(!Studio::addNote(root, note, &error).isEmpty());
+        }
+        QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1480, 900}));
+        QObject *panel = app.object("notesPanel");
+        QMetaObject::invokeMethod(panel, "noteSelected", Q_ARG(QString, "001"));
+        QTRY_COMPARE(app.window->property("selectedNote").toString(), QString("001"));
+        QCOMPARE(panel->property("selected").toString(), QString("001"));
+        QMetaObject::invokeMethod(app.window, "selectNote", Q_ARG(QVariant, "002"));
+        QTRY_COMPARE(panel->property("selected").toString(), QString("002"));
+    }
+
+    // Found by review: opening another scene resized a window the person had sized.
+    void openingAnotherSceneKeepsTheWindowSize() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
+        app.window->resize(1000, 700);
+        const QString other = app.dir.filePath("plain.qml");
+        write(other, tinyScene);
+        QVERIFY(app.backend->load(other));
+        QTRY_VERIFY(app.window->property("ready").toBool());
+        app.settle();
+        QCOMPARE(app.window->size(), QSize(1000, 700));
+    }
+
+    void rightToLeftMirrorsThePanels() {
+        App app("ar");
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
+        app.settle();
+        const double notes = app.item("notesPanel")->mapToScene(QPointF(0, 0)).x();
+        const double studio = app.item("studioPanel")->mapToScene(QPointF(0, 0)).x();
+        QVERIFY2(notes < studio, "In Arabic the notes belong on the left and the studio on the right.");
+    }
+
+    // --- The command line ---------------------------------------------------
+
+    void cliNewMakesAStudioAndNeverRefills() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        QCOMPARE(run({"new", "launch"}, dir.path()).code, 0);
+        for (const auto &file : {"brief.md", "gates.md", "notes.md", "activity.md", "scene.qml", "AGENTS.md",
+                                 ".claude/skills/omotion/SKILL.md"})
+            QVERIFY2(QFileInfo(QDir(dir.path()).filePath(QString("launch/") + file)).isFile(), file);
+        const Run again = run({"new", "launch"}, dir.path());
+        QCOMPARE(again.code, 1);
+        QVERIFY(again.err.contains("already has files"));
+        QCOMPARE(run({"check", "launch/scene.qml"}, dir.path()).code, 0);
+    }
+
+    // Found by an agent: a file name given for several formats was ignored, and
+    // the default names were written over earlier contact sheets.
+    void cliKeepsAGivenNameAcrossFormats() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        write(dir.filePath("s.qml"), tinyScene);
+        QCOMPARE(run({"sheet", "s.qml", "--format", "all", "-o", "proof.png"}, dir.path()).code, 0);
+        QCOMPARE(filesIn(dir.path()), QStringList({"proof-16x9.png", "proof-1x1.png", "s.qml"}));
+    }
+
+    // Found by review: "-o out" with several formats became a file ffmpeg couldn't write.
+    void cliPathWithoutAnExtensionIsAFolder() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        write(dir.filePath("s.qml"), tinyScene);
+        QCOMPARE(run({"render", "s.qml", "--format", "all", "-o", "clips"}, dir.path()).code, 0);
+        QCOMPARE(run({"frame", "s.qml", "--at", "0.5", "-o", "stills"}, dir.path()).code, 0);
+        QCOMPARE(filesIn(dir.path()),
+                 QStringList({"clips/s-16x9.mp4", "clips/s-1x1.mp4", "s.qml", "stills/s-16x9-0.50.png"}));
+        QVERIFY(QFileInfo(dir.filePath("clips/s-1x1.mp4")).size() > 0);
+    }
+
+    void cliFrameRingsTheMarkedPoint() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        write(dir.filePath("s.qml"), tinyScene);
+        QCOMPARE(run({"frame", "s.qml", "--at", "0", "--mark", "960,540", "-o", "f.png"}, dir.path()).code, 0);
+        const QImage frame(dir.filePath("f.png"));
+        // The ring's radius is 7.5% of the short side.
+        bool pink = false;
+        for (int x = 1035; x <= 1047 && !pink; ++x) {
+            const QColor c = frame.pixelColor(x, 540);
+            pink = c.red() > 200 && c.green() < 100 && c.blue() > 70;
+        }
+        QVERIFY(pink);
+        QVERIFY(frame.pixelColor(960, 540) == QColor(Qt::black));
+    }
+
+    void cliCheckFailsOnAClockWithJson() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        write(dir.filePath("s.qml"), QByteArray(tinyScene).replace("color: \"black\"\n",
+                                                                   "color: \"black\"\n    Timer { running: true }\n"));
+        const Run result = run({"check", "s.qml", "--json"}, dir.path());
+        QCOMPARE(result.code, 1);
+        const QJsonObject json = QJsonDocument::fromJson(result.out).object();
+        QCOMPARE(json["ok"].toBool(true), false);
+        QVERIFY(QString::fromUtf8(result.out).contains("Timer runs on the wall clock"));
+    }
+
+    void cliSkillInstallOnlyWritesIntoAStudio() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        const Run outside = run({"skill", "install"}, dir.path());
+        QCOMPARE(outside.code, 1);
+        QVERIFY(outside.err.contains("isn't inside a film"));
+        QCOMPARE(filesIn(dir.path()), QStringList());
+    }
+
+    // --- Screenshots to look at (bin/screens) -------------------------------
+
+    void screens() {
+        const QString out = qEnvironmentVariable("OMOTION_SCREENS");
+        if (out.isEmpty())
+            QSKIP("Set OMOTION_SCREENS to a folder to write the screenshot set.");
+        QDir().mkpath(out);
+        auto shoot = [&](App &app, const QString &name) {
+            app.settle();
+            QVERIFY(app.window->grabWindow().save(QDir(out).filePath(name + ".png")));
+        };
+        {
+            App app;
+            const QString root = app.studio();
+            Studio::Note note;
+            note.at = 6;
+            note.format = "16:9";
+            note.beat = "Review";
+            note.text = "This highlight should land a beat later.";
+            QString error;
+            Studio::addNote(root, note, &error);
+            write(QDir(root).filePath("activity.md"), "# Activity\n\n- 14:02 rebuilt the review beat\n");
+            QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1480, 900}, 6.0));
+            shoot(app, "wide");
+            app.key(Qt::Key_Question, Qt::ShiftModifier, "?");
+            shoot(app, "help");
+            app.key(Qt::Key_Escape);
+            QQuickItem *preview = app.item("preview");
+            QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier,
+                              preview->mapToScene(QPointF(preview->width() * 0.6, preview->height() * 0.4)).toPoint());
+            shoot(app, "note-editor");
+        }
+        {
+            App app;
+            QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {621, 670}, 6.0));
+            shoot(app, "tiled-film");
+            app.key(Qt::Key_P, Qt::NoModifier, "p");
+            shoot(app, "tiled-studio");
+            app.key(Qt::Key_P, Qt::NoModifier, "p");
+            shoot(app, "tiled-notes");
+        }
+        {
+            App app("ar");
+            QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}, 6.0));
+            shoot(app, "arabic");
+        }
+        {
+            App app;
+            app.backend->load(QString());
+            app.engine = std::make_unique<QQmlApplicationEngine>();
+            app.engine->rootContext()->setContextProperty("translator", app.translator.get());
+            app.engine->rootContext()->setContextProperty("theme", app.theme.get());
+            app.engine->rootContext()->setContextProperty("backend", app.backend.get());
+            app.engine->rootContext()->setContextProperty("startTime", 0.0);
+            app.engine->rootContext()->setContextProperty("startFormat", QString());
+            app.engine->rootContext()->setContextProperty("startSheet", false);
+            app.engine->load(QUrl("qrc:/Main.qml"));
+            app.window = qobject_cast<QQuickWindow *>(app.engine->rootObjects().first());
+            app.window->resize(1280, 820);
+            shoot(app, "welcome");
+        }
+        qInfo().noquote() << "Wrote the screenshot set to" << out;
+    }
+};
+
+QTEST_MAIN(AppTests)
+#include "app_tests.moc"

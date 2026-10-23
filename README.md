@@ -147,9 +147,24 @@ ships with Omarchy.
 
 ```sh
 bin/build      # build/omotion
-bin/test       # the Qt Test suite, offscreen
+bin/test       # every test, offscreen (see below)
+bin/screens    # the window's screenshot set, in build/screens
 bin/install    # makepkg -fsi, so omotion shows up in the app launcher
 ```
+
+`bin/test` builds the app and runs two suites:
+
+- `tests/omotion_tests.cpp`: scenes, `check`, rendering, the studio's files
+  (gates, notes, assets, activity), the skill's stamp, the theme, and the
+  translations.
+- `tests/app_tests.cpp`: the real window offscreen, asserted on what's on
+  screen (three columns when wide, tabs in a tiled half-screen, pinning a
+  note, the agent's answer in view, right-to-left), and the built `omotion`
+  run as a command, asserted on exactly which files it writes.
+
+Every bug found by looking or by review has a test that fails when the bug
+returns. `bin/screens` covers what assertions can't: look at the screenshots
+after changing the window.
 
 ## License
 

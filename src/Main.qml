@@ -301,6 +301,7 @@ ApplicationWindow {
 
             TabBar {
                 id: viewTabs
+                objectName: "viewTabs"
                 Layout.fillWidth: true
                 visible: win.compact
                 Material.background: "#141417"
@@ -323,6 +324,7 @@ ApplicationWindow {
                 spacing: 0
 
                 StudioPanel {
+                    objectName: "studioPanel"
                     Layout.preferredWidth: win.compact ? -1 : 250
                     Layout.fillWidth: win.compact
                     Layout.fillHeight: true
@@ -539,6 +541,7 @@ ApplicationWindow {
                 }
 
                 NotesPanel {
+                    objectName: "notesPanel"
                     Layout.preferredWidth: win.compact ? -1 : 300
                     Layout.fillWidth: win.compact
                     Layout.fillHeight: true
@@ -740,6 +743,7 @@ ApplicationWindow {
     }
 
     component Timeline: SceneTimeline {
+        objectName: "timeline"
         time: win.time
         duration: win.duration
         beats: win.beats
@@ -755,10 +759,12 @@ ApplicationWindow {
 
     NoteEditor {
         id: noteEditor
+        objectName: "noteEditor"
         parent: Overlay.overlay
     }
 
     ShortcutHelp {
+        objectName: "help"
         anchors.fill: parent
         visible: win.helpVisible
         onClosed: win.helpVisible = false

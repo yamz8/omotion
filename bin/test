@@ -1,10 +1,15 @@
 #!/bin/sh
 set -eu
 
+# Builds the app, then runs the unit tests and the app tests: the real window
+# offscreen and the built omotion as a command.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-mkdir -p "$ROOT/build/tests"
-cd "$ROOT/build/tests"
+"$ROOT/bin/build" > /dev/null
 
-qmake6 "$ROOT/tests/omotion_tests.pro"
-make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen ./omotion_tests
+for suite in omotion_tests app_tests; do
+  mkdir -p "$ROOT/build/tests/$suite"
+  cd "$ROOT/build/tests/$suite"
+  qmake6 "$ROOT/tests/$suite.pro" > /dev/null
+  make -j"$(nproc)" > /dev/null
+  QT_QPA_PLATFORM=offscreen OMOTION_BINARY="$ROOT/build/omotion" ./"$suite" "$@"
+done

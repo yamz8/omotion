@@ -64,6 +64,7 @@ Rectangle {
 
         ListView {
             id: list
+            objectName: "noteList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.preferredHeight: 3
@@ -149,6 +150,7 @@ Rectangle {
                         model: card.modelData.answers
                         delegate: Label {
                             required property string modelData
+                            objectName: "noteAnswer"
                             Layout.fillWidth: true
                             text: modelData
                             wrapMode: Text.WordWrap
