@@ -1,6 +1,6 @@
 # omotion
 
-![omotion previewing the starter scene's Review beat](screenshot.png)
+![omotion's studio window: the gates, the film, and a note pinned to it](screenshot.png)
 
 omotion previews, reviews, and renders motion scenes for Omarchy. A scene is
 one QML file in which everything on screen is computed from the time `t`, so
@@ -13,12 +13,23 @@ the scene, and omotion:
 
 - **previews it live**, reloading whenever the file is saved and staying on
   the moment you were looking at;
-- **shows a contact sheet**, every beat at once, so you look at the frames
+- **shows a contact sheet**, every beat at once, with strips of the film's
+  fastest changes and any frame that doesn't belong, so you look at the frames
   before anyone watches the film;
-- **checks it**: no wall clocks, no randomness that changes, no state carried
-  between frames, no text outside the frame in any format;
-- **renders each format from the source**: 16:9, 9:16, 1:1, and 4:5 are composed
-  by the scene, not cropped from one another, and encoded with ffmpeg.
+- **checks it, at every frame**: text too small for a phone or not held long
+  enough to read, text outside the safe area or running into things, an empty
+  first frame, colors, fonts, and springs outside the style guide, beats that
+  drift from the approved shot list, files from outside `assets/`, cues off
+  their beats, and anything that keeps state between frames;
+- **reviews it**: `omotion review` writes each round's scores and three
+  largest defects, with cropped frames as evidence;
+- **puts sound on the same timeline**: cues with sounds made the same way
+  every time, a track's beats to cut to, and one loudness on export;
+- **renders each format from the source**: 16:9, 9:16, 1:1, and 4:5 are
+  composed by the scene, not cropped from one another, encoded with ffmpeg a
+  beat at a time, so after a patch only the beats that changed render again;
+- **hands it over**: `omotion deliver` writes the videos, posters, sheets, a
+  storyboard, the source, and what still needs your review.
 
 ## Making a film
 
@@ -84,13 +95,17 @@ Rectangle {
     property real t: 0
     property real duration: 6
     property var formats: ["16:9", "9:16"]
-    property var beats: [{ at: 0, name: "Hook" }, { at: 3, name: "Proof" }]
+    property var beats: [
+        { at: 0, name: "Hook", purpose: "the claim", enter: "the word, arriving", exit: "the word, held" },
+        { at: 3, name: "Proof", purpose: "why to believe it", enter: "the word", exit: "the proof" }
+    ]
 
     color: "#0d0d10"
 
     Text {
         id: title
-        readonly property real arrive: Motion.spring(parent.t, 0.2)
+        // Already arriving at frame 0, which is often the thumbnail.
+        readonly property real arrive: Motion.rule("headline", parent.t, -0.1)
         anchors.centerIn: parent
         text: "Hello"
         color: "white"
@@ -101,7 +116,9 @@ Rectangle {
 }
 ```
 
-`omotion help format` prints the whole format and the `Motion` helpers, and
+`omotion help format` prints the whole format: the `Motion` helpers (springs
+by the style guide's rules, states with `Motion.between`), `Style` for the
+guide's tokens, `Camera` for pans and zooms, `Clip` for footage, and cues.
 `omotion new scene.qml` writes a single starter scene, outside any studio.
 
 ## Shortcuts
@@ -167,9 +184,10 @@ bin/install    # makepkg -fsi, so omotion shows up in the app launcher
 
 `bin/test` builds the app and runs two suites:
 
-- `tests/omotion_tests.cpp`: scenes, `check`, rendering, the studio's files
-  (gates, notes, assets, activity), the skill's stamp, the theme, and the
-  translations.
+- `tests/omotion_tests.cpp`: scenes, `check` and every measure, rendering
+  and its cache, sound, references, clips, reviews, deliverables, templates,
+  the studio's files (gates, notes, assets, activity), the skill's stamp, the
+  theme, and the translations.
 - `tests/app_tests.cpp`: the real window offscreen, asserted on what's on
   screen (three columns when wide, tabs in a tiled half-screen, pinning a
   note, the agent's answer in view, right-to-left), and the built `omotion`
