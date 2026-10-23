@@ -131,6 +131,22 @@ private slots:
         QVERIFY(anyMessage(problems, "depends on what was rendered before it"));
     }
 
+    // State set between the moments a normal check samples is found only by
+    // asking for every frame.
+    void thoroughCheckAsksForEveryFrame()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("s.qml"), sceneSource("    property bool passed: false\n"
+                                                 "    onTChanged: if (t > 1.15 && t < 1.25) passed = true\n"
+                                                 "    Rectangle { width: 300; height: 300; color: \"red\"; visible: parent.passed }\n"));
+        QString error;
+        Scene sampled, thorough;
+        QVERIFY(sampled.load(dir.filePath("s.qml"), "16:9", &error));
+        QVERIFY(!anyMessage(sampled.check(), "rendered before it"));
+        QVERIFY(thorough.load(dir.filePath("s.qml"), "16:9", &error));
+        QVERIFY(anyMessage(thorough.check(true), "of 20 frames, the first at"));
+    }
+
     void checkFindsTextOutsideTheFrame()
     {
         const QByteArray wide = "    Text { x: 40; y: 300; text: \"A headline much too wide to fit\"; font.pixelSize: 100; color: \"white\" }\n";

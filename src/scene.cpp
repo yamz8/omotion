@@ -20,6 +20,8 @@
 #include <QStandardPaths>
 #include <QVariantMap>
 #include <algorithm>
+#include <numeric>
+#include <random>
 #include <cmath>
 
 QList<Format> Formats::all() {
@@ -540,7 +542,7 @@ QImage Scene::contactSheet(const QList<double> &times, int columns, const QList<
     return sheet;
 }
 
-QList<Problem> Scene::check() {
+QList<Problem> Scene::check(bool thorough) {
     QList<Problem> problems = m_declarationProblems;
     // A film made with omotion new carries the skill its agent follows; an
     // outdated one leads the agent through an older workflow.
@@ -640,6 +642,33 @@ QList<Problem> Scene::check() {
                                     m_format.name, times[i]};
                 break;
             }
+    }
+
+    // Every frame, in order and shuffled, by two copies rendered small: a
+    // frame that depends on the one before shows up at any size.
+    if (thorough) {
+        Scene ordered, shuffled;
+        if (ordered.load(m_path, m_format.name, &error, 0.125) && shuffled.load(m_path, m_format.name, &error, 0.125)) {
+            QList<QImage> frames;
+            for (int i = 0; i < frameCount(); ++i)
+                frames << ordered.frame(i / double(m_fps));
+            QList<int> order(frameCount());
+            std::iota(order.begin(), order.end(), 0);
+            // A fixed shuffle, so a failure repeats.
+            std::mt19937 random(20261023);
+            std::shuffle(order.begin(), order.end(), random);
+            QList<int> wrong;
+            for (int i : order)
+                if (!sameFrame(shuffled.frame(i / double(m_fps)), frames[i]))
+                    wrong << i;
+            std::sort(wrong.begin(), wrong.end());
+            if (!wrong.isEmpty())
+                problems << Problem{true,
+                                    QString("%1 of %2 frames, the first at %3, differ when asked for out of order. Keep "
+                                            "no state between frames: derive everything from t.")
+                                        .arg(wrong.size()).arg(frameCount()).arg(seconds(wrong.first() / double(m_fps))),
+                                    m_format.name, wrong.first() / double(m_fps), {}};
+        }
     }
     return problems;
 }

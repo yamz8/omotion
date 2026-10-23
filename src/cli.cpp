@@ -151,6 +151,7 @@ int create(const QStringList &arguments) {
 int check(const QStringList &arguments) {
     Command command("check", "Report every problem with a scene: its declarations, clocks that break seeking, "
                              "and text outside the frame in each format.");
+    command.parser.addOption({"thorough", "Also ask for every frame, in order and shuffled, not just the beats"});
     command.format("all of the scene's formats");
     command.json();
     command.parser.process(arguments);
@@ -176,7 +177,7 @@ int check(const QStringList &arguments) {
                     {"audio", scene.audio().isEmpty() ? QJsonValue() : QJsonValue(scene.audio())}};
         }
         // The declarations are the same in every format, so report them once.
-        for (const auto &problem : scene.check())
+        for (const auto &problem : scene.check(command.parser.isSet("thorough")))
             if (i == 0 || !problem.format.isEmpty())
                 problems << problem;
     }

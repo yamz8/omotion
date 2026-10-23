@@ -84,7 +84,9 @@ and then hold. If everything overshoots, nothing feels precise.
 - `omotion check scene.qml` lists problems for every format, with times. It
   measures every frame: text under 10 px at phone width (390 px wide), text
   held less than 0.6 s or one second per 25 characters, text outside the safe
-  area or running into other things, and an empty frame 0.
+  area or running into other things, and an empty frame 0. `--thorough` also
+  asks for every frame, in order and shuffled, to find state between frames
+  that the sampled moments miss.
 - `omotion sheet scene.qml --format all` renders a contact sheet per format,
   with strips of the film's fastest changes and any frame unlike its
   neighbors below the beats; `--times 1.2,1.25,1.3` shows those moments instead.

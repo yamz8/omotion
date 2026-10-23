@@ -90,8 +90,10 @@ public:
     };
     QImage contactSheet(const QList<double> &times, int columns = 0, const QList<Strip> &strips = {});
 
-    // Problems with the declarations and with this format's frames.
-    QList<Problem> check();
+    // Problems with the declarations and with this format's frames. thorough
+    // asks two more copies for every frame, one in order and one shuffled,
+    // instead of only the beats in opposite orders.
+    QList<Problem> check(bool thorough = false);
 
     // Encodes every frame through ffmpeg into output, written beside it first
     // and renamed into place, so a failed render never leaves a broken file.

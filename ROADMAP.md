@@ -186,7 +186,7 @@ Turns the article's §7 checklist and critique into tooling.
 - ✅ **Automatic transition strips.** Score how fast each frame changes from the
   last at low resolution, and put the fastest transitions on the sheet without
   being asked.
-- **`check --thorough`** asks for every frame in a shuffled order, not just
+- ✅ **`check --thorough`** asks for every frame in a shuffled order, not just
   sampled moments.
 - **`omotion review`** writes `reviews/NNN.md`: contact sheets, measured
   results, and the article's critique format, with **the three largest
