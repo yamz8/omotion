@@ -2,6 +2,7 @@
 #include "studio.h"
 #include "measure.h"
 #include "sound.h"
+#include "style.h"
 
 #include <QDir>
 #include <QFile>
@@ -50,12 +51,20 @@ bool Formats::find(const QString &name, Format *format) {
 void registerSceneTypes() {
     static const bool registered = [] {
         qmlRegisterSingletonType(QUrl("qrc:/Motion.qml"), "Omotion", 1, 0, "Motion");
+        qmlRegisterType(QUrl("qrc:/Camera.qml"), "Omotion", 1, 0, "Camera");
+        qmlRegisterSingletonType<StyleTokens>("Omotion", 1, 0, "Style", [](QQmlEngine *engine, QJSEngine *) -> QObject * {
+            auto *style = new StyleTokens(engine->property("omotionStyleGuide").toString());
+            engine->setProperty("omotionStyle", QVariant::fromValue(style));
+            return style;
+        });
         return true;
     }();
     Q_UNUSED(registered);
 }
 
 namespace {
+int processSeed = 0;
+
 QString errorsText(const QList<QQmlError> &errors) {
     QStringList lines;
     for (const auto &error : errors)
@@ -289,6 +298,7 @@ bool Scene::load(const QString &path, const QString &formatName, QString *error,
         for (const auto &warning : warnings)
             m_warnings << warning.toString();
     });
+    StyleTokens::use(m_engine.get(), StyleTokens::guideFor(m_path));
     QQmlComponent component(m_engine.get(), QUrl::fromLocalFile(m_path), QQmlComponent::PreferSynchronous);
     if (component.isError()) {
         *error = errorsText(component.errors());
@@ -315,6 +325,8 @@ bool Scene::load(const QString &path, const QString &formatName, QString *error,
     m_root->setSize(m_format.size);
     if (m_root->metaObject()->indexOfProperty("format") >= 0)
         m_root->setProperty("format", m_format.name);
+    if (m_root->metaObject()->indexOfProperty("seed") >= 0)
+        m_root->setProperty("seed", processSeed);
     component.completeCreate();
     if (component.isError()) {
         *error = errorsText(component.errors());
@@ -460,6 +472,9 @@ void polish(QQuickItem *item) {
         polish(child);
 }
 }
+
+void Scene::setSeed(int seed) { processSeed = seed; }
+int Scene::seed() { return processSeed; }
 
 void Scene::seek(double t) {
     if (!m_root)
@@ -665,6 +680,7 @@ QList<Problem> Scene::check(bool thorough) {
     }
     // The checklist's measurable items: text a viewer can read, and a reason
     // to stop scrolling.
+    problems << Measure::rules(m_path, StyleTokens::guideFor(m_path));
     problems << Measure::text(*this);
     problems << Measure::hook(*this);
     problems << Measure::sync(*this);

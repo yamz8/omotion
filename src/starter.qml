@@ -10,7 +10,7 @@ Rectangle {
     property real duration: 9
     property int fps: 30
     property string format: "16:9"
-    property var formats: ["16:9", "9:16"]
+    property var formats: ["16:9", "9:16", "1:1", "4:5"]
     // Each beat matches one in shotlist.md: why it exists, and the states it
     // starts from and must reach, copied from the approved shot list.
     property var beats: [
@@ -27,6 +27,9 @@ Rectangle {
     // Type and spacing follow the short side, and the layout follows the
     // format, so the vertical cut is composed rather than cropped.
     readonly property bool portrait: height > width
+    // 16:9 has room for a row of five; 1:1 takes two rows, and the tall
+    // formats stack them in two columns.
+    readonly property bool wide: width > height * 1.2
     readonly property real unit: Math.min(width, height) / 1080
     readonly property real margin: (portrait ? 90 : 140) * unit
     readonly property color ink: "#f4f1ea"
@@ -54,7 +57,7 @@ Rectangle {
                 required property string modelData
                 required property int index
                 // The first word is already there at frame 0, which is often the thumbnail.
-                readonly property real arrive: index === 0 ? 1 : Motion.spring(scene.t, 0.06 + index * 0.09, 210, 22)
+                readonly property real arrive: index === 0 ? 1 : Motion.rule("headline", scene.t, 0.06 + index * 0.09)
                 text: modelData
                 color: modelData === "time." ? scene.accent : scene.ink
                 font.pixelSize: (scene.portrait ? 128 : 116) * scene.unit
@@ -92,12 +95,12 @@ Rectangle {
     // Frames, then Review: the same dot in five moments, then a pass over each.
     Grid {
         id: frames
-        readonly property real tileWidth: (scene.portrait ? 440 : 300) * scene.unit
-        readonly property real tileHeight: tileWidth * (scene.portrait ? 9 / 16 : 3 / 4)
-        columns: scene.portrait ? 2 : 5
-        spacing: (scene.portrait ? 34 : 40) * scene.unit
+        readonly property real tileWidth: (scene.wide ? 300 : scene.portrait ? 420 : 280) * scene.unit
+        readonly property real tileHeight: tileWidth * (scene.wide ? 3 / 4 : 9 / 16)
+        columns: scene.wide ? 5 : scene.portrait ? 2 : 3
+        spacing: (scene.wide ? 40 : 34) * scene.unit
         anchors.horizontalCenter: parent.horizontalCenter
-        y: (scene.height - height) / 2 + (scene.portrait ? 60 : 70) * scene.unit
+        y: (scene.height - height) / 2 + (scene.wide ? 70 : 60) * scene.unit
         visible: scene.t > 2.2 && scene.t < 8.4
 
         Repeater {
@@ -105,7 +108,7 @@ Rectangle {
             delegate: Rectangle {
                 id: tile
                 required property int index
-                readonly property real arrive: Motion.spring(scene.t, 2.35 + index * 0.12, 260, 24)
+                readonly property real arrive: Motion.rule("micro", scene.t, 2.35 + index * 0.12)
                 readonly property real leave: Motion.easeIn(Motion.progress(scene.t, 7.2 + index * 0.06, 7.75 + index * 0.06))
                 // The review pass lights one frame at a time, then approves them all.
                 readonly property int reviewing: Math.floor((scene.t - 5.2) / 0.32)
@@ -132,7 +135,7 @@ Rectangle {
 
                 // The object every frame shares, where a spring has it at this frame's time.
                 Rectangle {
-                    readonly property real travel: Motion.spring(tile.index * 0.25, 0, 60, 6)
+                    readonly property real travel: Motion.rule("panel", tile.index * 0.25, 0)
                     width: 34 * scene.unit
                     height: width
                     radius: width / 2
@@ -149,7 +152,7 @@ Rectangle {
                     text: "t = " + (tile.index * 0.25).toFixed(2)
                     color: scene.dim
                     // Readable in a feed: 10 px when the film plays 390 px wide.
-                    font.pixelSize: (scene.portrait ? 34 : 50) * scene.unit
+                    font.pixelSize: (scene.wide ? 50 : 34) * scene.unit
                     font.family: "monospace"
                 }
             }
@@ -162,7 +165,7 @@ Rectangle {
         anchors.centerIn: parent
         width: scene.width - 2 * scene.margin
         spacing: 36 * scene.unit
-        readonly property real arrive: Motion.spring(scene.t, 7.55, 150, 20)
+        readonly property real arrive: Motion.rule("panel", scene.t, 7.55)
         opacity: Motion.clamp(arrive, 0, 1)
         visible: scene.t > 7.5
         transform: Translate { y: (1 - closing.arrive) * 50 * scene.unit }

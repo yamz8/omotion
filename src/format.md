@@ -87,6 +87,36 @@ Rectangle {
 | `Motion.clamp(x, low, high)` | x kept within low..high |
 | `Motion.random(seed)` | a repeatable number in [0, 1) |
 | `Motion.beatAt(beats, t)` | index of the beat playing at t, or -1 |
+| `Motion.rule(name, t, start)` | a spring by the style guide's motion rule for that class of object |
+| `Motion.between(states, t)` | one object across states `[{ at, x, color, ... }]`, each eased in over `over` s (0.4) |
+| `Motion.per(format, { "1:1": 56 }, 64)` | a value for this format, or the fallback |
+| `Motion.safe(format, width, height)` | the rectangle the platform's controls leave clear |
+
+**Style** holds the style guide's `TOKENS`: `Style.colors.ink`,
+`Style.fonts.headline`, and the rules `Motion.rule` uses (without a guide,
+`micro`, `panel`, `camera`, and `headline` move as a new film's guide has them). `check` warns about
+a `Motion.spring` that matches no rule and a color or font the guide doesn't
+name, so the film can't drift from its guide.
+
+**Camera** pans and zooms over what's inside it, from `keys: [{ at, x, y,
+zoom, over }]`: the point of the content at the frame's center by `at`,
+eased in over `over` seconds (1). `camera.plane(depth)` gives `{ x, y, scale }`
+for a layer the camera moves less (below 1; 0 stays with the frame) or more
+(above 1) than the content, set on an Item with `transformOrigin: Item.TopLeft`:
+
+```qml
+Camera {
+    id: camera
+    anchors.fill: parent
+    t: scene.t
+    keys: [{ at: 0, zoom: 1 }, { at: 4, x: 1300, y: 500, zoom: 1.4, over: 1.5 }]
+    Image { source: "assets/screen.png" }
+}
+```
+
+A scene that declares `property int seed` gets the seed from `--seed N` on
+any command; `Motion.random(seed * 100 + i)` then makes repeatable
+variations, and `render --seed 3` writes `renders/scene-16x9-seed3.mp4`.
 
 Give motion weight by class of object: small controls snap (stiff, around
 300/24), large panels settle (soft, around 120/22), and headlines arrive fast

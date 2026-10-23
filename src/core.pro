@@ -12,6 +12,7 @@ HEADERS += \
     measure.h \
     review.h \
     sound.h \
+    style.h \
     scene.h \
     studio.h \
     theme.h \
@@ -24,6 +25,7 @@ SOURCES += \
     render.cpp \
     review.cpp \
     sound.cpp \
+    style.cpp \
     scene.cpp \
     studio.cpp \
     theme.cpp \

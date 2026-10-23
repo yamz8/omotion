@@ -89,6 +89,11 @@ public:
     double filmTime(double trackTime) const { return trackTime - m_audioTrim + m_audioDelay; }
     QList<SceneCue> cues() const { return m_cues; }
 
+    // The seed every scene this process loads gets, as its "seed" property
+    // when it declares one: render --seed 3 is the third repeatable variation.
+    static void setSeed(int seed);
+    static int seed();
+
     QImage frame(double t);
     // Moves the scene to t and lays it out, without rendering, so its items
     // can be measured.

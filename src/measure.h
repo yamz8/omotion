@@ -26,6 +26,11 @@ QList<Problem> text(Scene &scene);
 // the beat it first appears in. Empty when the guide is missing or a template.
 QList<Problem> style(Scene &scene, const QString &styleGuide);
 
+// Springs in the scene's source against the guide's motion rules: a
+// Motion.spring whose stiffness and damping match no rule, or a Motion.rule
+// the guide doesn't have. Empty when the guide has no rules.
+QList<Problem> rules(const QString &scenePath, const QString &styleGuide);
+
 // Sound against picture, in frames: each cue against the beat it's on, or
 // else the visual change nearest it, and each beat's cut against the music's
 // beat from the track's beat grid (track.wav.beats.json, from omotion beats).

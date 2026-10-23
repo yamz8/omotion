@@ -69,7 +69,7 @@ public:
     QStringList activity() const { return m_activity; }
     QVariantList notes() const { return m_notes; }
 
-    void setEngine(QQmlEngine *engine) { m_engine = engine; }
+    void setEngine(QQmlEngine *engine);
 
     Q_INVOKABLE bool load(const QString &pathOrUrl);
     Q_INVOKABLE void openScene();

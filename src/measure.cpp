@@ -1,4 +1,5 @@
 #include "measure.h"
+#include "style.h"
 
 #include <QColor>
 #include <QFile>
@@ -397,6 +398,52 @@ QList<Problem> Measure::style(Scene &scene, const QString &styleGuide) {
                             QString("Fonts that style-guide.md doesn't name: %1. Load the guide's from assets/ with "
                                     "FontLoader, or add them to it.").arg(list.join(", ")),
                             {}, -1, {}};
+    return problems;
+}
+
+QList<Problem> Measure::rules(const QString &scenePath, const QString &styleGuide) {
+    QList<Problem> problems;
+    const QVariantMap rules = StyleTokens::read(styleGuide).rules;
+    QFile file(scenePath);
+    if (rules.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return problems;
+    QStringList known;
+    for (auto it = rules.cbegin(); it != rules.cend(); ++it)
+        known << QString("%1 %2/%3").arg(it.key()).arg(it.value().toMap()["stiffness"].toDouble())
+                     .arg(it.value().toMap()["damping"].toDouble());
+    static const QRegularExpression spring(R"(Motion\.spring\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\))");
+    static const QRegularExpression rule(R"re(Motion\.rule\s*\(\s*"([^"]*)")re");
+    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    for (int i = 0; i < lines.size(); ++i) {
+        for (auto it = spring.globalMatch(lines[i]); it.hasNext();) {
+            const QStringList args = it.next().captured(1).split(',');
+            double stiffness = 170, damping = 26;
+            bool literal = true;
+            if (args.size() >= 3)
+                stiffness = args[2].trimmed().toDouble(&literal);
+            if (literal && args.size() >= 4)
+                damping = args[3].trimmed().toDouble(&literal);
+            if (!literal)
+                continue; // Worked out from something else; check can't say.
+            const bool matches = std::any_of(rules.cbegin(), rules.cend(), [&](const QVariant &r) {
+                return r.toMap()["stiffness"].toDouble() == stiffness && r.toMap()["damping"].toDouble() == damping;
+            });
+            if (!matches)
+                problems << Problem{false,
+                                    QString("Line %1 springs at %2/%3, which matches no motion rule in "
+                                            "style-guide.md (%4); use Motion.rule(name, t, start).")
+                                        .arg(i + 1).arg(stiffness).arg(damping).arg(known.join(", ")),
+                                    {}, -1, {}};
+        }
+        for (auto it = rule.globalMatch(lines[i]); it.hasNext();) {
+            const QString name = it.next().captured(1);
+            if (!rules.contains(name))
+                problems << Problem{true,
+                                    QString("Line %1 asks for the motion rule \"%2\", which style-guide.md doesn't "
+                                            "have (%3).").arg(i + 1).arg(name, known.join(", ")),
+                                    {}, -1, {}};
+        }
+    }
     return problems;
 }
 

@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QRegularExpression>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -18,6 +19,7 @@
 #include "measure.h"
 #include "review.h"
 #include "sound.h"
+#include "style.h"
 #include "scene.h"
 #include "studio.h"
 #include "theme.h"
@@ -88,14 +90,14 @@ private slots:
         QTemporaryDir dir;
         const QString path = dir.filePath("scene.qml");
         QVERIFY(QFile::copy(":/starter.qml", path));
-        for (const auto &format : {"16:9", "9:16"}) {
+        for (const auto &format : {"16:9", "9:16", "1:1", "4:5"}) {
             Scene scene;
             QString error;
             QVERIFY2(scene.load(path, format, &error), qPrintable(error));
             QCOMPARE(scene.duration(), 9.0);
             QCOMPARE(scene.frameCount(), 270);
             QCOMPARE(scene.beats().size(), 4);
-            QCOMPARE(scene.formats(), QStringList({"16:9", "9:16"}));
+            QCOMPARE(scene.formats(), QStringList({"16:9", "9:16", "1:1", "4:5"}));
             QCOMPARE(scene.frame(1).size(), scene.format().size);
             for (const auto &problem : scene.check())
                 QFAIL(qPrintable(QString("%1 %2").arg(format, problem.message)));
@@ -401,6 +403,81 @@ private slots:
         QVERIFY(quiet.render(dir.filePath("quiet.mp4"), &error));
         const double lufs = loudness(dir.filePath("quiet.mp4"));
         QVERIFY2(std::abs(lufs + 14) < 1.5, qPrintable(QString::number(lufs)));
+    }
+
+    // The style guide's tokens reach the scene, and check holds it to them.
+    void scenesUseTheStyleGuidesTokens()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("style-guide.md"),
+              "# Style guide\n\nPALETTE\ncolor ignored #000000\n\nTOKENS\ncolor accent #FFD60A\n"
+              "font headline Adwaita Sans\nrule panel 120 22\nrule micro 300 24\nrule broken 0 3\n");
+        const StyleTokens::Tokens tokens = StyleTokens::read(dir.filePath("style-guide.md"));
+        QCOMPARE(tokens.colors, QVariantMap({{"accent", "#ffd60a"}}));
+        QCOMPARE(tokens.fonts["headline"].toString(), QString("Adwaita Sans"));
+        QCOMPARE(tokens.rules.keys(), QStringList({"micro", "panel"}));
+
+        write(dir.filePath("s.qml"),
+              sceneSource("    property real ruled: Motion.rule(\"panel\", t, 0.2)\n"
+                          "    property real sprung: Motion.spring(t, 0.2, 120, 22)\n"
+                          "    property var state: Motion.between([{ at: 0, x: 0, c: \"#000000\", label: \"a\" },"
+                          " { at: 1, x: 100, c: \"#ffffff\", label: \"b\", over: 1 }], t)\n"
+                          "    property int seed: 0\n"
+                          "    property string format\n"
+                          "    property real square: Motion.per(format, { \"1:1\": 56 }, 64)\n"
+                          "    property var clear: Motion.safe(\"9:16\", 1080, 1920)\n"
+                          "    Rectangle { objectName: \"card\"; width: 50; height: 50; color: Style.colors.accent }\n"
+                          "    Rectangle { width: 10; height: 10; x: Motion.spring(parent.t, 0, 260, 20) }\n"
+                          "    Rectangle { width: 10; height: 10; x: Motion.rule(\"bounce\", parent.t, 0) }\n"));
+        Scene::setSeed(7);
+        Scene scene;
+        QString error;
+        QVERIFY2(scene.load(dir.filePath("s.qml"), "16:9", &error), qPrintable(error));
+        Scene::setSeed(0);
+        QCOMPARE(scene.root()->property("seed").toInt(), 7);
+        scene.seek(0.7);
+        QCOMPARE(scene.root()->property("ruled").toDouble(), scene.root()->property("sprung").toDouble());
+        QVERIFY(scene.root()->property("ruled").toDouble() > 0.3);
+        scene.seek(0.5);
+        const QVariantMap state = scene.root()->property("state").toMap();
+        QCOMPARE(state["x"].toDouble(), 50.0);
+        QCOMPARE(state["label"].toString(), QString("b"));
+        QCOMPARE(state["c"].value<QColor>().name(), QString("#808080"));
+        QCOMPARE(scene.root()->property("square").toDouble(), 64.0);
+        QCOMPARE(scene.root()->property("clear").toMap()["y"].toDouble(), 1920 * 0.12);
+        QCOMPARE(scene.frame(0).pixelColor(10, 10), QColor("#ffd60a"));
+
+        const QList<Problem> problems = scene.check();
+        QVERIFY(anyMessage(problems, "springs at 260/20, which matches no motion rule in style-guide.md"));
+        QVERIFY(anyMessage(problems, "asks for the motion rule \"bounce\", which style-guide.md doesn't have"));
+    }
+
+    void cameraPansAndZoomsByItsKeys()
+    {
+        QTemporaryDir dir;
+        // A red square at (1000, 600), brought to the middle of the frame and
+        // doubled by 1 s; a white band at depth 0 stays where the frame is.
+        write(dir.filePath("s.qml"),
+              "import QtQuick\nimport Omotion\nRectangle {\n    id: scene\n    property real t\n"
+              "    property real duration: 2\n    color: \"black\"\n    Camera {\n        id: camera\n"
+              "        anchors.fill: parent\n        t: scene.t\n"
+              "        keys: [{ at: 0 }, { at: 1, x: 1050, y: 650, zoom: 2, over: 1 }]\n"
+              "        Rectangle { x: 1000; y: 600; width: 100; height: 100; color: \"red\" }\n"
+              "        Item { readonly property var view: camera.plane(0); x: view.x; y: view.y; scale: view.scale;"
+              " transformOrigin: Item.TopLeft\n"
+              "            Rectangle { x: 0; y: 0; width: 1920; height: 40; color: \"white\" } }\n    }\n}\n");
+        Scene scene;
+        QString error;
+        QVERIFY2(scene.load(dir.filePath("s.qml"), "16:9", &error), qPrintable(error));
+        QCOMPARE(scene.frame(0).pixelColor(960, 540), QColor(Qt::black));
+        const QImage closeUp = scene.frame(1.5);
+        QCOMPARE(closeUp.pixelColor(960, 540), QColor(Qt::red));
+        // Twice the size: the square's edge is 100 px from the middle.
+        QCOMPARE(closeUp.pixelColor(960 + 95, 540), QColor(Qt::red));
+        QCOMPARE(closeUp.pixelColor(960 + 105, 540), QColor(Qt::black));
+        // The band at depth 0 doesn't pan: it stays at the top of the frame.
+        QCOMPARE(scene.frame(0).pixelColor(960, 20), QColor(Qt::white));
+        QCOMPARE(closeUp.pixelColor(960, 20), QColor(Qt::white));
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

@@ -66,14 +66,31 @@ struct Command {
             parser.addPositionalArgument("scene", "Scene file (.qml)", "<scene>");
     }
     void json() { parser.addOption({"json", "Print the result as JSON"}); }
+    // A variation of the scene, for scenes that declare "property int seed".
+    void seed() { parser.addOption({"seed", "Set the scene's seed property, for a repeatable variation", "number"}); }
+    bool applySeed() const {
+        if (!parser.isSet("seed"))
+            return true;
+        bool ok = false;
+        const int value = parser.value("seed").toInt(&ok);
+        if (!ok) {
+            print(stderr, "Give the seed as a whole number, such as --seed 3.");
+            return false;
+        }
+        Scene::setSeed(value);
+        return true;
+    }
     void format(const QString &fallback) {
         parser.addOption({"format", Formats::names().join(", ") + ", or all (default: " + fallback + ")", "format"});
     }
     QString argument(int index) const { return parser.positionalArguments().value(index); }
+    QString seedSuffix() const { return parser.isSet("seed") ? "-seed" + parser.value("seed") : QString(); }
     QString scene() const { return argument(1); }
 
     // The formats asked for, checked against the scene's own list when "all".
     bool formats(bool allByDefault, QStringList *formats) const {
+        if (!applySeed())
+            return false;
         if (scene().isEmpty()) {
             print(stderr, "Name a scene file.");
             return false;
@@ -155,6 +172,7 @@ int check(const QStringList &arguments) {
                              "and text outside the frame in each format.");
     command.parser.addOption({"thorough", "Also ask for every frame, in order and shuffled, not just the beats"});
     command.format("all of the scene's formats");
+    command.seed();
     command.json();
     command.parser.process(arguments);
     QStringList formats;
@@ -219,6 +237,7 @@ int frame(const QStringList &arguments) {
     command.parser.addOption({"width", "Scale the image to this width", "pixels"});
     command.parser.addOption({"mark", "Ring a point of the frame, in its pixels, such as 1100,446", "x,y"});
     command.format("the scene's first format");
+    command.seed();
     command.json();
     command.parser.process(arguments);
     QStringList formats;
@@ -289,6 +308,7 @@ int sheet(const QStringList &arguments) {
     command.parser.addOption({"strips", "Strips of the film's fastest changes to add below the beats, five frames "
                                         "each (default: 3; 0 for none)", "count"});
     command.format("the scene's first format");
+    command.seed();
     command.json();
     command.parser.process(arguments);
     QStringList formats;
@@ -374,6 +394,7 @@ int render(const QStringList &arguments) {
     command.parser.addOption({"progress", "Print a JSON line per frame"});
     command.parser.addOption({"fresh", "Encode every beat again, rather than only the beats whose frames changed"});
     command.format("all of the scene's formats");
+    command.seed();
     command.json();
     command.parser.process(arguments);
     QStringList formats;
@@ -389,6 +410,10 @@ int render(const QStringList &arguments) {
         if (!scene.load(command.scene(), formats[i], &error))
             return fail(error);
         QString target = Scene::defaultOutput(scene.path(), formats[i]);
+        // A variation never replaces the film.
+        if (!command.seedSuffix().isEmpty())
+            target = QFileInfo(target).absoluteDir().filePath(QFileInfo(target).completeBaseName() +
+                                                              command.seedSuffix() + ".mp4");
         if (!output.isEmpty())
             target = namesDirectory(output) ? QDir(output).filePath(QFileInfo(target).fileName())
                      : formats.size() == 1 ? output
@@ -504,6 +529,7 @@ int review(const QStringList &arguments) {
                               "changes, everything check measures, scores, and the three largest defects with "
                               "cropped evidence, leaving the judgments to complete.");
     command.format("all of the scene's formats");
+    command.seed();
     command.json();
     command.parser.process(arguments);
     QStringList formats;

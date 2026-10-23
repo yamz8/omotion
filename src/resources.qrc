@@ -9,6 +9,7 @@
         <file alias="NotesPanel.qml">NotesPanel.qml</file>
         <file alias="NoteEditor.qml">NoteEditor.qml</file>
         <file alias="Motion.qml">Motion.qml</file>
+        <file alias="Camera.qml">Camera.qml</file>
         <file alias="starter.qml">starter.qml</file>
         <file alias="format.md">format.md</file>
         <file alias="skill.md">skill.md</file>

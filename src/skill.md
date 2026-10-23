@@ -98,8 +98,11 @@ changes. Without one, write "none provided" and fill the same headings with
 the style you propose, marked as a proposal. If a reference is unclear, ask
 or render one test frame rather than build on a guess.
 
-Propose only fonts that are installed (`fc-list`) or that can go in
-`assets/`. Once approved, copy the font files into `assets/` and load them
+Write the palette, fonts, and motion rules as `TOKENS` too (`color ink
+#f4f1ea`, `font headline Adwaita Sans`, `rule panel 120 22`); the scene uses
+them as `Style.colors.ink` and `Motion.rule("panel", t, start)`, and `check`
+reports anything outside them. Propose only fonts that are installed
+(`fc-list`) or that can go in `assets/`. Once approved, copy the font files into `assets/` and load them
 with `FontLoader`, setting the weight and style to match the file, so the
 film renders the same elsewhere.
 
