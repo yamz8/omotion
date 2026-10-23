@@ -145,29 +145,31 @@ composition are cheapest to fix here.
 Render `omotion sheet film/scene.qml --format all -o film/reviews/` and look at
 every PNG. Judge only the rendered frames, not what you meant to make.
 
-**Measure these four; looking at stills misses them:**
+**`omotion check` measures what stills miss**, at every frame and in every
+format; fix each error it reports:
 
-1. **Text size at phone width.** In a feed the film plays about 390 px wide.
-   The smallest text must be at least 10 px there: font size × 390 ÷ the
-   frame's width. That is about 50 px in a 1920-wide 16:9 frame, and about
-   28 px in a 1080-wide 9:16, 4:5, or 1:1 frame. List every `pixelSize` in the scene
-   and check each against its format.
-2. **Holds.** Every text, and every mark or badge that means something, is
-   fully on screen for at least 0.6 s, or one second per 25 characters if
-   that's longer. Find when each is fully there with a strip across its
-   entrance and exit (`omotion sheet ... --times 5.1,5.2,5.3,5.4,5.5 -o
-   film/reviews/strip-badge.png`).
-3. **The first frame.** Frame 0 is often the thumbnail. Something should be on
-   screen by 0.2 s, unless the shot list chose an empty opening for a reason.
-4. **Every cut.** A strip across each beat change, looking for empty or
-   half-drawn frames.
+- **Text size at phone width.** In a feed the film plays about 390 px wide,
+  and text must be at least 10 px there: about 50 px in a 1920-wide frame,
+  28 px in a 1080-wide one.
+- **Holds.** Each text is fully on screen for at least 0.6 s, or one second
+  per 25 characters if that's longer.
+- **The safe area**, text running into other text or across the edge of a
+  picture, colors and fonts outside the style guide, a one-color frame 0
+  (often the thumbnail), and nothing changing in the first two seconds.
+
+**Measure what `check` can't read:** a mark or badge that means something
+needs the same hold as text; find it with a strip across its entrance and
+exit (`omotion sheet ... --times 5.1,5.2,5.3,5.4,5.5 -o
+film/reviews/strip-badge.png`). The sheet adds strips of the film's fastest
+changes; look at each, and at a strip across every cut, for empty or
+half-drawn frames. Words inside pictures are too small for `check` to see:
+judge them at phone width.
 
 **Then judge the rest:** each beat reaching the exit state in
-`shotlist.md`; text that overlaps or crosses the safe area; real product
-assets, never replacements, and no claim inside them the brief doesn't make; consistent type and color across beats;
-cuts and sound cues landing together; a real hook in the first two seconds; a
-last frame strong enough to be the poster; and after each move, the viewer
-knows where to look.
+`shotlist.md`; real product assets, never replacements, and no claim inside
+them the brief doesn't make; cuts and sound cues landing together; whether
+the hook is a real one; a last frame strong enough to be the poster; and
+after each move, the viewer knows where to look.
 
 ## Gate 5: Repair the three largest defects
 

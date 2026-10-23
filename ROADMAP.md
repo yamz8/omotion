@@ -179,11 +179,11 @@ Turns the article's §7 checklist and critique into tooling.
   | First two seconds contain a real hook | Measured: visible change before 2 s; quality judged by the agent |
   | Last frame strong enough to be a poster | Last frame exported as `poster.png`; judged |
 
-- **Overlap detection**: text over content that isn't background. This would
+- ✅ **Overlap detection**: text over content that isn't background. This would
   have caught the chip running into the screenshot in our launch film.
-- **On-screen time per text**: words shown versus seconds held, so headlines
+- ✅ **On-screen time per text**: words shown versus seconds held, so headlines
   "hold long enough to be read" (§5).
-- **Automatic transition strips.** Score how fast each frame changes from the
+- ✅ **Automatic transition strips.** Score how fast each frame changes from the
   last at low resolution, and put the fastest transitions on the sheet without
   being asked.
 - **`check --thorough`** asks for every frame in a shuffled order, not just

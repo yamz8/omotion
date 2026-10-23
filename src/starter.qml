@@ -15,7 +15,7 @@ Rectangle {
     // starts from and must reach, copied from the approved shot list.
     property var beats: [
         { at: 0.0, name: "Hook", purpose: "say what the film is about before anyone scrolls past",
-          enter: "an empty frame", exit: "the headline, read and gone" },
+          enter: "the first word, already on screen", exit: "the headline, read and gone" },
         { at: 2.2, name: "Frames", purpose: "show that a frame is a moment, not a recording",
           enter: "an empty frame", exit: "five moments of one dot, side by side" },
         { at: 4.8, name: "Review", purpose: "show the frames being checked before release",
@@ -53,7 +53,8 @@ Rectangle {
             delegate: Text {
                 required property string modelData
                 required property int index
-                readonly property real arrive: Motion.spring(scene.t, 0.15 + index * 0.09, 210, 22)
+                // The first word is already there at frame 0, which is often the thumbnail.
+                readonly property real arrive: index === 0 ? 1 : Motion.spring(scene.t, 0.06 + index * 0.09, 210, 22)
                 text: modelData
                 color: modelData === "time." ? scene.accent : scene.ink
                 font.pixelSize: (scene.portrait ? 128 : 116) * scene.unit
@@ -68,12 +69,12 @@ Rectangle {
     // A caption above the frames, which changes with the beat.
     Repeater {
         model: [
-            { text: "Every frame asks one question: what is on screen at t?", from: 2.6, to: 4.7 },
-            { text: "Then look at the frames, before anyone watches the film.", from: 4.9, to: 7.1 }
+            { text: "Each frame shows what's on screen at t.", from: 2.4, to: 4.75 },
+            { text: "Then check the frames before anyone watches.", from: 4.85, to: 7.2 }
         ]
         delegate: Text {
             required property var modelData
-            readonly property real shown: Motion.easeOut(Motion.progress(scene.t, modelData.from, modelData.from + 0.4))
+            readonly property real shown: Motion.easeOut(Motion.progress(scene.t, modelData.from, modelData.from + 0.25))
                                           * (1 - Motion.progress(scene.t, modelData.to - 0.25, modelData.to))
             x: scene.margin
             y: frames.y - height - 70 * scene.unit + (1 - shown) * 20 * scene.unit
@@ -91,12 +92,12 @@ Rectangle {
     // Frames, then Review: the same dot in five moments, then a pass over each.
     Grid {
         id: frames
-        readonly property real tileWidth: (scene.portrait ? 520 : 300) * scene.unit
+        readonly property real tileWidth: (scene.portrait ? 440 : 300) * scene.unit
         readonly property real tileHeight: tileWidth * (scene.portrait ? 9 / 16 : 3 / 4)
-        columns: scene.portrait ? 1 : 5
+        columns: scene.portrait ? 2 : 5
         spacing: (scene.portrait ? 34 : 40) * scene.unit
         anchors.horizontalCenter: parent.horizontalCenter
-        y: (scene.height - height) / 2 + (scene.portrait ? 120 : 70) * scene.unit
+        y: (scene.height - height) / 2 + (scene.portrait ? 60 : 70) * scene.unit
         visible: scene.t > 2.2 && scene.t < 8.4
 
         Repeater {
@@ -137,7 +138,8 @@ Rectangle {
                     radius: width / 2
                     color: scene.accent
                     x: Motion.mix(24 * scene.unit, tile.width - width - 48 * scene.unit, travel / 1.25)
-                    anchors.verticalCenter: parent.verticalCenter
+                    // In the space above the label.
+                    y: (tile.height - 72 * scene.unit - height) / 2
                 }
 
                 Text {
@@ -146,7 +148,8 @@ Rectangle {
                     anchors.margins: 16 * scene.unit
                     text: "t = " + (tile.index * 0.25).toFixed(2)
                     color: scene.dim
-                    font.pixelSize: 26 * scene.unit
+                    // Readable in a feed: 10 px when the film plays 390 px wide.
+                    font.pixelSize: (scene.portrait ? 34 : 50) * scene.unit
                     font.family: "monospace"
                 }
             }
@@ -190,7 +193,7 @@ Rectangle {
             Text {
                 text: "omotion"
                 color: scene.dim
-                font.pixelSize: 44 * scene.unit
+                font.pixelSize: 52 * scene.unit
                 font.weight: Font.Medium
             }
         }

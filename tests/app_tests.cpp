@@ -458,6 +458,34 @@ private slots:
         QVERIFY(QString::fromUtf8(result.out).contains("Timer runs on the wall clock"));
     }
 
+    // Found in film 2: a frame between beats that no sheet showed.
+    void cliSheetShowsTheFastestChangesAndAStrayFrame() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        // A slow drift, a cut at 1.5 s, and one stray frame at 0.5 s.
+        QVERIFY(write(dir.filePath("s.qml"),
+                      "import QtQuick\nRectangle {\n    property real t\n    property real duration: 2\n"
+                      "    property int fps: 10\n    color: t < 1.5 ? \"black\" : \"#1040a0\"\n"
+                      "    Rectangle { width: 200; height: 200; x: 300 + parent.t * 40; y: 300; color: \"white\" }\n"
+                      "    Rectangle { width: 600; height: 600; x: 900; y: 200; color: \"#e04040\"; "
+                      "visible: Math.round(parent.t * 10) === 5 }\n}\n"));
+        const Run sheet = run({"sheet", "s.qml", "--json"}, dir.path());
+        QCOMPARE(sheet.code, 0);
+        const QJsonArray strips = QJsonDocument::fromJson(sheet.out).object()["sheets"].toArray()[0]
+                                      .toObject()["fast_changes"].toArray();
+        QStringList found;
+        for (const auto &strip : strips)
+            found << QString("%1 %2").arg(strip.toObject()["kind"].toString()).arg(strip.toObject()["frame"].toInt());
+        QVERIFY2(found.contains("change 15"), qPrintable(found.join(", ")));
+        QVERIFY2(found.contains("flash 5"), qPrintable(found.join(", ")));
+        QCOMPARE(strips[0].toObject()["times"].toArray().size(), 5);
+        // Asked for moments, it shows only those.
+        const Run times = run({"sheet", "s.qml", "--times", "0.5", "--json"}, dir.path());
+        QCOMPARE(QJsonDocument::fromJson(times.out).object()["sheets"].toArray()[0].toObject()["fast_changes"]
+                     .toArray().size(), 0);
+    }
+
     void cliRendersTheInstagramFeedFormat() {
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");

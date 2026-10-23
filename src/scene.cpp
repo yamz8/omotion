@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "studio.h"
+#include "measure.h"
 
 #include <QDir>
 #include <QFile>
@@ -260,7 +261,8 @@ Scene::~Scene() {
     m_engine.reset();
 }
 
-bool Scene::load(const QString &path, const QString &formatName, QString *error) {
+bool Scene::load(const QString &path, const QString &formatName, QString *error, double scale) {
+    m_scale = scale > 0 && scale <= 1 ? scale : 1;
     registerSceneTypes();
     m_root = nullptr;
     m_window.reset();
@@ -304,7 +306,7 @@ bool Scene::load(const QString &path, const QString &formatName, QString *error)
 
     m_window = std::make_unique<QQuickWindow>();
     m_window->setColor(Qt::black);
-    m_window->resize(m_format.size);
+    m_window->resize((QSizeF(m_format.size) * m_scale).toSize());
     m_root->setParent(m_window->contentItem());
     m_root->setParentItem(m_window->contentItem());
     m_root->setSize(m_format.size);
@@ -317,6 +319,10 @@ bool Scene::load(const QString &path, const QString &formatName, QString *error)
     }
     // After completion too, in case the scene bound its own size.
     m_root->setSize(m_format.size);
+    if (m_scale < 1) {
+        m_root->setTransformOrigin(QQuickItem::TopLeft);
+        m_root->setScale(m_scale);
+    }
     return readDeclarations(error);
 }
 
@@ -406,6 +412,23 @@ QImage Scene::frame(double t) {
     return m_window->grabWindow().convertToFormat(QImage::Format_RGB32);
 }
 
+namespace {
+// Positioners and layouts place their children when they're polished, which
+// otherwise happens only on the way to rendering.
+void polish(QQuickItem *item) {
+    item->ensurePolished();
+    for (QQuickItem *child : item->childItems())
+        polish(child);
+}
+}
+
+void Scene::seek(double t) {
+    if (!m_root)
+        return;
+    m_root->setProperty("t", t);
+    polish(m_root);
+}
+
 QList<double> Scene::sheetTimes() const {
     QList<double> times;
     if (m_beats.isEmpty()) {
@@ -428,7 +451,7 @@ QString Scene::beatNameAt(double t) const {
     return name;
 }
 
-QImage Scene::contactSheet(const QList<double> &times, int columns) {
+QImage Scene::contactSheet(const QList<double> &times, int columns, const QList<Strip> &strips) {
     const QSize frameSize = m_format.size;
     const bool portrait = frameSize.height() > frameSize.width();
     const bool square = frameSize.height() == frameSize.width();
@@ -439,9 +462,19 @@ QImage Scene::contactSheet(const QList<double> &times, int columns) {
     const int tileHeight = tileWidth * frameSize.height() / frameSize.width();
     const int gap = 16, label = 52, header = 64;
     const int rows = (times.size() + columns - 1) / columns;
+    const int width = gap + columns * (tileWidth + gap);
+    // A strip's frames share the sheet's width, however many there are.
+    int stripTile = 0, stripHeight = 0;
+    for (const auto &strip : strips)
+        if (!strip.times.isEmpty()) {
+            stripTile = qMax(stripTile, (width - gap) / int(strip.times.size()) - gap);
+            stripTile = qMin(stripTile, tileWidth);
+        }
+    for (const auto &strip : strips)
+        if (!strip.times.isEmpty())
+            stripHeight += header + stripTile * frameSize.height() / frameSize.width() + label + gap;
 
-    QImage sheet(gap + columns * (tileWidth + gap), header + rows * (tileHeight + label + gap),
-                 QImage::Format_RGB32);
+    QImage sheet(width, header + rows * (tileHeight + label + gap) + stripHeight, QImage::Format_RGB32);
     sheet.fill(QColor("#0e0e10"));
     QPainter painter(&sheet);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -480,6 +513,29 @@ QImage Scene::contactSheet(const QList<double> &times, int columns) {
         painter.setFont(small);
         painter.drawText(text, Qt::AlignBottom | Qt::AlignLeft,
                          QString("%1   frame %2").arg(seconds(times[i])).arg(int(std::lround(times[i] * m_fps))));
+    }
+
+    int top = header + rows * (tileHeight + label + gap);
+    for (const auto &strip : strips) {
+        if (strip.times.isEmpty())
+            continue;
+        const int stripTileHeight = stripTile * frameSize.height() / frameSize.width();
+        painter.setPen(QColor("#f2f2f2"));
+        painter.setFont(name);
+        painter.drawText(QRect(gap, top, width - 2 * gap, header), Qt::AlignVCenter | Qt::AlignLeft, strip.heading);
+        top += header;
+        for (int i = 0; i < strip.times.size(); ++i) {
+            const QRect tile(gap + i * (stripTile + gap), top, stripTile, stripTileHeight);
+            painter.drawImage(tile, frame(strip.times[i]));
+            painter.setPen(QColor("#3a3a40"));
+            painter.drawRect(tile.adjusted(0, 0, -1, -1));
+            painter.setPen(QColor("#9a9aa2"));
+            painter.setFont(small);
+            painter.drawText(QRect(tile.left(), tile.bottom() + 6, stripTile, label - 10), Qt::AlignTop | Qt::AlignLeft,
+                             QString("%1   frame %2").arg(seconds(strip.times[i]))
+                                 .arg(int(std::lround(strip.times[i] * m_fps))));
+        }
+        top += stripTileHeight + label + gap;
     }
     return sheet;
 }
@@ -564,8 +620,14 @@ QList<Problem> Scene::check() {
         }
     }
 
-    if (!studio.isEmpty() && QFileInfo(m_path) == QFileInfo(QDir(studio).filePath("scene.qml")))
+    if (!studio.isEmpty() && QFileInfo(m_path) == QFileInfo(QDir(studio).filePath("scene.qml"))) {
         problems << assetManifest(sources, studio);
+        problems << Measure::style(*this, QDir(studio).filePath("style-guide.md"));
+    }
+    // The checklist's measurable items: text a viewer can read, and a reason
+    // to stop scrolling.
+    problems << Measure::text(*this);
+    problems << Measure::hook(*this);
 
     Scene other;
     QString error;

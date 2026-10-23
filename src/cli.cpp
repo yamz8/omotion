@@ -1,4 +1,5 @@
 #include "cli.h"
+#include "measure.h"
 #include "scene.h"
 #include "studio.h"
 
@@ -282,6 +283,8 @@ int sheet(const QStringList &arguments) {
     command.parser.addOption({"times", "Comma-separated seconds to show instead of the beats", "list"});
     command.parser.addOption({{"o", "output"}, "PNG file (with the format added when there are several), or a folder (default: <scene>-<format>-sheet.png beside the scene)", "path"});
     command.parser.addOption({"columns", "Tiles per row", "count"});
+    command.parser.addOption({"strips", "Strips of the film's fastest changes to add below the beats, five frames "
+                                        "each (default: 3; 0 for none)", "count"});
     command.format("the scene's first format");
     command.json();
     command.parser.process(arguments);
@@ -308,6 +311,48 @@ int sheet(const QStringList &arguments) {
         }
         if (times.isEmpty())
             return fail("No moments to show.");
+        // The fastest changes, found by comparing every frame rendered small,
+        // are where a half-drawn or doubled frame hides between the beats.
+        QList<Scene::Strip> strips;
+        QJsonArray stripList;
+        const int stripCount = command.parser.isSet("strips") ? command.parser.value("strips").toInt() : 3;
+        if (!command.parser.isSet("times") && stripCount > 0) {
+            Scene small;
+            if (!small.load(command.scene(), name, &error, 0.125))
+                return fail(error);
+            QList<double> flashes;
+            const QList<double> changes = Measure::changes(small, &flashes);
+            // A frame unlike both its neighbors is worth a strip even when it
+            // isn't among the largest changes, which cuts usually are.
+            // A stray frame also makes the largest changes, as it comes and
+            // goes, so it takes their place.
+            QList<double> strays;
+            for (double t : Measure::fastestChanges(flashes, scene.fps(), 2))
+                if (flashes[int(std::lround(t * scene.fps()))] > 0.004)
+                    strays << t;
+            QList<QPair<double, QString>> moments;
+            for (double t : Measure::fastestChanges(changes, scene.fps(), stripCount))
+                if (std::none_of(strays.cbegin(), strays.cend(), [&](double f) { return std::abs(f - t) < 0.2; }))
+                    moments << qMakePair(t, QString("Fast change"));
+            for (double t : strays)
+                moments << qMakePair(t, QString("A frame unlike its neighbors"));
+            std::sort(moments.begin(), moments.end());
+            for (const auto &[t, kind] : moments) {
+                const int at = int(std::lround(t * scene.fps()));
+                Scene::Strip strip;
+                for (int f = qMax(0, at - 2); f <= qMin(scene.frameCount() - 1, at + 2); ++f)
+                    strip.times << f / double(scene.fps());
+                strip.heading = QString("%1 at %2 (frame %3)%4")
+                                    .arg(kind, seconds(t)).arg(at)
+                                    .arg(scene.beatNameAt(t).isEmpty() ? QString() : ", in " + scene.beatNameAt(t));
+                strips << strip;
+                QJsonArray frames;
+                for (double s : strip.times)
+                    frames << s;
+                stripList << QJsonObject{{"at", t}, {"frame", at}, {"kind", kind == "Fast change" ? "change" : "flash"},
+                                         {"times", frames}};
+            }
+        }
         const QString file = QString("%1-%2-sheet.png").arg(QFileInfo(scene.path()).completeBaseName(),
                                                             scene.format().slug());
         QString output = command.parser.value("output");
@@ -318,12 +363,13 @@ int sheet(const QStringList &arguments) {
         else if (formats.size() > 1)
             output = withFormat(output, scene.format().slug());
         QDir().mkpath(QFileInfo(output).absolutePath());
-        if (!savePng(scene.contactSheet(times, command.parser.value("columns").toInt()), output))
+        if (!savePng(scene.contactSheet(times, command.parser.value("columns").toInt(), strips), output))
             return fail("Could not save " + output);
         QJsonArray tiles;
         for (double t : times)
             tiles << QJsonObject{{"at", t}, {"frame", int(std::lround(t * scene.fps()))}, {"beat", scene.beatNameAt(t)}};
-        sheets << QJsonObject{{"image", QFileInfo(output).absoluteFilePath()}, {"format", name}, {"tiles", tiles}};
+        sheets << QJsonObject{{"image", QFileInfo(output).absoluteFilePath()}, {"format", name}, {"tiles", tiles},
+                              {"fast_changes", stripList}};
         if (!command.parser.isSet("json"))
             print(stdout, "Rendered " + output);
     }

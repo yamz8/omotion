@@ -15,6 +15,7 @@
 
 #include "backend.h"
 #include "filepicker.h"
+#include "measure.h"
 #include "scene.h"
 #include "studio.h"
 #include "theme.h"
@@ -133,10 +134,11 @@ private slots:
     void checkFindsTextOutsideTheFrame()
     {
         const QByteArray wide = "    Text { x: 40; y: 300; text: \"A headline much too wide to fit\"; font.pixelSize: 100; color: \"white\" }\n";
-        QCOMPARE(problemsFor(sceneSource(wide), "16:9").size(), 0);
+        QVERIFY(!anyMessage(problemsFor(sceneSource(wide), "16:9"), "outside the"));
         QVERIFY(anyMessage(problemsFor(sceneSource(wide), "9:16"), "runs outside the 9:16 frame"));
         // Clipped away by its parent, it isn't on screen to overflow.
-        QCOMPARE(problemsFor(sceneSource("    Item { width: 600; height: 600; clip: true\n" + wide + "    }\n"), "9:16").size(), 0);
+        QVERIFY(!anyMessage(problemsFor(sceneSource("    Item { width: 600; height: 600; clip: true\n" + wide + "    }\n"), "9:16"),
+                            "outside the"));
     }
 
     void checkReadsBeatsAndAudio()
@@ -145,6 +147,102 @@ private slots:
             "{ at: 1, name: \"Two\" }", "{ at: 3, name: \"Late\" }"));
         QVERIFY(anyMessage(problems, "outside the scene's 2.00s"));
         QVERIFY(anyMessage(problems, "missing.wav does not exist"));
+    }
+
+    // The review checklist's text items, measured at every frame.
+    void measuresTextAViewerCanRead()
+    {
+        auto text = [](const QByteArray &items, const QString &format = "16:9") {
+            QTemporaryDir dir;
+            write(dir.filePath("s.qml"), sceneSource(items));
+            Scene scene;
+            QString error;
+            if (!scene.load(dir.filePath("s.qml"), format, &error))
+                return QList<Problem>{Problem{true, error, {}, -1, {}}};
+            return Measure::text(scene);
+        };
+        const QByteArray big = "font.pixelSize: 60; color: \"white\"";
+        QCOMPARE(text("    Text { x: 300; y: 300; text: \"Readable\"; " + big + " }\n").size(), 0);
+
+        // On screen for 0.2 s, where 0.6 s is the least anything needs.
+        const QList<Problem> brief = text("    Text { x: 300; y: 300; text: \"Gone\"; " + big +
+                                          "; visible: parent.t >= 0.5 && parent.t < 0.7 }\n");
+        QVERIFY(anyMessage(brief, "Text \"Gone\" is fully on screen for 0.20 s (0.50s to 0.70s)"));
+        QCOMPARE(brief.first().at, 0.5);
+        QVERIFY(!brief.first().area.isEmpty());
+
+        // Typing out, it's read in its final form only.
+        QCOMPARE(text("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.ceil(parent.t * 20)); " + big +
+                      " }\n").size(), 0);
+
+        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"Small\"; font.pixelSize: 30 }\n"),
+                           "Text at 30 px is 6.1 px when the film plays 390 px wide on a phone; make it at least 50 px "
+                           "in 16:9: \"Small\"."));
+        // 30 px is readable in a 1080-wide frame.
+        QVERIFY(!anyMessage(text("    Text { x: 300; y: 600; text: \"Small\"; font.pixelSize: 30 }\n", "9:16"), "px"));
+        // A scaled parent scales the text it holds.
+        QVERIFY(anyMessage(text("    Item { scale: 0.5; transformOrigin: Item.TopLeft\n"
+                                "        Text { x: 300; y: 300; text: \"Shrunk\"; " + big + " } }\n"),
+                           "Text at 30 px"));
+
+        QVERIFY(anyMessage(text("    Text { x: 20; y: 300; text: \"Edge\"; " + big + " }\n"),
+                           "Text \"Edge\" crosses the 16:9 safe area"));
+        // The bottom fifth of a vertical film sits under the platform's controls.
+        QVERIFY(anyMessage(text("    Text { x: 200; y: 1700; text: \"Low\"; " + big + " }\n", "9:16"),
+                           "crosses the 9:16 safe area (the top 12%, the bottom 20%"));
+
+        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"First\"; " + big + " }\n"
+                                "    Text { x: 320; y: 310; text: \"Second\"; " + big + " }\n"),
+                           "runs into text"));
+        // Text set on a card belongs there; text crossing its edge has run into it.
+        const QByteArray card = "    Rectangle { x: 600; y: 600; width: 400; height: 200; color: \"#333\" }\n";
+        QCOMPARE(text(card + "    Text { x: 620; y: 620; text: \"On it\"; " + big + " }\n").size(), 0);
+        QVERIFY(anyMessage(text(card + "    Text { x: 900; y: 620; text: \"Across it\"; " + big + " }\n"),
+                           "Text \"Across it\" runs into a 400 x 200 rectangle from 0.00s"));
+    }
+
+    void measuresTheHookAndTheFastestChanges()
+    {
+        QTemporaryDir dir;
+        // Black until a square arrives at 2.5 s.
+        write(dir.filePath("late.qml"), "import QtQuick\nRectangle {\n    property real t\n    property real duration: 3\n"
+                                        "    color: \"black\"\n    Rectangle { width: 300; height: 300; color: \"white\"; "
+                                        "visible: parent.t > 2.5 }\n}\n");
+        Scene late;
+        QString error;
+        QVERIFY2(late.load(dir.filePath("late.qml"), "16:9", &error), qPrintable(error));
+        const QList<Problem> hook = Measure::hook(late);
+        QVERIFY(anyMessage(hook, "Frame 0 shows only one color"));
+        QVERIFY(anyMessage(hook, "Nothing visibly changes in the first two seconds"));
+
+        Scene small;
+        QVERIFY(small.load(dir.filePath("late.qml"), "16:9", &error, 0.1));
+        QCOMPARE(small.frame(0).size(), QSize(192, 108));
+        const QList<double> changes = Measure::changes(small);
+        QCOMPARE(changes.size(), 90);
+        QCOMPARE(Measure::fastestChanges(changes, 30), QList<double>{76 / 30.0});
+
+        QList<double> made(40, 0);
+        made[5] = 0.3, made[6] = 0.2, made[20] = 0.1, made[30] = 0.05, made[35] = 0.01;
+        QCOMPARE(Measure::fastestChanges(made, 10, 3, 0.5), QList<double>({0.5, 2.0, 3.0}));
+    }
+
+    void measuresTheFilmAgainstItsStyleGuide()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        write(QDir(root).filePath("scene.qml"),
+              sceneSource("    Text { x: 300; y: 300; text: \"Hi\"; font.family: \"Serif Pro\"; color: \"#ff0000\" }\n"));
+        Scene scene;
+        QVERIFY(scene.load(QDir(root).filePath("scene.qml"), "16:9", &error));
+        // The template guide holds no palette yet.
+        QCOMPARE(Measure::style(scene, QDir(root).filePath("style-guide.md")).size(), 0);
+        write(QDir(root).filePath("style-guide.md"), "Background black, type #FFFFFF in Serif Pro.\n");
+        const QList<Problem> off = Measure::style(scene, QDir(root).filePath("style-guide.md"));
+        QCOMPARE(off.size(), 1);
+        QVERIFY(off[0].message.startsWith("Colors that style-guide.md's palette doesn't name: #ff0000 (beat \"One\")"));
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()
