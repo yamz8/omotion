@@ -74,7 +74,8 @@ Fill in `brief.md`, keeping two kinds of line apart:
   4:5 for the Instagram and Facebook feeds, 9:16 for Stories, Reels, and
   TikTok.
 
-Collect the real assets into `assets/` and list each in `assets/assets.md`
+Collect the real assets into `assets/` (`omotion capture <url>` takes a
+product page's screenshot and lists it) and list each in `assets/assets.md`
 with where it came from, naming its file by its path in `assets/`
 (`screens/editor.png`, or `slides/*.png` for a set); list the ones you still
 need there too, marked missing. Fonts and sound are assets too. `check`
@@ -91,8 +92,10 @@ Brand colors and fonts don't block: without them you propose a style at gate 2.
 
 ## Gate 2: Style guide and shot list (the person approves)
 
-Given a reference (a frame, a film, earlier work), write what you learned in
-`style-guide.md` in measurable terms: actual colors, not "premium";
+Given a reference (a frame, a film, earlier work), run `omotion reference
+<film or images> --write film/style-guide.md` for its measured palette,
+pacing, and motion, then complete what you learned in `style-guide.md` in
+measurable terms: actual colors, not "premium";
 typefaces and weights; where the eye goes first; the time between meaningful
 changes. Without one, write "none provided" and fill the same headings with
 the style you propose, marked as a proposal. If a reference is unclear, ask
@@ -257,4 +260,4 @@ beat; strip in reviews/strip-gates-16x9.png`.
 - `omotion open film/scene.qml` opens the studio window for them; it needs
   their desktop, so don't wait on it.
 
-<!-- omotion 0.1.0 skill 9d9b6aeb57ea -->
+<!-- omotion 0.1.0 skill 8bcc9a3f56ba -->

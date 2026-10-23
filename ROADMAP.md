@@ -308,7 +308,7 @@ asked for out of order in under 2 s, decoding included.
 
 ### v1.0: Production · L
 
-- **Deliverables from §1 and the final prompt**: final videos, poster frames,
+- ✅ **Deliverables from §1 and the final prompt**: final videos, poster frames,
   contact sheets, storyboard PDF, source, asset list, and a short "what still
   needs human review" note.
 - **Speed**: parallel rendering across processes by frame range; progress and

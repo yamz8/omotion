@@ -19,6 +19,7 @@
 
 #include "backend.h"
 #include "filepicker.h"
+#include "deliver.h"
 #include "measure.h"
 #include "reference.h"
 #include "review.h"
@@ -618,6 +619,41 @@ private slots:
         QCOMPARE(QDir(film.filePath("renders/.cache/clips")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 1);
         for (const auto &problem : scene.check())
             QVERIFY2(!problem.message.contains("assets"), qPrintable(problem.message));
+    }
+
+    void deliverHandsOverEverything()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString scene = dir.filePath("film/scene.qml");
+        write(scene, sceneSource());
+        write(dir.filePath("film/notes.md"), "# Notes\n\n- [ ] 001 · 1.00s · 16:9 · Two · (10, 10)\n  note: bigger\n");
+        QJsonObject result;
+        QStringList steps;
+        QVERIFY2(Deliver::write(scene, {"16:9", "9:16"}, {}, &result, &error, [&](const QString &s) { steps << s; }),
+                 qPrintable(error));
+        const QDir out(dir.filePath("film/deliverables"));
+        for (const auto &file : {"videos/film-16x9.mp4", "videos/film-9x16.mp4", "posters/film-16x9.png",
+                                 "posters/film-9x16.png", "sheets/film-16x9-sheet.png", "storyboard.pdf",
+                                 "source/scene.qml", "source/brief.md", "assets.md", "REVIEW.md"})
+            QVERIFY2(QFileInfo(out.filePath(file)).size() > 0, file);
+        QVERIFY(!QFileInfo::exists(out.filePath("source/.claude")));
+        QFile review(out.filePath("REVIEW.md"));
+        QVERIFY(review.open(QIODevice::ReadOnly));
+        const QString text = QString::fromUtf8(review.readAll());
+        QVERIFY(text.contains("- Gate 1, References and assets"));
+        QVERIFY(text.contains("- Note 001 at 1.00s (16:9) is open: bigger"));
+        QVERIFY(text.contains("has no purpose"));
+        QVERIFY(text.contains("the music's license"));
+        QVERIFY(steps.contains("Storyboard"));
+        // A second delivery encodes nothing again.
+        Scene again;
+        QVERIFY(again.load(scene, "16:9", &error));
+        QVERIFY(again.render(Scene::defaultOutput(scene, "16:9"), &error));
+        QCOMPARE(again.reusedFrames(), 20);
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

@@ -1,4 +1,5 @@
 #include "cli.h"
+#include "deliver.h"
 #include "measure.h"
 #include "reference.h"
 #include "review.h"
@@ -588,6 +589,40 @@ int reference(const QStringList &arguments) {
     return 0;
 }
 
+int deliver(const QStringList &arguments) {
+    Command command("deliver", "Hand the film over: render every format, then write the videos, posters, contact "
+                               "sheets, a storyboard PDF, the source with its assets, the asset list, and a note on what "
+                               "still needs a person's review, into deliverables/.");
+    command.parser.addOption({{"o", "output"}, "Folder for the deliverables (default: deliverables/ in the film's folder)",
+                              "folder"});
+    command.format("all of the scene's formats");
+    command.seed();
+    command.json();
+    command.parser.process(arguments);
+    QStringList formats;
+    if (!command.formats(true, &formats))
+        return 1;
+    const bool json = command.parser.isSet("json");
+    QJsonObject result;
+    QString error;
+    if (!Deliver::write(command.scene(), formats, command.parser.value("output"), &result, &error,
+                        [&](const QString &what) {
+                            if (!json)
+                                print(stdout, what + "...");
+                        }))
+        return fail(error);
+    if (json) {
+        print(result);
+        return 0;
+    }
+    print(stdout, "Delivered " + result["folder"].toString() + ": " +
+                      QString("%1 videos, posters, sheets, storyboard.pdf, source/, and REVIEW.md")
+                          .arg(result["videos"].toArray().size()));
+    if (result["open"].toInt() > 0)
+        print(stdout, QString("REVIEW.md lists %1 things still open.").arg(result["open"].toInt()));
+    return 0;
+}
+
 int capture(const QStringList &arguments) {
     Command command("capture", "Capture a web page as a PNG with Chromium, for a film's assets: in a film's folder it "
                                "goes in assets/screens/ and assets.md lists it with its address, for the person to "
@@ -728,6 +763,7 @@ QString cliSummary() {
            "  sheet <scene>             Render a contact sheet of the beats to PNG\n"
            "  review <scene>            Write the next review: sheets, measures, scores, defects\n"
            "  render <scene>            Encode MP4s, one per format\n"
+           "  deliver <scene>           Every deliverable: videos, posters, sheets, storyboard, source\n"
            "  beats <track>             Measure a track's tempo and beats for cutting to it\n"
            "  reference <video|images>  Measure a reference's palette, pacing, and motion\n"
            "  capture <url>             Capture a page into the film's assets\n"
@@ -736,7 +772,7 @@ QString cliSummary() {
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "reference", "capture", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "reference", "capture", "deliver", "skill", "help"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
@@ -751,6 +787,7 @@ int runCli(const QStringList &arguments) {
            : command == "beats"  ? beats(arguments)
            : command == "reference" ? reference(arguments)
            : command == "capture" ? capture(arguments)
+           : command == "deliver" ? deliver(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
 }

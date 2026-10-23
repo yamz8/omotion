@@ -76,6 +76,7 @@ struct ShotListBeat {
     QString enters;
     QString exits;
     QString why;
+    QString onScreen; // Every word on screen in the beat, as the shot list has it.
 };
 // Empty while shotlist.md is missing or still the template.
 QList<ShotListBeat> readShotList(const QString &root);

@@ -204,7 +204,8 @@ defect to fix.
   sound, `on` the beat it belongs to. If the sound has no shape without the
   picture, it isn't finished. The music's license is the person's decision.
 - **Render:** `omotion render film/scene.qml --json` writes one MP4 per format
-  into `renders/`.
+  into `renders/`; once the person approves, `omotion deliver
+  film/scene.qml` hands everything over in `deliverables/`.
 - **Posters:** the strongest frame in each format (`omotion frame ... -o
   film/renders/`).
 - **Hand-off:** the videos, posters, contact sheets, and a short note on

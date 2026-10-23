@@ -151,7 +151,9 @@ QByteArray inputsKey(const QString &scenePath, const QString &outputFolder, cons
         const QString absolute = it.next();
         const QString path = folder.relativeFilePath(absolute);
         const QString top = path.section('/', 0, 0);
-        if (top == "renders" || top == "reviews" || top.startsWith('.') || absolute.startsWith(outputFolder + "/"))
+        // What omotion writes is never what a frame is made from.
+        if (top == "renders" || top == "reviews" || top == "deliverables" || top.startsWith('.') ||
+            absolute.startsWith(outputFolder + "/"))
             continue;
         // A scene in a folder this big isn't a film's folder; don't cache it.
         if (files.size() > 5000)

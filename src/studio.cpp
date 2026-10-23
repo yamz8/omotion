@@ -331,6 +331,7 @@ QList<Studio::ShotListBeat> Studio::readShotList(const QString &root) {
             last = key == "enters" ? &beats.last().enters
                    : key == "exits" ? &beats.last().exits
                    : key == "why"   ? &beats.last().why
+                   : key.startsWith("on screen") ? &beats.last().onScreen
                                     : nullptr;
             if (last)
                 *last = match.captured(2).trimmed();
