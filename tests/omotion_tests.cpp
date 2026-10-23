@@ -356,7 +356,7 @@ private slots:
         write(QDir(root).filePath("shotlist.md"),
               "# Shot list\n\n00.0-01.0s   ONE: \"a subtitle\"\n"
               "  enters: an empty frame\n  action: ignored\n  exits: the slide,\n    full frame.\n  why: the hook\n\n"
-              "01.0-02.0s   TWO\n  enters: the slide\n  exits: the end card\n\nFORMATS\n16:9: wide\n");
+              "01.0-02.0s   TWO (the poster)\n  enters: the slide\n  exits: the end card\n\nFORMATS\n16:9: wide\n");
         const auto shots = Studio::readShotList(root);
         QCOMPARE(shots.size(), 2);
         QCOMPARE(shots[0].name, QString("ONE"));
