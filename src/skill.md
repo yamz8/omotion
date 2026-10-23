@@ -5,7 +5,7 @@ description: |
   data stories, kinetic typography) with omotion: a studio folder holding the
   brief, style guide, and shot list, and a QML scene in which every frame is a
   function of time, approved at gates by the person, checked, reviewed on
-  contact sheets, and rendered to MP4 in 16:9, 9:16, and 1:1. Use for ANY
+  contact sheets, and rendered to MP4 in 16:9, 9:16, 1:1, and 4:5. Use for ANY
   request to make, change, review, or export a video or animation with omotion,
   and for any .qml file that is an omotion scene.
 ---
@@ -71,7 +71,8 @@ Fill in `brief.md`, keeping two kinds of line apart:
   draft them and mark them as proposals. A proposal states only facts the
   person gave you, with a visible gap for anything unconfirmed. Propose
   formats from where the film will be posted: 16:9 and 1:1 for an X feed,
-  9:16 for Stories, Reels, and TikTok.
+  4:5 for the Instagram and Facebook feeds, 9:16 for Stories, Reels, and
+  TikTok.
 
 Collect the real assets into `assets/` and list each in `assets/assets.md`
 with where it came from, naming its file by its path in `assets/`
@@ -112,8 +113,8 @@ or demo slide showing a price, a plan, or a number the brief doesn't have
 makes that claim to the viewer. Replace that sample content, or ask.
 
 Compose each format on purpose: 16:9 has more spatial context, 9:16 fewer
-elements and a stronger vertical hierarchy, 1:1 tighter type and shorter
-holds. Never crop one from another. Beats start at the same times in every
+elements and a stronger vertical hierarchy, 4:5 a tall feed post between the
+two, 1:1 tighter type and shorter holds. Never crop one from another. Beats start at the same times in every
 format; within a beat, timing may differ.
 
 **Stop.** Show the style guide and shot list, and wait for approval before
@@ -149,7 +150,7 @@ every PNG. Judge only the rendered frames, not what you meant to make.
 1. **Text size at phone width.** In a feed the film plays about 390 px wide.
    The smallest text must be at least 10 px there: font size × 390 ÷ the
    frame's width. That is about 50 px in a 1920-wide 16:9 frame, and about
-   28 px in a 1080-wide 9:16 or 1:1 frame. List every `pixelSize` in the scene
+   28 px in a 1080-wide 9:16, 4:5, or 1:1 frame. List every `pixelSize` in the scene
    and check each against its format.
 2. **Holds.** Every text, and every mark or badge that means something, is
    fully on screen for at least 0.6 s, or one second per 25 characters if

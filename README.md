@@ -17,7 +17,7 @@ the scene, and omotion:
   before anyone watches the film;
 - **checks it**: no wall clocks, no randomness that changes, no state carried
   between frames, no text outside the frame in any format;
-- **renders each format from the source**: 16:9, 9:16, and 1:1 are composed
+- **renders each format from the source**: 16:9, 9:16, 1:1, and 4:5 are composed
   by the scene, not cropped from one another, and encoded with ffmpeg.
 
 ## Making a film

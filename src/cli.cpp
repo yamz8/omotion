@@ -64,7 +64,7 @@ struct Command {
     }
     void json() { parser.addOption({"json", "Print the result as JSON"}); }
     void format(const QString &fallback) {
-        parser.addOption({"format", "16:9, 9:16, 1:1, or all (default: " + fallback + ")", "format"});
+        parser.addOption({"format", Formats::names().join(", ") + ", or all (default: " + fallback + ")", "format"});
     }
     QString argument(int index) const { return parser.positionalArguments().value(index); }
     QString scene() const { return argument(1); }

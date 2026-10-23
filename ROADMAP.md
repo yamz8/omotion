@@ -229,8 +229,9 @@ recognizably the same across states.
   content, and position across states.
 - **Style tokens**: palette and type from `style-guide.md` exposed as a `Style`
   object, so a film can't drift from its own guide.
-- **4:5**, the Instagram feed's format (1080×1350), beside 16:9, 9:16, and 1:1;
-  the first test agent asked for an Instagram film couldn't offer it.
+- ✅ **4:5**, the Instagram feed's format (1080×1350), beside 16:9, 9:16, and 1:1;
+  the first test agent asked for an Instagram film couldn't offer it. Moved
+  ahead of the checkpoint after a second agent hit the same gap.
 - **First-class formats**: per-format timing (1:1 gets "tighter typography and
   shorter holds", §8), layout helpers, and a starter composed for all three.
 - **A global seed** (`render --seed`) for repeatable variations.

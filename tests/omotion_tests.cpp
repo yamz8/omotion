@@ -51,6 +51,9 @@ private slots:
         QCOMPARE(format.size, QSize(1080, 1920));
         QCOMPARE(format.slug(), QString("9x16"));
         QVERIFY(!Formats::find("4:3"));
+        // The Instagram feed's tall post, which two test agents asked for.
+        QVERIFY(Formats::find("4x5", &format));
+        QCOMPARE(format.size, QSize(1080, 1350));
     }
 
     void motionHelpersArePure()

@@ -458,6 +458,17 @@ private slots:
         QVERIFY(QString::fromUtf8(result.out).contains("Timer runs on the wall clock"));
     }
 
+    void cliRendersTheInstagramFeedFormat() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        QVERIFY(write(dir.filePath("s.qml"), QByteArray(tinyScene).replace("\"1:1\"]", "\"4:5\"]")));
+        const Run frame = run({"frame", "s.qml", "--at", "0.5", "--format", "4:5", "--json"}, dir.path());
+        QCOMPARE(frame.code, 0);
+        QCOMPARE(QImage(QDir(dir.path()).filePath("s-4x5-0.50.png")).size(), QSize(1080, 1350));
+        QCOMPARE(run({"check", "s.qml"}, dir.path()).code, 0);
+    }
+
     void cliStatusSaysWhereTheFilmIs() {
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");

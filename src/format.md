@@ -13,7 +13,7 @@ Rectangle {
     property real t: 0                 // set by omotion; required
     property real duration: 9          // seconds; required
     property int fps: 30               // optional, 1 to 120
-    property string format: "16:9"     // set by omotion: "16:9", "9:16", or "1:1"
+    property string format: "16:9"     // set by omotion: "16:9", "9:16", "1:1", or "4:5"
     property var formats: ["16:9", "9:16"]   // the formats this scene is composed for
     property var beats: [              // the moments a viewer should notice
         { at: 0.0, name: "Hook", purpose: "why the viewer stays",
