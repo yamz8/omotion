@@ -56,9 +56,13 @@ struct Note {
     QStringList answers; // The agent's "fixed:" and "reply:" lines.
 };
 QList<Note> readNotes(const QString &root);
-// Appends the note with the next free id, which it returns; the rest of the
-// file is left as it is, so an agent's edits to other notes are kept.
+// Appends the note with the next free id, which it returns, and sets its
+// evidence to reviews/notes/<id>.png, so the id and the frame can't disagree.
+// The rest of the file is left as it is, so an agent's edits are kept.
 QString addNote(const QString &root, Note note, QString *error);
+// A note's time as notes.md writes it: precise to the frame at any rate up to
+// 120 fps, without trailing zeros past two decimals ("12.60", "0.033").
+QString noteTime(double at);
 // The note as one line, for pasting into an agent's terminal.
 QString noteReference(const Note &note);
 

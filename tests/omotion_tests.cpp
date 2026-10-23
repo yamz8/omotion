@@ -11,6 +11,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <cmath>
 
 #include "backend.h"
 #include "filepicker.h"
@@ -319,7 +320,7 @@ private slots:
         note.point = {1152, 446};
         note.target = "you approve";
         note.text = "these marks\nleave too soon";
-        note.evidence = "reviews/notes/001.png";
+        note.evidence = "ignored: the id decides it";
         QCOMPARE(Studio::addNote(root, note, &error), QString("001"));
         note.text = "second";
         note.target.clear();
@@ -342,12 +343,30 @@ private slots:
         QCOMPARE(notes[0].text, QString("these marks leave too soon"));
         QCOMPARE(notes[0].point, QPoint(1152, 446));
         QCOMPARE(notes[0].answers, QStringList{"fixed: held to 13.05 s; proof reviews/fix.png"});
+        QCOMPARE(notes[0].evidence, QString("reviews/notes/001.png"));
         QVERIFY(!notes[1].done);
         QCOMPARE(notes[1].target, QString());
+        QCOMPARE(notes[1].evidence, QString("reviews/notes/002.png"));
         QVERIFY(Studio::noteReference(notes[0]).startsWith("Note 001 in notes.md (12.60s in 16:9, beat Gates"));
         // Adding another keeps the agent's edits.
         QCOMPARE(Studio::addNote(root, note, &error), QString("003"));
         QVERIFY(Studio::readNotes(root)[0].done);
+
+        // A beat or target holding the heading's separator still reads back, so
+        // no note goes missing and no id is used twice.
+        note.beat = "Intro · Logo";
+        note.target = "a · b";
+        note.at = 1 / 30.0;
+        QCOMPARE(Studio::addNote(root, note, &error), QString("004"));
+        const auto all = Studio::readNotes(root);
+        QCOMPARE(all.size(), 4);
+        QCOMPARE(all[3].beat, QString("Intro - Logo"));
+        QCOMPARE(all[3].target, QString("a - b"));
+        // Frame-precise, so the note and its evidence are the same frame.
+        QCOMPARE(std::lround(all[3].at * 30), 1L);
+        QCOMPARE(Studio::noteTime(12.6), QString("12.60"));
+        QCOMPARE(Studio::noteTime(1 / 30.0), QString("0.033"));
+        QCOMPARE(Studio::addNote(root, note, &error), QString("005"));
     }
 
     void studioListsMissingAssetsAndActivity()

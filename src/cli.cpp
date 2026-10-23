@@ -26,8 +26,17 @@ int fail(const QString &message) {
     return 1;
 }
 QString seconds(double t) { return QString::number(t, 'f', 2) + "s"; }
-// A path ending in a slash, or naming a folder that exists, is where the file goes.
-bool namesDirectory(const QString &path) { return path.endsWith('/') || QFileInfo(path).isDir(); }
+// A path ending in a slash, naming a folder that exists, or without an
+// extension is a folder for the file to go in.
+bool namesDirectory(const QString &path) {
+    return path.endsWith('/') || QFileInfo(path).isDir() || QFileInfo(path).suffix().isEmpty();
+}
+// Written beside and renamed into place, so a window watching the folder
+// never loads half a PNG.
+bool savePng(const QImage &image, const QString &path) {
+    QSaveFile file(path);
+    return file.open(QIODevice::WriteOnly) && image.save(&file, "PNG") && file.commit();
+}
 // A file name given for several formats keeps its name, with the format added:
 // proof.png becomes proof-16x9.png, so one format never overwrites another,
 // and no other file is touched.
@@ -255,7 +264,7 @@ int frame(const QStringList &arguments) {
     else if (namesDirectory(output))
         output = QDir(output).filePath(name);
     QDir().mkpath(QFileInfo(output).absolutePath());
-    if (!image.save(output, "PNG"))
+    if (!savePng(image, output))
         return fail("Could not save " + output);
     if (command.parser.isSet("json"))
         print({{"image", QFileInfo(output).absoluteFilePath()}, {"at", at}, {"format", scene.format().name},
@@ -308,7 +317,7 @@ int sheet(const QStringList &arguments) {
         else if (formats.size() > 1)
             output = withFormat(output, scene.format().slug());
         QDir().mkpath(QFileInfo(output).absolutePath());
-        if (!scene.contactSheet(times, command.parser.value("columns").toInt()).save(output, "PNG"))
+        if (!savePng(scene.contactSheet(times, command.parser.value("columns").toInt()), output))
             return fail("Could not save " + output);
         QJsonArray tiles;
         for (double t : times)

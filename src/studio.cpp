@@ -222,18 +222,21 @@ QString Studio::addNote(const QString &root, Note note, QString *error) {
     for (const auto &other : readNotes(root))
         last = qMax(last, other.id.toInt());
     note.id = QString("%1").arg(last + 1, 3, 10, QChar('0'));
+    note.evidence = "reviews/notes/" + note.id + ".png";
 
-    auto oneLine = [](QString text) { return text.replace('\n', ' ').replace('"', '\'').simplified(); };
+    // The heading's fields are separated by "·", so none of them may hold one.
+    auto oneLine = [](QString text) {
+        return text.replace('\n', ' ').replace('"', '\'').replace(QString("·"), "-").simplified();
+    };
     QString entry = QString("- [ ] %1 · %2s · %3 · %4 · (%5, %6)")
-                        .arg(note.id, QString::number(note.at, 'f', 2), note.format,
+                        .arg(note.id, noteTime(note.at), oneLine(note.format),
                              note.beat.isEmpty() ? QString("no beat") : oneLine(note.beat))
                         .arg(note.point.x())
                         .arg(note.point.y());
     if (!note.target.trimmed().isEmpty())
         entry += " · on \"" + oneLine(note.target).left(60) + "\"";
     entry += "\n";
-    if (!note.evidence.isEmpty())
-        entry += "  evidence: " + note.evidence + "\n";
+    entry += "  evidence: " + note.evidence + "\n";
     entry += "  note: " + oneLine(note.text) + "\n";
 
     if (!contents.endsWith('\n'))
@@ -244,8 +247,15 @@ QString Studio::addNote(const QString &root, Note note, QString *error) {
     return note.id;
 }
 
+QString Studio::noteTime(double at) {
+    QString text = QString::number(at, 'f', 3);
+    if (text.endsWith('0'))
+        text.chop(1);
+    return text;
+}
+
 QString Studio::noteReference(const Note &note) {
-    QString where = QString("%1s in %2").arg(QString::number(note.at, 'f', 2), note.format);
+    QString where = QString("%1s in %2").arg(noteTime(note.at), note.format);
     if (!note.beat.isEmpty() && note.beat != "no beat")
         where += ", beat " + note.beat;
     if (!note.target.isEmpty())

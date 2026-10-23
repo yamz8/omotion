@@ -334,24 +334,20 @@ QString kindOf(const QString &suffix) {
 
 void Backend::reloadStudio() {
     watchStudio();
-    m_gates.clear();
-    m_assets.clear();
-    m_evidence.clear();
-    m_notes.clear();
-    m_missing.clear();
-    m_activity.clear();
+    QVariantList gates, assets, evidence, notes;
+    QStringList missing, activity;
     if (!m_root.isEmpty()) {
         const QDir root(m_root);
         for (const auto &gate : Studio::readGates(m_root))
-            m_gates << QVariantMap{{"number", gate.number}, {"title", gate.title}, {"passed", gate.passed},
-                                   {"status", gate.status}, {"waiting", gate.waitingForPerson()},
-                                   // Gates 1, 2, and 6 are the person's to pass; the rest are the agent's.
-                                   {"person", gate.number == 1 || gate.number == 2 || gate.number == 6}};
+            gates << QVariantMap{{"number", gate.number}, {"title", gate.title}, {"passed", gate.passed},
+                                 {"status", gate.status}, {"waiting", gate.waitingForPerson()},
+                                 // Gates 1, 2, and 6 are the person's to pass; the rest are the agent's.
+                                 {"person", gate.number == 1 || gate.number == 2 || gate.number == 6}};
         for (const auto &info : QDir(root.filePath("assets")).entryInfoList(QDir::Files, QDir::Name))
             if (info.fileName() != "assets.md")
-                m_assets << QVariantMap{{"name", info.fileName()}, {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
-                                        {"kind", kindOf(info.suffix())}};
-        m_missing = Studio::missingAssets(m_root);
+                assets << QVariantMap{{"name", info.fileName()}, {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
+                                      {"kind", kindOf(info.suffix())}};
+        missing = Studio::missingAssets(m_root);
 
         QFileInfoList files = QDir(root.filePath("reviews")).entryInfoList({"*.png", "*.md", "*.jpg"}, QDir::Files);
         files += QDir(root.filePath("renders")).entryInfoList({"*.mp4", "*.png", "*.webm", "*.mov"}, QDir::Files);
@@ -359,19 +355,37 @@ void Backend::reloadStudio() {
             return a.lastModified() > b.lastModified();
         });
         for (const auto &info : files.mid(0, 40))
-            m_evidence << QVariantMap{{"name", info.fileName()}, {"path", root.relativeFilePath(info.absoluteFilePath())},
-                                      {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
-                                      {"kind", kindOf(info.suffix())}, {"modified", info.lastModified()}};
+            evidence << QVariantMap{{"name", info.fileName()}, {"path", root.relativeFilePath(info.absoluteFilePath())},
+                                    {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
+                                    {"kind", kindOf(info.suffix())}, {"modified", info.lastModified()}};
 
         for (const auto &note : Studio::readNotes(m_root)) {
-            const QString evidence = note.evidence.isEmpty() ? QString() : root.filePath(note.evidence);
-            m_notes << QVariantMap{{"id", note.id}, {"done", note.done}, {"at", note.at}, {"format", note.format},
-                                   {"beat", note.beat}, {"target", note.target}, {"text", note.text},
-                                   {"answers", note.answers}, {"evidence", note.evidence},
-                                   {"evidenceUrl", QFileInfo::exists(evidence) ? QUrl::fromLocalFile(evidence) : QUrl()}};
+            const QFileInfo proof(root.filePath(note.evidence));
+            notes << QVariantMap{{"id", note.id}, {"done", note.done}, {"at", note.at}, {"format", note.format},
+                                 {"beat", note.beat}, {"target", note.target}, {"text", note.text},
+                                 {"answers", note.answers}, {"evidence", note.evidence},
+                                 {"evidenceUrl", !note.evidence.isEmpty() && proof.isFile()
+                                                     ? QUrl::fromLocalFile(proof.absoluteFilePath()) : QUrl()},
+                                 // Changes when the frame is rewritten, so the card shows the new one.
+                                 {"evidenceStamp", proof.isFile() ? proof.lastModified().toMSecsSinceEpoch() : 0}};
         }
-        m_activity = Studio::readActivity(m_root);
+        activity = Studio::readActivity(m_root);
     }
+    auto update = [](auto &member, const auto &value, auto signal) {
+        if (member != value) {
+            member = value;
+            signal();
+        }
+    };
+    update(m_gates, gates, [this] { emit gatesChanged(); });
+    if (m_assets != assets || m_missing != missing) {
+        m_assets = assets;
+        m_missing = missing;
+        emit assetsChanged();
+    }
+    update(m_evidence, evidence, [this] { emit evidenceChanged(); });
+    update(m_notes, notes, [this] { emit notesChanged(); });
+    update(m_activity, activity, [this] { emit activityChanged(); });
     emit studioChanged();
 }
 
@@ -379,11 +393,6 @@ QString Backend::addNote(double at, const QString &format, const QString &beat, 
                          const QString &text) {
     if (m_root.isEmpty() || text.trimmed().isEmpty())
         return {};
-    int last = 0;
-    for (const auto &note : Studio::readNotes(m_root))
-        last = qMax(last, note.id.toInt());
-    const QString next = QString("%1").arg(last + 1, 3, 10, QChar('0'));
-
     Studio::Note note;
     note.at = at;
     note.format = format;
@@ -391,18 +400,38 @@ QString Backend::addNote(double at, const QString &format, const QString &beat, 
     note.point = {x, y};
     note.target = target;
     note.text = text;
-    note.evidence = "reviews/notes/" + next + ".png";
     QString error;
     const QString id = Studio::addNote(m_root, note, &error);
     if (id.isEmpty()) {
         setMessage(tr("Could not save the note: %1").arg(error), true);
         return {};
     }
-    // The evidence is the frame as it renders, made the same way an export is.
+    // The evidence is the frame as it renders, made the same way an export is,
+    // at exactly the time notes.md records. A failure is said, never hidden,
+    // since the note would otherwise point at a frame that doesn't exist.
     QDir(m_root).mkpath("reviews/notes");
-    QProcess::startDetached(m_renderer, {"frame", m_path, "--at", QString::number(at, 'f', 4), "--format", format,
-                                         "--mark", QString("%1,%2").arg(x).arg(y), "-o",
-                                         QDir(m_root).filePath("reviews/notes/" + id + ".png")});
+    auto *render = new QProcess(this);
+    render->setProcessChannelMode(QProcess::SeparateChannels);
+    auto failed = [this, id, render](const QString &why) {
+        setMessage(tr("Note %1 is saved, but its evidence frame couldn't be rendered: %2").arg(id, why), true);
+    };
+    connect(render, &QProcess::errorOccurred, this, [render, failed](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            failed(render->errorString());
+            render->deleteLater();
+        }
+    });
+    connect(render, &QProcess::finished, this, [this, render, failed](int code, QProcess::ExitStatus status) {
+        if (status != QProcess::NormalExit || code != 0) {
+            const QStringList lines = QString::fromUtf8(render->readAllStandardError()).trimmed().split('\n');
+            failed(lines.last().isEmpty() ? tr("the renderer stopped.") : lines.last());
+        }
+        reloadStudio();
+        render->deleteLater();
+    });
+    render->start(m_renderer, {"frame", m_path, "--at", Studio::noteTime(at), "--format", format, "--mark",
+                               QString("%1,%2").arg(x).arg(y), "-o",
+                               QDir(m_root).filePath("reviews/notes/" + id + ".png")});
     reloadStudio();
     setMessage(tr("Note %1 saved to notes.md. Tell your agent to check your notes.").arg(id), false);
     return id;

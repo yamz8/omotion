@@ -10,7 +10,7 @@ Rectangle {
     color: "#121215"
 
     property string selected: ""
-    signal seek(real time, string format)
+    signal noteSelected(string id)
 
     readonly property int openCount: {
         let count = 0
@@ -117,10 +117,7 @@ Rectangle {
                             font.underline: timeHover.hovered
                             HoverHandler { id: timeHover; cursorShape: Qt.PointingHandCursor }
                             TapHandler {
-                                onTapped: {
-                                    panel.selected = card.modelData.id
-                                    panel.seek(card.modelData.at, card.modelData.format)
-                                }
+                                onTapped: panel.noteSelected(card.modelData.id)
                             }
                         }
                         ToolButton {
@@ -152,10 +149,9 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: visible ? width * sourceSize.height / Math.max(1, sourceSize.width) : 0
                         visible: card.modelData.evidenceUrl != ""
-                        source: card.modelData.evidenceUrl
+                        source: card.modelData.evidenceUrl != "" ? card.modelData.evidenceUrl + "?" + card.modelData.evidenceStamp : ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
-                        cache: false
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: backend.openStudioPath(card.modelData.evidence) }
                     }

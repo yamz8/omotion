@@ -6,8 +6,8 @@ import QtMultimedia
 
 ApplicationWindow {
     id: win
-    width: backend.studioRoot !== "" ? 1480 : 1280
-    height: backend.studioRoot !== "" ? 900 : 820
+    width: 1280
+    height: 820
     minimumWidth: 760
     minimumHeight: 520
     visible: true
@@ -187,7 +187,15 @@ ApplicationWindow {
         function onSceneChanged() { win.loadScene() }
     }
 
-    Component.onCompleted: loadScene()
+    Component.onCompleted: {
+        // A studio needs room for its panels; the size is set once, so opening
+        // another scene never resizes a window the person has sized.
+        if (backend.studioRoot !== "") {
+            width = 1480
+            height = 900
+        }
+        loadScene()
+    }
 
     onSceneChanged: {
         if (ready && sceneFormats.indexOf(format) < 0)
@@ -491,7 +499,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     visible: win.studio && win.width >= 900
                     selected: win.selectedNote
-                    onSeek: (t, noteFormat) => win.seekNote(t, noteFormat)
+                    onNoteSelected: id => win.selectNote(id)
                 }
             }
 

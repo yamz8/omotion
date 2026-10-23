@@ -32,12 +32,14 @@ class Backend : public QObject {
     // The studio the scene belongs to, read from its files as the agent works.
     Q_PROPERTY(QString studioRoot READ studioRoot NOTIFY studioChanged)
     Q_PROPERTY(QString studioName READ studioName NOTIFY studioChanged)
-    Q_PROPERTY(QVariantList gates READ gates NOTIFY studioChanged)
-    Q_PROPERTY(QVariantList assets READ assets NOTIFY studioChanged)
-    Q_PROPERTY(QStringList missingAssets READ missingAssets NOTIFY studioChanged)
-    Q_PROPERTY(QVariantList evidence READ evidence NOTIFY studioChanged)
-    Q_PROPERTY(QStringList activity READ activity NOTIFY studioChanged)
-    Q_PROPERTY(QVariantList notes READ notes NOTIFY studioChanged)
+    // One signal each, sent only when that list really changed, so a line the
+    // agent adds to activity.md doesn't rebuild the notes the person is reading.
+    Q_PROPERTY(QVariantList gates READ gates NOTIFY gatesChanged)
+    Q_PROPERTY(QVariantList assets READ assets NOTIFY assetsChanged)
+    Q_PROPERTY(QStringList missingAssets READ missingAssets NOTIFY assetsChanged)
+    Q_PROPERTY(QVariantList evidence READ evidence NOTIFY evidenceChanged)
+    Q_PROPERTY(QStringList activity READ activity NOTIFY activityChanged)
+    Q_PROPERTY(QVariantList notes READ notes NOTIFY notesChanged)
 
 public:
     // renderer is the program that runs "render"; this binary by default.
@@ -100,6 +102,11 @@ signals:
     void exportChanged();
     void messageChanged();
     void studioChanged();
+    void gatesChanged();
+    void assetsChanged();
+    void evidenceChanged();
+    void activityChanged();
+    void notesChanged();
 
 private:
     void watch();

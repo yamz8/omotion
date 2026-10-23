@@ -69,7 +69,7 @@ tick the note and add a line under it:
 - [x] 004 · 12.60s · 16:9 · Gates · (1152, 446) · on "you approve"
   evidence: reviews/notes/004.png
   note: these marks leave too soon
-  fixed: marks now arrive at 11.2–11.4 s and hold to 13.05 s; proof reviews/fix004-16x9.png
+  fixed: marks now arrive at 11.2–11.4 s and hold to 13.05 s; proof reviews/fix-note004-16x9.png
 ```
 
 Name proof after its note (`reviews/fix-note004-16x9.png`), never over
