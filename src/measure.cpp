@@ -16,6 +16,7 @@
 #include <QSet>
 #include <algorithm>
 #include <numeric>
+#include <tuple>
 #include <cmath>
 
 namespace {
@@ -58,15 +59,16 @@ double drawnPixels(const QQuickItem *item) {
     return size * QLineF(item->mapToScene(QPointF(0, 0)), item->mapToScene(QPointF(0, 1))).length();
 }
 
-// Items stay alive for the whole measure, even ones a Loader or Repeater has
-// let go of: they're freed with deleteLater, which waits for the event loop,
-// and measuring never returns to it.
+// An item as it is on one frame. Everything a measure needs is read then,
+// since by the next frame the item may have moved, changed, or been let go.
 struct Seen {
-    QQuickItem *item;
-    QRectF rect;    // On the frame, as far as it's visible.
-    QRectF full;    // On the frame, all of it.
-    double opacity; // Including every ancestor's.
-    QString text;   // What a text item reads as, once per frame.
+    QQuickItem *item;  // Only to be read on its own frame.
+    QRectF rect;       // On the frame, as far as it's visible.
+    QRectF full;       // On the frame, all of it.
+    double opacity;    // Including every ancestor's.
+    QString text;      // What a text item reads as.
+    double pixels = 0; // The size a text's letters are drawn at.
+    int lines = 1;     // The lines a text is set in.
 };
 
 void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *seen) {
@@ -84,9 +86,11 @@ void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *see
         const QRectF shown = full & visible;
         // Read only once it's on the frame: clipped text costs nothing.
         if (!shown.isEmpty()) {
-            const QString text = isText(item) ? readable(item->property("text").toString()) : QString();
-            if (!isText(item) || !text.isEmpty())
-                seen->append({item, shown, full, opacity, text});
+            if (!isText(item))
+                seen->append({item, shown, full, opacity, {}});
+            else if (const QString text = readable(item->property("text").toString()); !text.isEmpty())
+                seen->append({item, shown, full, opacity, text, drawnPixels(item),
+                              qMax(1, item->property("lineCount").toInt())});
         }
     }
     for (QQuickItem *child : item->childItems())
@@ -96,8 +100,7 @@ void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *see
 // Where a text's letters are: its line boxes without the leading above and
 // below, which is about a fifth of a line at most sizes.
 QRectF glyphBox(const Seen &seen) {
-    const int lines = qMax(1, seen.item->property("lineCount").toInt());
-    const double inset = seen.rect.height() / lines * 0.2;
+    const double inset = seen.rect.height() / seen.lines * 0.2;
     return seen.rect.adjusted(0, inset, 0, -inset);
 }
 
@@ -110,9 +113,15 @@ bool isAncestor(const QQuickItem *ancestor, const QQuickItem *item) {
 
 // One text as the viewer sees it: an item showing one string, which is its key.
 struct Shown {
-    double peak = 0;       // Its highest opacity anywhere in the film.
-    QList<int> frames;     // Frames where it's at full strength and whole.
-    QHash<int, Seen> at;   // What it looked like at each of those frames.
+    double peak = 0;     // Its highest opacity anywhere in the film.
+    QMap<int, Seen> at;  // What it looked like at each frame it's drawn in.
+    QList<int> frames;   // Those where it's at its own full strength and whole.
+};
+
+// Where a text met something, read on the frame they met.
+struct Contact {
+    QString other;
+    QRectF area;
 };
 
 struct Run {
@@ -150,49 +159,52 @@ QList<Problem> Measure::text(Scene &scene) {
     const int frames = scene.frameCount();
     const double fps = scene.fps();
 
-    // Every frame, without rendering: each text and where it is, and what's
-    // drawn around it.
-    QMap<QPair<QQuickItem *, QString>, Shown> texts;
-    QHash<QQuickItem *, QStringList> strings; // Each item's texts, in the order they appear.
-    QHash<QPair<QQuickItem *, QQuickItem *>, QList<int>> overlaps;
-    QList<QList<Seen>> drawn(frames);
+    // Items by a number of their own, so an item made where a freed one was
+    // is never taken for it.
+    QHash<const QQuickItem *, int> ids;
+    int next = 0;
+    QObject watch;
+    auto idOf = [&](QQuickItem *item) {
+        if (const auto found = ids.constFind(item); found != ids.constEnd())
+            return *found;
+        QObject::connect(item, &QObject::destroyed, &watch, [&ids, item] { ids.remove(item); });
+        return ids[item] = next++;
+    };
+
+    // Every frame, without rendering: each text and where it is, and what it
+    // runs into.
+    QMap<QPair<int, QString>, Shown> texts;
+    QHash<int, QStringList> strings; // Each item's texts, in the order they appear.
+    QHash<int, QStringList> shapes;  // The same, with each number as #.
+    static const QRegularExpression number(R"(\d[\d,.]*)");
+    // By the text, the string it showed, and what it met.
+    QMap<std::tuple<int, QString, int>, QMap<int, Contact>> contacts;
     for (int i = 0; i < frames; ++i) {
         scene.seek(i / fps);
-        walk(scene.root(), 1, QRectF(-1e7, -1e7, 2e7, 2e7), &drawn[i]);
-        for (const Seen &seen : drawn[i]) {
-            if (!isText(seen.item))
+        QList<Seen> drawn;
+        walk(scene.root(), 1, QRectF(-1e7, -1e7, 2e7, 2e7), &drawn);
+        QList<int> id(drawn.size());
+        for (int k = 0; k < drawn.size(); ++k) {
+            const Seen &seen = drawn[k];
+            id[k] = idOf(seen.item);
+            if (seen.text.isEmpty())
                 continue;
-            const QString &text = seen.text;
-            Shown &shown = texts[{seen.item, text}];
+            Shown &shown = texts[{id[k], seen.text}];
             shown.peak = qMax(shown.peak, seen.opacity);
-            if (!strings[seen.item].contains(text))
-                strings[seen.item] << text;
-        }
-    }
-    // A text counts as shown where it's at its own full strength and whole.
-    for (int i = 0; i < frames; ++i)
-        for (const Seen &seen : drawn[i]) {
-            if (!isText(seen.item))
-                continue;
-            Shown &shown = texts[{seen.item, seen.text}];
-            if (shown.peak >= 0.3 && seen.opacity >= shown.peak * 0.95 && seen.rect == seen.full &&
-                frame.adjusted(-1, -1, 1, 1).contains(seen.full)) {
-                shown.frames << i;
-                shown.at.insert(i, seen);
+            shown.at.insert(i, seen);
+            if (!strings[id[k]].contains(seen.text)) {
+                strings[id[k]] << seen.text;
+                shapes[id[k]] << QString(seen.text).replace(number, "#");
             }
         }
-    // Only fully shown text runs into things: at full strength, against
-    // anything drawn that isn't its own container or the background.
-    for (int i = 0; i < frames; ++i)
-        for (const Seen &a : drawn[i]) {
-            if (!isText(a.item))
+        // Against anything drawn that isn't its own container or the background.
+        for (int k = 0; k < drawn.size(); ++k) {
+            const Seen &a = drawn[k];
+            if (a.text.isEmpty())
                 continue;
-            // Looked up in place: a Shown holds every frame it's seen in.
-            const auto found = texts.constFind({a.item, a.text});
-            if (found == texts.constEnd() || !found->at.contains(i))
-                continue;
-            for (const Seen &b : drawn[i]) {
-                if (b.item == a.item || isAncestor(b.item, a.item) || isAncestor(a.item, b.item) || b.opacity < 0.3)
+            for (int m = 0; m < drawn.size(); ++m) {
+                const Seen &b = drawn[m];
+                if (m == k || isAncestor(b.item, a.item) || isAncestor(a.item, b.item) || b.opacity < 0.3)
                     continue;
                 if (b.full.width() * b.full.height() >= frame.width() * frame.height() * 0.9)
                     continue;
@@ -200,25 +212,38 @@ QList<Problem> Measure::text(Scene &scene) {
                 if (both.isEmpty())
                     continue;
                 bool runsInto;
-                if (isText(b.item)) {
+                if (!b.text.isEmpty()) {
                     // Text over text: their glyphs, not their line boxes, which
                     // tight leading overlaps on purpose.
                     const QRectF glyphs = glyphBox(a) & glyphBox(b);
                     const double smaller = qMin(a.rect.width() * a.rect.height(), b.rect.width() * b.rect.height());
-                    runsInto = a.item < b.item && !glyphs.isEmpty() && // Each pair once.
+                    runsInto = id[k] < id[m] && !glyphs.isEmpty() && // Each pair once.
                                glyphs.width() * glyphs.height() > smaller * 0.05;
                 } else {
                     // Text set on a card or picture is placed there; text that
                     // crosses its edge has run into it.
                     runsInto = !b.rect.contains(a.rect);
                 }
-                if (runsInto)
-                    overlaps[{a.item, b.item}] << i;
+                if (!runsInto)
+                    continue;
+                const QString other = !b.text.isEmpty() ? "text " + quoted(b.text)
+                                      : b.item->inherits("QQuickImage")
+                                          ? "the image " + b.item->property("source").toUrl().fileName()
+                                          : QString("a %1 x %2 rectangle").arg(qRound(b.item->width()))
+                                                .arg(qRound(b.item->height()));
+                contacts[{id[k], a.text, id[m]}].insert(i, {other, a.full | b.full});
             }
         }
+    }
+    // A text counts as shown where it's at its own full strength and whole.
+    for (Shown &shown : texts)
+        for (auto it = shown.at.cbegin(); it != shown.at.cend(); ++it)
+            if (shown.peak >= 0.3 && it->opacity >= shown.peak * 0.95 && it->rect == it->full &&
+                frame.adjusted(-1, -1, 1, 1).contains(it->full))
+                shown.frames << it.key();
 
     QList<Problem> problems;
-    QSet<QQuickItem *> safeReported;
+    QSet<int> safeReported;
     // Small text, by size: one decision about a size is one problem to fix.
     struct Small {
         QStringList texts;
@@ -228,20 +253,23 @@ QList<Problem> Measure::text(Scene &scene) {
     QMap<int, Small> small;
     for (auto it = texts.cbegin(); it != texts.cend(); ++it) {
         const Shown &shown = it.value();
-        QQuickItem *item = it.key().first;
+        const int item = it.key().first;
         const QString &words = it.key().second;
-        // Text that types out or counts up is read in its final form.
+        // Text that types out or counts up is read in its final form: skipped
+        // when a later string goes on from it, or is the same words around
+        // other numbers. Every other string an item shows is read on its own.
         const QStringList &all = strings.value(item);
-        if (all.size() > 5 ? words != all.last()
-                           : std::any_of(all.cbegin(), all.cend(), [&](const QString &other) {
-                                 return other.size() > words.size() && other.startsWith(words);
-                             }))
-            continue;
-        if (shown.frames.isEmpty())
+        const QStringList &shape = shapes.value(item);
+        const int index = all.indexOf(words);
+        bool step = false;
+        for (int later = index + 1; later < all.size() && !step; ++later)
+            step = (all[later].size() > words.size() && all[later].startsWith(words)) || shape[later] == shape[index];
+        if (step || shown.frames.isEmpty())
             continue;
         const Run run = longestRun(shown.frames);
-        const Seen &settled = shown.at.value(shown.frames[shown.frames.indexOf(run.first) + run.length / 2]);
-        const double settledAt = shown.frames[shown.frames.indexOf(run.first) + run.length / 2] / fps;
+        const int middle = shown.frames[shown.frames.indexOf(run.first) + run.length / 2];
+        const Seen &settled = *shown.at.constFind(middle);
+        const double settledAt = middle / fps;
 
         const double held = run.length / fps;
         const double needed = qMax(0.6, words.size() / 25.0);
@@ -255,7 +283,7 @@ QList<Problem> Measure::text(Scene &scene) {
                                     .arg(QString::number(needed, 'f', 2)),
                                 format.name, run.first / fps, settled.full};
 
-        const double pixels = drawnPixels(item);
+        const double pixels = settled.pixels;
         const double onPhone = pixels * phoneWidth / format.size.width();
         if (onPhone + 1e-6 < readablePixels) {
             Small &group = small[qRound(pixels)];
@@ -292,26 +320,28 @@ QList<Problem> Measure::text(Scene &scene) {
                                                       : texts.join(", ")),
                             format.name, it.value().at, it.value().area};
     }
-    for (auto it = overlaps.cbegin(); it != overlaps.cend(); ++it) {
+    // Only fully shown text runs into things.
+    for (auto it = contacts.cbegin(); it != contacts.cend(); ++it) {
+        const int item = std::get<0>(it.key());
+        const QString &words = std::get<1>(it.key());
+        const auto found = texts.constFind({item, words});
+        if (found == texts.constEnd())
+            continue;
+        QList<int> met;
+        for (auto contact = it->cbegin(); contact != it->cend(); ++contact)
+            if (std::binary_search(found->frames.cbegin(), found->frames.cend(), contact.key()))
+                met << contact.key();
         // A pass across something is motion; a fifth of a second or more is a
         // collision the viewer sees.
-        const Run run = longestRun(it.value());
+        const Run run = longestRun(met);
         if (run.length < qMax(3.0, 0.2 * fps))
             continue;
-        QQuickItem *a = it.key().first;
-        QQuickItem *b = it.key().second;
-        // Read both as they were when they met.
-        scene.seek(run.first / fps);
-        const QString other = isText(b) ? "text " + quoted(b->property("text").toString())
-                              : b->inherits("QQuickImage")
-                                  ? "the image " + b->property("source").toUrl().fileName()
-                                  : QString("a %1 x %2 rectangle").arg(qRound(b->width())).arg(qRound(b->height()));
-        const QRectF area = a->mapRectToScene(a->boundingRect()) | b->mapRectToScene(QRectF(0, 0, b->width(), b->height()));
+        const Contact &first = it->value(run.first);
         problems << Problem{false,
                             QString("Text %1 runs into %2 from %3 to %4.")
-                                .arg(quoted(a->property("text").toString()), other, seconds(run.first / fps),
+                                .arg(quoted(words), first.other, seconds(run.first / fps),
                                      seconds((run.first + run.length) / fps)),
-                            format.name, run.first / fps, area};
+                            format.name, run.first / fps, first.area};
     }
     std::stable_sort(problems.begin(), problems.end(),
                      [](const Problem &a, const Problem &b) { return a.at < b.at; });

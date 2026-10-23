@@ -213,7 +213,11 @@ copying its record for every pair. That change also measures each frame by
 the text it shows then rather than the text the film ends on: a line that
 types out must be held whole for its own time, and a caption that is
 changed or cleared is checked under each string it showed, so films that
-passed before can now fail on both. Not measured: words inside pictures, and
+passed before can now fail on both. The steps of typing and counting are
+the exception: a string a later one goes on from ("Save" before "Save 20%"),
+or the same words around another number, is read only in its final form.
+Size, line count, and what a text runs into are all read on the frame they
+are measured at. Not measured: words inside pictures, and
 the price in film 2's demo slide, which only a reviewer reading the frames
 can catch.
 

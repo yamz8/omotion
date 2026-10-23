@@ -177,87 +177,122 @@ private slots:
     // The review checklist's text items, measured at every frame.
     void measuresTextAViewerCanRead()
     {
-        auto text = [](const QByteArray &items, const QString &format = "16:9") {
-            QTemporaryDir dir;
-            write(dir.filePath("s.qml"), sceneSource(items));
-            Scene scene;
-            QString error;
-            if (!scene.load(dir.filePath("s.qml"), format, &error))
-                return QList<Problem>{Problem{true, error, {}, -1, {}}};
-            return Measure::text(scene);
-        };
         const QByteArray big = "font.pixelSize: 60; color: \"white\"";
-        QCOMPARE(text("    Text { x: 300; y: 300; text: \"Readable\"; " + big + " }\n").size(), 0);
+        QCOMPARE(measureText("    Text { x: 300; y: 300; text: \"Readable\"; " + big + " }\n").size(), 0);
 
         // On screen for 0.2 s, where 0.6 s is the least anything needs.
-        const QList<Problem> brief = text("    Text { x: 300; y: 300; text: \"Gone\"; " + big +
+        const QList<Problem> brief = measureText("    Text { x: 300; y: 300; text: \"Gone\"; " + big +
                                           "; visible: parent.t >= 0.5 && parent.t < 0.7 }\n");
         QVERIFY(anyMessage(brief, "Text \"Gone\" is fully on screen for 0.20 s (0.50s to 0.70s)"));
         QCOMPARE(brief.first().at, 0.5);
         QVERIFY(!brief.first().area.isEmpty());
 
         // Typing out, it's read in its final form only.
-        QCOMPARE(text("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.ceil(parent.t * 20)); " + big +
+        QCOMPARE(measureText("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.ceil(parent.t * 20)); " + big +
                       " }\n").size(), 0);
 
-        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"Small\"; font.pixelSize: 30 }\n"),
+        QVERIFY(anyMessage(measureText("    Text { x: 300; y: 300; text: \"Small\"; font.pixelSize: 30 }\n"),
                            "Text at 30 px is 6.1 px when the film plays 390 px wide on a phone; make it at least 50 px "
                            "in 16:9: \"Small\"."));
         // 30 px is readable in a 1080-wide frame.
-        QVERIFY(!anyMessage(text("    Text { x: 300; y: 600; text: \"Small\"; font.pixelSize: 30 }\n", "9:16"), "px"));
+        QVERIFY(!anyMessage(measureText("    Text { x: 300; y: 600; text: \"Small\"; font.pixelSize: 30 }\n", "9:16"), "px"));
         // A scaled parent scales the text it holds.
-        QVERIFY(anyMessage(text("    Item { scale: 0.5; transformOrigin: Item.TopLeft\n"
+        QVERIFY(anyMessage(measureText("    Item { scale: 0.5; transformOrigin: Item.TopLeft\n"
                                 "        Text { x: 300; y: 300; text: \"Shrunk\"; " + big + " } }\n"),
                            "Text at 30 px"));
 
-        QVERIFY(anyMessage(text("    Text { x: 20; y: 300; text: \"Edge\"; " + big + " }\n"),
+        QVERIFY(anyMessage(measureText("    Text { x: 20; y: 300; text: \"Edge\"; " + big + " }\n"),
                            "Text \"Edge\" crosses the 16:9 safe area"));
         // The bottom fifth of a vertical film sits under the platform's controls.
-        QVERIFY(anyMessage(text("    Text { x: 200; y: 1700; text: \"Low\"; " + big + " }\n", "9:16"),
+        QVERIFY(anyMessage(measureText("    Text { x: 200; y: 1700; text: \"Low\"; " + big + " }\n", "9:16"),
                            "crosses the 9:16 safe area (the top 12%, the bottom 20%"));
 
-        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"First\"; " + big + " }\n"
+        QVERIFY(anyMessage(measureText("    Text { x: 300; y: 300; text: \"First\"; " + big + " }\n"
                                 "    Text { x: 320; y: 310; text: \"Second\"; " + big + " }\n"),
                            "runs into text"));
         // Text set on a card belongs there; text crossing its edge has run into it.
         const QByteArray card = "    Rectangle { x: 600; y: 600; width: 400; height: 200; color: \"#333\" }\n";
-        QCOMPARE(text(card + "    Text { x: 620; y: 620; text: \"On it\"; " + big + " }\n").size(), 0);
-        QVERIFY(anyMessage(text(card + "    Text { x: 900; y: 620; text: \"Across it\"; " + big + " }\n"),
+        QCOMPARE(measureText(card + "    Text { x: 620; y: 620; text: \"On it\"; " + big + " }\n").size(), 0);
+        QVERIFY(anyMessage(measureText(card + "    Text { x: 900; y: 620; text: \"Across it\"; " + big + " }\n"),
                            "Text \"Across it\" runs into a 400 x 200 rectangle from 0.00s"));
     }
 
     // Each frame counts for the text it shows then, not the one the film ends on.
     void measuresTextAsItReadsAtEachFrame()
     {
-        auto text = [](const QByteArray &items) {
-            QTemporaryDir dir;
-            write(dir.filePath("s.qml"), sceneSource(items));
-            Scene scene;
-            QString error;
-            if (!scene.load(dir.filePath("s.qml"), "16:9", &error))
-                return QList<Problem>{Problem{true, error, {}, -1, {}}};
-            return Measure::text(scene);
-        };
         const QByteArray big = "font.pixelSize: 60; color: \"white\"";
         // Typing until 1.6 s, the whole line is up for the last 0.4 s alone.
-        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.floor(parent.t * 5) + 1); " +
+        QVERIFY(anyMessage(measureText("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.floor(parent.t * 5) + 1); " +
                                 big + " }\n"),
                            "Text \"Typed out\" is fully on screen for 0.40 s (1.60s to 2.00s)"));
 
         // A caption that crosses the card and is then cleared is measured as it
         // was, not as the empty text it ends on.
         const QByteArray card = "    Rectangle { x: 600; y: 600; width: 400; height: 200; color: \"#333\" }\n";
-        QVERIFY(anyMessage(text(card + "    Text { x: 900; y: 620; text: parent.t < 1 ? \"Across it\" : \"\"; " + big +
+        QVERIFY(anyMessage(measureText(card + "    Text { x: 900; y: 620; text: parent.t < 1 ? \"Across it\" : \"\"; " + big +
                                        " }\n"),
                            "Text \"Across it\" runs into a 400 x 200 rectangle from 0.00s to 1.00s"));
 
         // Text a Loader has swapped out is reported as it was when it met the card.
         const QList<Problem> swapped =
-            text(card + "    Component { id: first; Text { x: 900; y: 620; text: \"Swapped out\"; " + big + " } }\n"
+            measureText(card + "    Component { id: first; Text { x: 900; y: 620; text: \"Swapped out\"; " + big + " } }\n"
                         "    Component { id: second; Text { x: 100; y: 300; text: \"Swapped in\"; " + big + " } }\n"
                         "    Loader { sourceComponent: parent.t < 1 ? first : second }\n");
         QVERIFY(anyMessage(swapped, "Text \"Swapped out\" runs into a 400 x 200 rectangle from 0.00s to 1.00s"));
         QVERIFY(!anyMessage(swapped, "Swapped in\" runs into"));
+        // Marked where it met the card, under the Loader's own offset.
+        const QList<Problem> moved =
+            measureText(card + "    Component { id: away; Text { x: 700; y: 620; text: \"Swapped out\"; " + big + " } }\n"
+                        "    Loader { x: 200; sourceComponent: parent.t < 1 ? away : null }\n");
+        QVERIFY(anyMessage(moved, "runs into a 400 x 200 rectangle"));
+        QVERIFY2(moved.first().area.right() > 1100, qPrintable(QString::number(moved.first().area.right())));
+    }
+
+    // Everything about a text is read at the frames it's measured at, and each
+    // string it shows is its own text, except the steps of typing and counting.
+    void measuresEachTextAsItIsThen_data()
+    {
+        QTest::addColumn<QByteArray>("items");
+        QTest::addColumn<QString>("message");
+        QTest::addColumn<bool>("reported");
+        const QByteArray big = "font.pixelSize: 60; color: \"white\"";
+        const QByteArray card = "    Rectangle { x: 600; y: 600; width: 400; height: 200; color: \"#333\" }\n";
+        // Its size where it's read, not after its container has shrunk away.
+        QTest::newRow("size") << "    Item { scale: parent.t > 1.85 ? 0 : 1\n"
+                                 "        Text { x: 300; y: 300; text: \"Exits\"; " + big + " } }\n"
+                              << "Text at 0 px" << false;
+        // One line early on, its letters end above the text set just below
+        // it; measured with the three lines it has at the end, they wouldn't.
+        QTest::newRow("lines") << "    Text { x: 300; y: 300; text: parent.t < 1 ? \"One\" : \"One\\nTwo\\nThree\"; " + big + " }\n"
+                                  "    Text { x: 300; y: 348; text: \"Under\"; visible: parent.t < 1; " + big + " }\n"
+                               << "runs into text" << false;
+        // Quoted as it reads, without its markup, like every other message.
+        QTest::newRow("markup") << card + "    Text { x: 900; y: 620; text: \"<b>Bold</b> across\"; " + big + " }\n"
+                                << "Text \"Bold across\" runs into a 400 x 200 rectangle" << true;
+        // Subtitles: every caption is read, not only the last.
+        QTest::newRow("captions") << "    Text { x: 300; y: 300; text: [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", "
+                                     "\"Six\"][Math.min(5, Math.floor(parent.t * 3))]; " + big + " }\n"
+                                  << "Text \"One\" is fully on screen for 0.40 s" << true;
+        // A counter is read at the number it stops on.
+        QTest::newRow("counter") << "    Text { x: 300; y: 300; text: \"Count \" + Math.min(10, Math.floor(parent.t * 10)); " +
+                                        big + " }\n"
+                                 << "is fully on screen" << false;
+        // Two captions each pass the card in 0.2 s: two passes, not one collision.
+        QTest::newRow("passes") << card + "    Text { x: parent.t < 0.35 ? 960 : 100; y: 620; "
+                                          "text: parent.t < 0.15 ? \"Aa\" : \"Bb\"; " + big + " }\n"
+                                << "runs into" << false;
+    }
+
+    void measuresEachTextAsItIsThen()
+    {
+        QFETCH(QByteArray, items);
+        QFETCH(QString, message);
+        QFETCH(bool, reported);
+        const QList<Problem> problems = measureText(items);
+        QStringList all;
+        for (const auto &problem : problems)
+            all << problem.message;
+        QVERIFY2(anyMessage(problems, message) == reported, qPrintable(all.join("\n")));
     }
 
     void measuresTheHookAndTheFastestChanges()
@@ -1267,6 +1302,18 @@ private:
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(contents);
+    }
+
+    // Only the text measures, for a scene holding these items.
+    static QList<Problem> measureText(const QByteArray &items, const QString &format = "16:9")
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("scene.qml"), sceneSource(items));
+        Scene scene;
+        QString error;
+        if (!scene.load(dir.filePath("scene.qml"), format, &error))
+            return {Problem{true, error, {}, -1, {}}};
+        return Measure::text(scene);
     }
 
     static QList<Problem> problemsFor(const QByteArray &source, const QString &format = "16:9")
