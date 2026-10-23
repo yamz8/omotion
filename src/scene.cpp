@@ -62,6 +62,71 @@ QVariant plain(const QVariant &value) {
     return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant() : value;
 }
 
+QString seconds(double t) { return QString::number(t, 'f', 2) + "s"; }
+
+// Two descriptions of a state agree when they differ only in case, spacing,
+// quotes, or a closing period.
+QString comparable(QString text) {
+    text = text.toLower().simplified();
+    text.remove(QRegularExpression(R"([\"“”])"));
+    while (text.endsWith('.'))
+        text.chop(1);
+    return text.trimmed();
+}
+
+// The scene's beats against the approved shot list, beat for beat. A scene
+// that drifts from the shots the person approved builds a film nobody agreed
+// to, so the structure is an error and the wording a warning.
+QList<Problem> beatContract(const QList<Beat> &beats, const QString &root, double duration, int fps) {
+    QList<Problem> problems;
+    auto add = [&](bool error, const QString &message, double at = -1) {
+        problems << Problem{error, message, {}, at};
+    };
+    for (const auto &beat : beats) {
+        if (beat.purpose.isEmpty())
+            add(true, QString("Beat \"%1\" has no purpose: say why it exists, as shotlist.md's \"why:\" does, "
+                              "{ at: %2, name: \"%1\", purpose: \"...\", enter: \"...\", exit: \"...\" }.")
+                          .arg(beat.name).arg(beat.at), beat.at);
+        else if (beat.enter.isEmpty() || beat.exit.isEmpty())
+            add(false, QString("Beat \"%1\" doesn't say its %2 state; copy it from shotlist.md.")
+                           .arg(beat.name, beat.enter.isEmpty() ? "enter" : "exit"), beat.at);
+    }
+    const QList<Studio::ShotListBeat> shots = Studio::readShotList(root);
+    if (shots.isEmpty())
+        return problems;
+    if (shots.size() != beats.size()) {
+        QStringList names;
+        for (const auto &shot : shots)
+            names << shot.name;
+        add(true, QString("The scene has %1 beats and shotlist.md has %2 (%3); they match one for one.")
+                      .arg(beats.size()).arg(shots.size()).arg(names.join(", ")));
+        return problems;
+    }
+    // Within half a frame, or the shot list's own rounding to a tenth.
+    const double tolerance = qMax(0.5 / fps, 0.05);
+    for (int i = 0; i < beats.size(); ++i) {
+        const Beat &beat = beats[i];
+        const auto &shot = shots[i];
+        if (std::abs(beat.at - shot.start) > tolerance)
+            add(true, QString("Beat \"%1\" starts at %2, but shotlist.md starts %3 at %4.")
+                          .arg(beat.name, seconds(beat.at), shot.name, seconds(shot.start)), beat.at);
+        if (comparable(beat.name) != comparable(shot.name))
+            add(false, QString("Beat \"%1\" is \"%2\" in shotlist.md; use the same name.").arg(beat.name, shot.name),
+                beat.at);
+        const QList<QPair<QString, QPair<QString, QString>>> states{{"enter", {beat.enter, shot.enters}},
+                                                                   {"exit", {beat.exit, shot.exits}}};
+        for (const auto &[which, pair] : states)
+            if (!pair.first.isEmpty() && !pair.second.isEmpty() && comparable(pair.first) != comparable(pair.second))
+                add(false, QString("Beat \"%1\"'s %2 state differs from shotlist.md's \"%3\". Build to the "
+                                   "approved state, or ask the person to change the shot list.")
+                               .arg(beat.name, which, pair.second), beat.at);
+    }
+    if (std::abs(shots.last().end - duration) > tolerance)
+        add(false, QString("shotlist.md ends at %1, but the scene lasts %2.")
+                       .arg(seconds(shots.last().end), seconds(duration)));
+    return problems;
+}
+
 QString typeName(const QObject *object) {
     QString name = QString::fromLatin1(object->metaObject()->className());
     name.remove(QRegularExpression("_QML(TYPE)?_\\d+$"));
@@ -74,7 +139,6 @@ QString quoted(const QString &text) {
     return "\"" + (line.size() > 32 ? line.left(31) + "…" : line) + "\"";
 }
 
-QString seconds(double t) { return QString::number(t, 'f', 2) + "s"; }
 
 // The renderer's glyph cache can shift a few antialiased edge pixels by a level
 // or two depending on what it drew before, which isn't the scene's doing. State
@@ -236,7 +300,8 @@ bool Scene::readDeclarations(QString *error) {
                 problem(true, QString("Beat \"%1\" starts at %2, not after \"%3\"; list beats in order.")
                                   .arg(name, seconds(at), m_beats.last().name));
             else
-                m_beats << Beat{at, name};
+                m_beats << Beat{at, name, entry.value("purpose").toString().trimmed(),
+                                entry.value("enter").toString().trimmed(), entry.value("exit").toString().trimmed()};
         }
     }
     if (m_beats.isEmpty())
@@ -367,6 +432,10 @@ QList<Problem> Scene::check() {
         const QString skill = Studio::skillProblem(studio);
         if (!skill.isEmpty())
             problems << Problem{false, skill, {}, -1};
+        // Only the studio's own film answers to its shot list; other QML
+        // files beside it are components or experiments.
+        if (QFileInfo(m_path) == QFileInfo(QDir(studio).filePath("scene.qml")))
+            problems << beatContract(m_beats, studio, m_duration, m_fps);
     }
     for (const auto &warning : m_warnings)
         problems << Problem{false, warning, m_format.name, -1};

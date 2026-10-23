@@ -167,7 +167,8 @@ int check(const QStringList &arguments) {
         if (i == 0) {
             QJsonArray beats;
             for (const auto &beat : scene.beats())
-                beats << QJsonObject{{"at", beat.at}, {"name", beat.name}};
+                beats << QJsonObject{{"at", beat.at}, {"name", beat.name}, {"purpose", beat.purpose},
+                                     {"enter", beat.enter}, {"exit", beat.exit}};
             info = {{"scene", scene.path()}, {"duration", scene.duration()}, {"fps", scene.fps()},
                     {"frames", scene.frameCount()}, {"beats", beats},
                     {"formats", QJsonArray::fromStringList(scene.formats())},

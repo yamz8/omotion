@@ -16,9 +16,10 @@ Rectangle {
     property string format: "16:9"     // set by omotion: "16:9", "9:16", or "1:1"
     property var formats: ["16:9", "9:16"]   // the formats this scene is composed for
     property var beats: [              // the moments a viewer should notice
-        { at: 0.0, name: "Hook" },
-        { at: 2.2, name: "Problem" },
-        { at: 5.0, name: "Proof" }
+        { at: 0.0, name: "Hook", purpose: "why the viewer stays",
+          enter: "an empty frame", exit: "the claim on screen" },
+        { at: 2.2, name: "Problem", purpose: "...", enter: "...", exit: "..." },
+        { at: 5.0, name: "Proof", purpose: "...", enter: "...", exit: "..." }
     ]
     property string audio: "track.wav" // optional, beside the scene, starts at t = 0
 
@@ -52,6 +53,11 @@ Rectangle {
 - **Name the beats.** A beat starts at `at` and lasts until the next one. The
   contact sheet shows the middle of each, labelled, so give each beat a reason
   to exist and enough time to be read.
+- **Beats are a contract with the shot list.** Each beat gives its `purpose`,
+  and the `enter` and `exit` states it builds between. In a film's folder,
+  `check` matches the beats to `shotlist.md` one for one: a beat without a
+  purpose, a missing beat, or a different start time is an error; a renamed
+  beat or a state that differs from the approved one is a warning.
 - Images and fonts load from files beside the scene; refer to them relatively.
   Other QML files beside the scene can be used as components.
 

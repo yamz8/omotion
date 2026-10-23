@@ -66,6 +66,19 @@ QString noteTime(double at);
 // The note as one line, for pasting into an agent's terminal.
 QString noteReference(const Note &note);
 
+// A beat as shotlist.md writes it: "03.0-06.0s   BECOMES A SLIDE", then
+// indented "enters:", "exits:", and "why:" lines, which may wrap.
+struct ShotListBeat {
+    double start = 0;
+    double end = 0;
+    QString name; // The heading up to any ": " subtitle.
+    QString enters;
+    QString exits;
+    QString why;
+};
+// Empty while shotlist.md is missing or still the template.
+QList<ShotListBeat> readShotList(const QString &root);
+
 // What a gate's evidence still lacks, read only from the studio's files, so a
 // later session can see where the film stands and what to do next. formats
 // are the scene's, whose renders gate 6 needs.

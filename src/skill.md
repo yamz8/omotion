@@ -120,7 +120,9 @@ writing the scene.
 
 Run `omotion help format` for the scene format and the Motion helpers. Replace
 the starter in `scene.qml` with the film from the shot list: its `beats`
-match `shotlist.md` one for one, its `formats` list every format in the
+match `shotlist.md` one for one, with the same names and start times, each
+with its `purpose` and its `enter` and `exit` states copied from the shot
+list, its `formats` list every format in the
 brief, and it uses only files from `assets/`. Build each beat to the entry
 and exit states the person approved. If one can't be built as written, or you
 see a better way, say so at the next stop instead of quietly changing it:

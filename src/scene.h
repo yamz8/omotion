@@ -27,9 +27,14 @@ QStringList names();
 bool find(const QString &name, Format *format = nullptr);
 }
 
+// A moment the viewer should notice, and its contract with the shot list:
+// why it exists, the state it starts from, and the state it must reach.
 struct Beat {
     double at = 0;
     QString name;
+    QString purpose;
+    QString enter;
+    QString exit;
 };
 
 struct Problem {

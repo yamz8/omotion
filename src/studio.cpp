@@ -291,6 +291,52 @@ QStringList filesUnder(const QString &root, const QString &folder, const QRegula
 }
 }
 
+QList<Studio::ShotListBeat> Studio::readShotList(const QString &root) {
+    QList<ShotListBeat> beats;
+    QFile file(QDir(root).filePath("shotlist.md"));
+    if (!file.open(QIODevice::ReadOnly))
+        return beats;
+    const QByteArray text = file.readAll();
+    if (text == resource(":/studio/shotlist.md"))
+        return beats;
+    static const QRegularExpression heading(R"(^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*s\s+(.+?)\s*$)");
+    static const QRegularExpression field(R"(^ {1,3}([a-z][a-z ()]*?)\s*:\s*(.*)$)",
+                                          QRegularExpression::CaseInsensitiveOption);
+    QString *last = nullptr;
+    for (const auto &line : QString::fromUtf8(text).split('\n')) {
+        if (const auto match = heading.match(line); match.hasMatch()) {
+            ShotListBeat beat;
+            beat.start = match.captured(1).toDouble();
+            beat.end = match.captured(2).toDouble();
+            const QString title = match.captured(3);
+            // "END CARD (the poster)": a remark after the name isn't part of it.
+            beat.name = title.left(title.indexOf(": ")).remove(QRegularExpression(R"(\s*\([^)]*\)\s*$)")).trimmed();
+            beats << beat;
+            last = nullptr;
+            continue;
+        }
+        if (beats.isEmpty())
+            continue;
+        if (!line.startsWith(' ')) {
+            if (!line.trimmed().isEmpty())
+                last = nullptr; // A new section, such as FORMATS.
+            continue;
+        }
+        if (const auto match = field.match(line); match.hasMatch()) {
+            const QString key = match.captured(1).toLower();
+            last = key == "enters" ? &beats.last().enters
+                   : key == "exits" ? &beats.last().exits
+                   : key == "why"   ? &beats.last().why
+                                    : nullptr;
+            if (last)
+                *last = match.captured(2).trimmed();
+        } else if (last && line.startsWith("    ")) {
+            *last += " " + line.trimmed();
+        }
+    }
+    return beats;
+}
+
 QStringList Studio::missingEvidence(const QString &root, int gate, const QStringList &formats) {
     QStringList missing;
     auto add = [&](const QString &problem) {

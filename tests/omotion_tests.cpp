@@ -345,6 +345,55 @@ private slots:
                  QStringList({"renders/scene-16x9.mp4 is older than scene.qml", "renders/scene-9x16.mp4 is missing"}));
     }
 
+    // Found in film 2: the agent quietly built a beat differently from the
+    // shot the person approved, and nothing noticed.
+    void sceneAnswersToTheShotList()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        write(QDir(root).filePath("shotlist.md"),
+              "# Shot list\n\n00.0-01.0s   ONE: \"a subtitle\"\n"
+              "  enters: an empty frame\n  action: ignored\n  exits: the slide,\n    full frame.\n  why: the hook\n\n"
+              "01.0-02.0s   TWO\n  enters: the slide\n  exits: the end card\n\nFORMATS\n16:9: wide\n");
+        const auto shots = Studio::readShotList(root);
+        QCOMPARE(shots.size(), 2);
+        QCOMPARE(shots[0].name, QString("ONE"));
+        QCOMPARE(shots[0].exits, QString("the slide, full frame."));
+        QCOMPARE(shots[0].why, QString("the hook"));
+        QCOMPARE(shots[1].start, 1.0);
+        QCOMPARE(shots[1].end, 2.0);
+
+        auto problems = [&](const QByteArray &beats) {
+            write(QDir(root).filePath("scene.qml"), sceneSource({}, "    property var beats: [" + beats + "]\n")
+                                                      .replace("    property var beats: [{ at: 0, name: \"One\" }, "
+                                                               "{ at: 1, name: \"Two\" }]\n", ""));
+            Scene scene;
+            QString error;
+            if (!scene.load(QDir(root).filePath("scene.qml"), "16:9", &error))
+                return QStringList{error};
+            QStringList found;
+            for (const auto &problem : scene.check())
+                if (!problem.message.contains("skill"))
+                    found << QString(problem.error ? "error: " : "warning: ") + problem.message;
+            return found;
+        };
+        const QByteArray one = R"({ at: 0, name: "One", purpose: "hook", enter: "An empty frame.", exit: "the slide, full frame" })";
+        QCOMPARE(problems(one + R"(, { at: 1, name: "Two", purpose: "close", enter: "the slide", exit: "the end card" })"),
+                 QStringList());
+        const QStringList drift = problems(
+            one + R"(, { at: 1.4, name: "Close", purpose: "close", enter: "the slide", exit: "the slide, scaled down" })");
+        QCOMPARE(drift.size(), 3);
+        QVERIFY2(drift[0].startsWith("error: Beat \"Close\" starts at 1.40s, but shotlist.md starts TWO at 1.00s"),
+                 qPrintable(drift[0]));
+        QVERIFY(drift[1].startsWith("warning: Beat \"Close\" is \"TWO\" in shotlist.md"));
+        QVERIFY(drift[2].startsWith("warning: Beat \"Close\"'s exit state differs from shotlist.md's \"the end card\""));
+        QVERIFY(problems(one)[0].startsWith("error: The scene has 1 beats and shotlist.md has 2 (ONE, TWO)"));
+        QVERIFY(problems(R"({ at: 0, name: "One" }, { at: 1, name: "Two", purpose: "close" })")[0]
+                    .startsWith("error: Beat \"One\" has no purpose"));
+    }
+
     void notesRoundTripWithTheAgent()
     {
         QTemporaryDir dir;

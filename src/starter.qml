@@ -11,11 +11,17 @@ Rectangle {
     property int fps: 30
     property string format: "16:9"
     property var formats: ["16:9", "9:16"]
+    // Each beat matches one in shotlist.md: why it exists, and the states it
+    // starts from and must reach, copied from the approved shot list.
     property var beats: [
-        { at: 0.0, name: "Hook" },
-        { at: 2.2, name: "Frames" },
-        { at: 4.8, name: "Review" },
-        { at: 7.2, name: "Ship" }
+        { at: 0.0, name: "Hook", purpose: "say what the film is about before anyone scrolls past",
+          enter: "an empty frame", exit: "the headline, read and gone" },
+        { at: 2.2, name: "Frames", purpose: "show that a frame is a moment, not a recording",
+          enter: "an empty frame", exit: "five moments of one dot, side by side" },
+        { at: 4.8, name: "Review", purpose: "show the frames being checked before release",
+          enter: "five moments of one dot", exit: "each moment passed over" },
+        { at: 7.2, name: "Ship", purpose: "leave the viewer with the idea and the name",
+          enter: "the frames clear", exit: "the closing line and the mark, held as the poster" }
     ]
 
     // Type and spacing follow the short side, and the layout follows the
