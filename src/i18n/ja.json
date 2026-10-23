@@ -82,7 +82,6 @@
   "On “%1”": "「%1」の上",
   "Pin Note": "メモを留める",
   "Pin a note to that moment": "その瞬間にメモを留める",
-  "Show or hide the studio panels": "スタジオのパネルを表示 / 非表示",
   "The agent's steps appear here as it writes them to activity.md.": "エージェントが activity.md に書いた手順がここに表示されます。",
   "Video": "動画",
   "Waiting for your approval": "あなたの承認待ち",
@@ -94,5 +93,9 @@
   },
   "Copied a request to check %n open notes. Paste it into your agent's terminal.": {
     "other": "未解決のメモ %n 件を確認する依頼をコピーしました。エージェントのターミナルに貼り付けてください。"
-  }
+  },
+  "Film": "フィルム",
+  "Studio": "スタジオ",
+  "Studio panels, or the next tab in a narrow window": "スタジオのパネル、または狭いウィンドウでは次のタブ",
+  "Note %1 is saved, but its evidence frame couldn't be rendered: %2": "メモ %1 は保存しましたが、証拠フレームをレンダリングできませんでした: %2"
 }

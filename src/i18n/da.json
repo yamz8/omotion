@@ -82,7 +82,6 @@
   "On “%1”": "På “%1”",
   "Pin Note": "Fastgør note",
   "Pin a note to that moment": "Fastgør en note til det øjeblik",
-  "Show or hide the studio panels": "Vis eller skjul studiepanelerne",
   "The agent's steps appear here as it writes them to activity.md.": "Agentens trin dukker op her, efterhånden som den skriver dem i activity.md.",
   "Video": "Video",
   "Waiting for your approval": "Venter på din godkendelse",
@@ -96,5 +95,9 @@
   "Copied a request to check %n open notes. Paste it into your agent's terminal.": {
     "one": "Kopierede en anmodning om at tjekke %n åben note. Indsæt den i din agents terminal.",
     "other": "Kopierede en anmodning om at tjekke %n åbne noter. Indsæt den i din agents terminal."
-  }
+  },
+  "Film": "Film",
+  "Studio": "Studie",
+  "Studio panels, or the next tab in a narrow window": "Studiepaneler, eller næste fane i et smalt vindue",
+  "Note %1 is saved, but its evidence frame couldn't be rendered: %2": "Note %1 er gemt, men dens dokumentationsbillede kunne ikke renderes: %2"
 }

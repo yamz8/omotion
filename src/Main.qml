@@ -29,6 +29,19 @@ ApplicationWindow {
     property string selectedNote: ""
     readonly property bool editing: noteEditor.opened
     readonly property bool studio: backend.studioRoot !== "" && panelsVisible
+    // Omarchy tiles windows, often to half a screen, which can't fit three
+    // columns; there the film, studio, and notes take turns as tabs.
+    readonly property bool compact: studio && width < 1100
+    readonly property bool narrowTransport: width < 900
+    readonly property var views: ["film", "studio", "notes"]
+    property string view: "film"
+    readonly property int openNotes: {
+        let count = 0
+        for (const note of backend.notes)
+            if (!note.done)
+                ++count
+        return count
+    }
 
     readonly property var scene: preview.scene
     readonly property bool ready: scene !== null && preview.problem === "" && loadError === ""
@@ -123,6 +136,7 @@ ApplicationWindow {
 
     function selectNote(id) {
         selectedNote = id
+        view = "film"
         for (const note of backend.notes)
             if (note.id === id)
                 seekNote(note.at, note.format)
@@ -251,7 +265,17 @@ ApplicationWindow {
     Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.openScene() }
     Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.newFilm() }
     Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.reload() }
-    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.panelsVisible = !win.panelsVisible }
+    Shortcut {
+        sequence: "P"
+        context: Qt.ApplicationShortcut
+        enabled: !win.editing
+        onActivated: {
+            if (win.compact)
+                win.view = win.views[(win.views.indexOf(win.view) + 1) % win.views.length]
+            else
+                win.panelsVisible = !win.panelsVisible
+        }
+    }
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
@@ -275,21 +299,41 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
+            TabBar {
+                id: viewTabs
+                Layout.fillWidth: true
+                visible: win.compact
+                Material.background: "#141417"
+                onCurrentIndexChanged: win.view = win.views[currentIndex]
+                Connections {
+                    target: win
+                    function onViewChanged() { viewTabs.currentIndex = win.views.indexOf(win.view) }
+                }
+                TabButton { text: qsTr("Film"); focusPolicy: Qt.NoFocus }
+                TabButton { text: qsTr("Studio"); focusPolicy: Qt.NoFocus }
+                TabButton {
+                    text: win.openNotes > 0 ? qsTr("Notes · %n open", "", win.openNotes) : qsTr("Notes")
+                    focusPolicy: Qt.NoFocus
+                }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
 
                 StudioPanel {
-                    Layout.preferredWidth: 250
+                    Layout.preferredWidth: win.compact ? -1 : 250
+                    Layout.fillWidth: win.compact
                     Layout.fillHeight: true
-                    visible: win.studio && win.width >= 1100
+                    visible: win.studio && (!win.compact || win.view === "studio")
                 }
 
                 Item {
                     id: stage
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    visible: !win.compact || win.view === "film"
 
                     ScenePreview {
                         id: preview
@@ -495,9 +539,10 @@ ApplicationWindow {
                 }
 
                 NotesPanel {
-                    Layout.preferredWidth: 300
+                    Layout.preferredWidth: win.compact ? -1 : 300
+                    Layout.fillWidth: win.compact
                     Layout.fillHeight: true
-                    visible: win.studio && win.width >= 900
+                    visible: win.studio && (!win.compact || win.view === "notes")
                     selected: win.selectedNote
                     onNoteSelected: id => win.selectNote(id)
                 }
@@ -506,9 +551,21 @@ ApplicationWindow {
             // The transport: play, where we are, the beats, format, sheet, export.
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 72
+                Layout.preferredHeight: win.narrowTransport ? 112 : 72
                 color: "#141417"
                 visible: backend.scenePath !== ""
+
+                // Narrow, the beats get a row of their own so their names stay readable.
+                Timeline {
+                    visible: win.narrowTransport
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    anchors.topMargin: 20
+                    height: 30
+                }
 
                 Rectangle {
                     anchors.top: parent.top
@@ -518,7 +575,10 @@ ApplicationWindow {
                 }
 
                 RowLayout {
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 72
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
                     spacing: 14
@@ -586,20 +646,15 @@ ApplicationWindow {
                         }
                     }
 
-                    SceneTimeline {
+                    Timeline {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 34
-                        time: win.time
-                        duration: win.duration
-                        beats: win.beats
-                        current: win.currentBeat
-                        notes: backend.notes
-                        selectedNote: win.selectedNote
-                        onNoteClicked: id => win.selectNote(id)
-                        onSeek: t => {
-                            win.playing = false
-                            win.seek(t)
-                        }
+                        visible: !win.narrowTransport
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        visible: win.narrowTransport
                     }
 
                     Button {
@@ -681,6 +736,20 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    component Timeline: SceneTimeline {
+        time: win.time
+        duration: win.duration
+        beats: win.beats
+        current: win.currentBeat
+        notes: backend.notes
+        selectedNote: win.selectedNote
+        onNoteClicked: id => win.selectNote(id)
+        onSeek: t => {
+            win.playing = false
+            win.seek(t)
         }
     }
 

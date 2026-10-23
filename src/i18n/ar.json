@@ -82,7 +82,6 @@
   "On “%1”": "على “%1”",
   "Pin Note": "تثبيت الملاحظة",
   "Pin a note to that moment": "تثبيت ملاحظة في تلك اللحظة",
-  "Show or hide the studio panels": "إظهار لوحات الاستوديو أو إخفاؤها",
   "The agent's steps appear here as it writes them to activity.md.": "تظهر هنا خطوات الوكيل كلما كتبها في activity.md.",
   "Video": "فيديو",
   "Waiting for your approval": "بانتظار موافقتك",
@@ -104,5 +103,9 @@
     "few": "نُسخ طلب مراجعة %n ملاحظات مفتوحة. الصقه في طرفية وكيلك.",
     "many": "نُسخ طلب مراجعة %n ملاحظة مفتوحة. الصقه في طرفية وكيلك.",
     "other": "نُسخ طلب مراجعة %n ملاحظة مفتوحة. الصقه في طرفية وكيلك."
-  }
+  },
+  "Film": "الفيلم",
+  "Studio": "الاستوديو",
+  "Studio panels, or the next tab in a narrow window": "لوحات الاستوديو، أو التبويب التالي في نافذة ضيقة",
+  "Note %1 is saved, but its evidence frame couldn't be rendered: %2": "حُفظت الملاحظة %1، لكن تعذّر تصيير إطار الدليل الخاص بها: %2"
 }

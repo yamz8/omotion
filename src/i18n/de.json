@@ -82,7 +82,6 @@
   "On “%1”": "Auf „%1“",
   "Pin Note": "Notiz anheften",
   "Pin a note to that moment": "Eine Notiz an diesen Moment heften",
-  "Show or hide the studio panels": "Studio-Leisten ein- oder ausblenden",
   "The agent's steps appear here as it writes them to activity.md.": "Die Schritte des Agenten erscheinen hier, sobald er sie in activity.md schreibt.",
   "Video": "Video",
   "Waiting for your approval": "Wartet auf deine Freigabe",
@@ -96,5 +95,9 @@
   "Copied a request to check %n open notes. Paste it into your agent's terminal.": {
     "one": "Bitte kopiert, %n offene Notiz zu prüfen. Füge sie im Terminal deines Agenten ein.",
     "other": "Bitte kopiert, %n offene Notizen zu prüfen. Füge sie im Terminal deines Agenten ein."
-  }
+  },
+  "Film": "Film",
+  "Studio": "Studio",
+  "Studio panels, or the next tab in a narrow window": "Studio-Leisten, oder der nächste Tab in einem schmalen Fenster",
+  "Note %1 is saved, but its evidence frame couldn't be rendered: %2": "Notiz %1 ist gespeichert, aber ihr Nachweisbild konnte nicht gerendert werden: %2"
 }

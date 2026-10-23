@@ -82,7 +82,6 @@
   "On “%1”": "Sobre “%1”",
   "Pin Note": "Fijar nota",
   "Pin a note to that moment": "Fijar una nota en ese momento",
-  "Show or hide the studio panels": "Mostrar u ocultar los paneles del estudio",
   "The agent's steps appear here as it writes them to activity.md.": "Los pasos del agente aparecen aquí a medida que los escribe en activity.md.",
   "Video": "Video",
   "Waiting for your approval": "Esperando tu aprobación",
@@ -98,5 +97,9 @@
     "one": "Se copió una solicitud para revisar %n nota abierta. Pégala en la terminal de tu agente.",
     "many": "Se copió una solicitud para revisar %n notas abiertas. Pégala en la terminal de tu agente.",
     "other": "Se copió una solicitud para revisar %n notas abiertas. Pégala en la terminal de tu agente."
-  }
+  },
+  "Film": "Película",
+  "Studio": "Estudio",
+  "Studio panels, or the next tab in a narrow window": "Paneles del estudio, o la siguiente pestaña en una ventana angosta",
+  "Note %1 is saved, but its evidence frame couldn't be rendered: %2": "La nota %1 se guardó, pero no se pudo renderizar su cuadro de evidencia: %2"
 }
