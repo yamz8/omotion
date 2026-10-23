@@ -207,10 +207,15 @@ hand: the 16:9 supporting text at 6-8 px on a phone (the peer review) and
 the empty frame 0 (the person's note 001), each with its time and place. A
 one-line patch to one beat re-encodes 96 of 450 frames, and the result
 matches a fresh render exactly. Checking and sheeting film 1 in both formats
-takes 6.6 to 7.9 s of wall time over five runs, on a machine with a load
+takes 1.5 s on an idle machine (1.6 s of CPU), and 6.6 to 8.2 s with a load
 average of 16 on 8 cores, after reading each text once per frame instead of
-copying its record for every pair. Not measured: words inside pictures, and the price in film
-2's demo slide, which only a reviewer reading the frames can catch.
+copying its record for every pair. That change also measures each frame by
+the text it shows then rather than the text the film ends on: a line that
+types out must be held whole for its own time, and a caption that is
+changed or cleared is checked under each string it showed, so films that
+passed before can now fail on both. Not measured: words inside pictures, and
+the price in film 2's demo slide, which only a reviewer reading the frames
+can catch.
 
 ### v0.4: Sound on the same timeline · L
 

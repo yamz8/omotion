@@ -58,6 +58,9 @@ double drawnPixels(const QQuickItem *item) {
     return size * QLineF(item->mapToScene(QPointF(0, 0)), item->mapToScene(QPointF(0, 1))).length();
 }
 
+// Items stay alive for the whole measure, even ones a Loader or Repeater has
+// let go of: they're freed with deleteLater, which waits for the event loop,
+// and measuring never returns to it.
 struct Seen {
     QQuickItem *item;
     QRectF rect;    // On the frame, as far as it's visible.
@@ -79,9 +82,12 @@ void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *see
         const QRectF full = isText(item) ? item->mapRectToScene(item->boundingRect())
                                          : item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
         const QRectF shown = full & visible;
-        const QString text = isText(item) ? readable(item->property("text").toString()) : QString();
-        if (!shown.isEmpty() && (!isText(item) || !text.isEmpty()))
-            seen->append({item, shown, full, opacity, text});
+        // Read only once it's on the frame: clipped text costs nothing.
+        if (!shown.isEmpty()) {
+            const QString text = isText(item) ? readable(item->property("text").toString()) : QString();
+            if (!isText(item) || !text.isEmpty())
+                seen->append({item, shown, full, opacity, text});
+        }
     }
     for (QQuickItem *child : item->childItems())
         walk(child, opacity, visible, seen);
@@ -102,10 +108,8 @@ bool isAncestor(const QQuickItem *ancestor, const QQuickItem *item) {
     return false;
 }
 
-// One text as the viewer sees it: an item showing one string.
+// One text as the viewer sees it: an item showing one string, which is its key.
 struct Shown {
-    QQuickItem *item = nullptr;
-    QString text;
     double peak = 0;       // Its highest opacity anywhere in the film.
     QList<int> frames;     // Frames where it's at full strength and whole.
     QHash<int, Seen> at;   // What it looked like at each of those frames.
@@ -160,8 +164,6 @@ QList<Problem> Measure::text(Scene &scene) {
                 continue;
             const QString &text = seen.text;
             Shown &shown = texts[{seen.item, text}];
-            shown.item = seen.item;
-            shown.text = text;
             shown.peak = qMax(shown.peak, seen.opacity);
             if (!strings[seen.item].contains(text))
                 strings[seen.item] << text;
@@ -226,11 +228,13 @@ QList<Problem> Measure::text(Scene &scene) {
     QMap<int, Small> small;
     for (auto it = texts.cbegin(); it != texts.cend(); ++it) {
         const Shown &shown = it.value();
+        QQuickItem *item = it.key().first;
+        const QString &words = it.key().second;
         // Text that types out or counts up is read in its final form.
-        const QStringList &all = strings.value(shown.item);
-        if (all.size() > 5 ? shown.text != all.last()
+        const QStringList &all = strings.value(item);
+        if (all.size() > 5 ? words != all.last()
                            : std::any_of(all.cbegin(), all.cend(), [&](const QString &other) {
-                                 return other.size() > shown.text.size() && other.startsWith(shown.text);
+                                 return other.size() > words.size() && other.startsWith(words);
                              }))
             continue;
         if (shown.frames.isEmpty())
@@ -240,34 +244,34 @@ QList<Problem> Measure::text(Scene &scene) {
         const double settledAt = shown.frames[shown.frames.indexOf(run.first) + run.length / 2] / fps;
 
         const double held = run.length / fps;
-        const double needed = qMax(0.6, shown.text.size() / 25.0);
+        const double needed = qMax(0.6, words.size() / 25.0);
         if (held + 0.5 / fps < needed)
             problems << Problem{true,
                                 QString("Text %1 is fully on screen for %2 s (%3 to %4); its %5 characters need %6 s "
                                         "(at least 0.6 s, or one second per 25 characters).")
-                                    .arg(quoted(shown.text), QString::number(held, 'f', 2), seconds(run.first / fps),
+                                    .arg(quoted(words), QString::number(held, 'f', 2), seconds(run.first / fps),
                                          seconds((run.first + run.length) / fps))
-                                    .arg(shown.text.size())
+                                    .arg(words.size())
                                     .arg(QString::number(needed, 'f', 2)),
                                 format.name, run.first / fps, settled.full};
 
-        const double pixels = drawnPixels(shown.item);
+        const double pixels = drawnPixels(item);
         const double onPhone = pixels * phoneWidth / format.size.width();
         if (onPhone + 1e-6 < readablePixels) {
             Small &group = small[qRound(pixels)];
-            if (!group.texts.contains(quoted(shown.text)))
-                group.texts << quoted(shown.text);
+            if (!group.texts.contains(quoted(words)))
+                group.texts << quoted(words);
             if (group.at < 0 || settledAt < group.at) {
                 group.at = settledAt;
                 group.area = settled.full;
             }
         }
-        if (!safe.contains(settled.full) && !safeReported.contains(shown.item)) {
-            safeReported << shown.item;
+        if (!safe.contains(settled.full) && !safeReported.contains(item)) {
+            safeReported << item;
             problems << Problem{false,
                                 QString("Text %1 crosses the %2 safe area (%3), where the platform's own controls "
                                         "can cover it.")
-                                    .arg(quoted(shown.text), format.name,
+                                    .arg(quoted(words), format.name,
                                          format.name == "9:16" ? "the top 12%, the bottom 20%, and 6% at each side"
                                                                : "5% at each edge"),
                                 format.name, settledAt, settled.full};

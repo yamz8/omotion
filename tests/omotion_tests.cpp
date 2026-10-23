@@ -226,6 +226,40 @@ private slots:
                            "Text \"Across it\" runs into a 400 x 200 rectangle from 0.00s"));
     }
 
+    // Each frame counts for the text it shows then, not the one the film ends on.
+    void measuresTextAsItReadsAtEachFrame()
+    {
+        auto text = [](const QByteArray &items) {
+            QTemporaryDir dir;
+            write(dir.filePath("s.qml"), sceneSource(items));
+            Scene scene;
+            QString error;
+            if (!scene.load(dir.filePath("s.qml"), "16:9", &error))
+                return QList<Problem>{Problem{true, error, {}, -1, {}}};
+            return Measure::text(scene);
+        };
+        const QByteArray big = "font.pixelSize: 60; color: \"white\"";
+        // Typing until 1.6 s, the whole line is up for the last 0.4 s alone.
+        QVERIFY(anyMessage(text("    Text { x: 300; y: 300; text: \"Typed out\".substring(0, Math.floor(parent.t * 5) + 1); " +
+                                big + " }\n"),
+                           "Text \"Typed out\" is fully on screen for 0.40 s (1.60s to 2.00s)"));
+
+        // A caption that crosses the card and is then cleared is measured as it
+        // was, not as the empty text it ends on.
+        const QByteArray card = "    Rectangle { x: 600; y: 600; width: 400; height: 200; color: \"#333\" }\n";
+        QVERIFY(anyMessage(text(card + "    Text { x: 900; y: 620; text: parent.t < 1 ? \"Across it\" : \"\"; " + big +
+                                       " }\n"),
+                           "Text \"Across it\" runs into a 400 x 200 rectangle from 0.00s to 1.00s"));
+
+        // Text a Loader has swapped out is reported as it was when it met the card.
+        const QList<Problem> swapped =
+            text(card + "    Component { id: first; Text { x: 900; y: 620; text: \"Swapped out\"; " + big + " } }\n"
+                        "    Component { id: second; Text { x: 100; y: 300; text: \"Swapped in\"; " + big + " } }\n"
+                        "    Loader { sourceComponent: parent.t < 1 ? first : second }\n");
+        QVERIFY(anyMessage(swapped, "Text \"Swapped out\" runs into a 400 x 200 rectangle from 0.00s to 1.00s"));
+        QVERIFY(!anyMessage(swapped, "Swapped in\" runs into"));
+    }
+
     void measuresTheHookAndTheFastestChanges()
     {
         QTemporaryDir dir;
