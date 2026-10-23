@@ -103,6 +103,32 @@ for approval at gates 1 and 2 before writing a frame (✅ shown with two test
 agents on the skill alone). A second agent session,
 started cold, can resume from `omotion status` alone.
 
+### v0.2.5: The studio window · M
+
+The agent keeps working headless in the film's folder; the omotion window
+becomes the studio that watches it. Directing film 1 meant relaying notes
+through chat and finding moments by hand; the studio makes the person's eye a
+direct input to the loop, in files (§9), with evidence (§7).
+
+- **Gates panel** from `gates.md`: passed, current, and waiting for the
+  person; each opens the files that are its evidence.
+- **Assets panel**: thumbnails of `assets/`, with the ones `assets.md` lists
+  as missing flagged.
+- **Notes pinned to moments.** Click the preview to write a note at that time,
+  format, and point. omotion saves it to `notes.md` with the beat, the text
+  under the pointer, and a frame from the render with the point marked, as
+  evidence. The skill treats every open note as a defect: fix it locally,
+  prove it with a frame or strip, and tick it, or reply and leave it open.
+  Notes never pass a gate; only the person does.
+- **Activity** from `activity.md`, where the agent writes one line per step
+  with its evidence.
+- **Reviews and renders** one click away, newest first.
+- **Copy a note** for the agent's terminal in one click.
+
+**Done when:** directing a film needs no relaying: the person pins a note in
+the window, the agent fixes it with proof, and the tick appears in the window
+without the person writing a message beyond "check my notes".
+
 ### Checkpoint: prove the loop, then choose the renderer · S
 
 Before v0.3, test whether the studio works, because everything after it is
@@ -297,4 +323,6 @@ The three cheapest changes with the most effect, in order:
 3. **Overlap and safe-area checks**, so the defect we found by eye is found
    automatically.
 
-Then the checkpoint: the five-film test, and the renderer decision.
+Then the studio window (v0.2.5), which film 1 showed is what directing needs
+most, and then the checkpoint: the five-film test and the renderer decision.
+Film 1 is the first of the five.
