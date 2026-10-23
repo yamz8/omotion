@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: gate1-stop
+expected_outcome: |
+  The agent drafts the brief with film choices marked as proposals, asks for the product facts it
+  wasn't told, and stops at gate 1 without writing a scene.
+context:
+  scaffold_script: place-files.sh

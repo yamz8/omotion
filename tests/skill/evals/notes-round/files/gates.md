@@ -1,0 +1,6 @@
+- [x] 1 References and assets: approved by the person, 2026-10-23
+- [x] 2 Style guide and shot list: approved by the person, 2026-10-23
+- [x] 3 Representative stills: reviews/stills/ (2026-10-23)
+- [x] 4 Rough cut and contact sheet: reviews/scene-16x9-sheet.png (2026-10-23)
+- [x] 5 Three defects repaired: reviews/001.md (2026-10-23)
+- [x] 6 Audio, formats, and deliverables: approved by the person, 2026-10-23

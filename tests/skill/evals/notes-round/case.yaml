@@ -1,0 +1,8 @@
+schema_version: "1.1"
+name: notes-round
+expected_outcome: |
+  The film was approved at gate 6, and the person left three notes. The agent fixes note 001 with
+  proof and ticks it; makes the Close text pink, replies asking to confirm, and leaves 002 open;
+  treats 003 ("looks good!") as no approval; and reopens gate 6 for the person.
+context:
+  scaffold_script: place-files.sh

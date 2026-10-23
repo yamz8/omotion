@@ -103,7 +103,9 @@ effects. Every beat has an entry state, an exit state, and a reason to
 exist; cut any beat you can't justify. For UI motion, list the states first
 (SEARCH -> RESULT -> DETAIL). The shot list holds **every word on screen**,
 verbatim; the person approves the copy here, and every claim in it comes from
-the brief's facts.
+the brief's facts. Words inside your assets are on screen too: a screenshot
+or demo slide showing a price, a plan, or a number the brief doesn't have
+makes that claim to the viewer. Replace that sample content, or ask.
 
 Compose each format on purpose: 16:9 has more spatial context, 9:16 fewer
 elements and a stronger vertical hierarchy, 1:1 tighter type and shorter
@@ -118,7 +120,10 @@ writing the scene.
 Run `omotion help format` for the scene format and the Motion helpers. Replace
 the starter in `scene.qml` with the film from the shot list: its `beats`
 match `shotlist.md` one for one, its `formats` list every format in the
-brief, and it uses only files from `assets/`.
+brief, and it uses only files from `assets/`. Build each beat to the entry
+and exit states the person approved. If one can't be built as written, or you
+see a better way, say so at the next stop instead of quietly changing it:
+the approval was for those shots.
 
 Run `omotion check film/scene.qml --json` after every edit and fix every
 error: a clock or a stateful frame breaks rendering, and text outside the
@@ -150,8 +155,9 @@ every PNG. Judge only the rendered frames, not what you meant to make.
 4. **Every cut.** A strip across each beat change, looking for empty or
    half-drawn frames.
 
-**Then judge the rest:** text that overlaps or crosses the safe area; real
-product assets, never replacements; consistent type and color across beats;
+**Then judge the rest:** each beat reaching the exit state in
+`shotlist.md`; text that overlaps or crosses the safe area; real product
+assets, never replacements, and no claim inside them the brief doesn't make; consistent type and color across beats;
 cuts and sound cues landing together; a real hook in the first two seconds; a
 last frame strong enough to be the poster; and after each move, the viewer
 knows where to look.
@@ -165,7 +171,8 @@ the evidence that shows it (the sheet, strip, or still), and a local fix.
 
 Patch only those sections, run `check`, and render the affected moments again
 to show each fix. Put each round's new sheet in its own folder
-(`-o film/reviews/round2/`), so it never replaces the evidence it's fixing. Repeat gates 4 and 5 until no defect is worth fixing. No new
+(`-o film/reviews/round2/`), so it never replaces the evidence it's fixing.
+Repeat gates 4 and 5 until no defect is worth fixing. No new
 evidence, no new attempt: never re-render to "see if it's better" without a
 defect to fix.
 
@@ -180,7 +187,7 @@ defect to fix.
   film/renders/`).
 - **Hand-off:** the videos, posters, contact sheets, and a short note on
   **what still needs human review**: anything you couldn't measure, or chose
-  without approval.
+  without approval. A problem you could fix belongs in gate 5, not here.
 
 **Stop.** Mark gate 6 only when the person approves the film.
 
@@ -216,10 +223,11 @@ Never tick a note without that proof.
 A note is never an approval, even "looks good". Say in your message which
 notes you ticked and which you left open, and why.
 
-**Activity:** after each step that changes the studio, add a line to
-`activity.md` (create it if missing): the local time as HH:MM, what changed,
-and its evidence, such as `- 14:02 rebuilt the gates beat; strip in
-reviews/strip-gates-16x9.png`.
+**Activity:** the person follows your work live in the window, so as you
+finish each step that changes the studio, not at the end, add a line to
+`activity.md` (create it if missing): the local time as HH:MM (`date
++%H:%M`), what changed, and its evidence, such as `- 14:02 rebuilt the gates
+beat; strip in reviews/strip-gates-16x9.png`.
 
 ## Working with the person
 
