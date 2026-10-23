@@ -162,8 +162,9 @@ bin/install    # makepkg -fsi, so omotion shows up in the app launcher
   note, the agent's answer in view, right-to-left), and the built `omotion`
   run as a command, asserted on exactly which files it writes.
 
-Every bug found by looking or by review has a test that fails when the bug
-returns. `bin/screens` covers what assertions can't: look at the screenshots
+`bin/test unit` or `bin/test app` runs one suite, and `bin/test NAME...` runs
+those tests in whichever suite has them. Every bug found by looking or by
+review has a test that fails when the bug returns. `bin/screens` covers what assertions can't: look at the screenshots
 after changing the window.
 
 ## License

@@ -3,12 +3,8 @@ set -eu
 
 # Writes the window's screenshot set to build/screens: wide, tiled tabs,
 # Arabic, the shortcuts, the note editor, and the welcome. For looking at the
-# window after a change, which no assertion replaces.
+# window after a change, which no assertion replaces. Built and run exactly as
+# bin/test runs the app tests.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-"$ROOT/bin/build" > /dev/null
-mkdir -p "$ROOT/build/tests/app_tests"
-cd "$ROOT/build/tests/app_tests"
-qmake6 "$ROOT/tests/app_tests.pro" > /dev/null
-make -j"$(nproc)" > /dev/null
 rm -rf "$ROOT/build/screens"
-QT_QPA_PLATFORM=offscreen OMOTION_BINARY="$ROOT/build/omotion" OMOTION_SCREENS="$ROOT/build/screens" ./app_tests screens
+OMOTION_SCREENS="$ROOT/build/screens" exec "$ROOT/bin/test" app screens

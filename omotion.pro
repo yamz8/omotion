@@ -4,24 +4,13 @@ CONFIG += c++17 release
 TARGET = omotion
 TEMPLATE = app
 
+include(src/shared.pri)
+
 HEADERS += \
-    src/backend.h \
     src/cli.h \
-    src/filepicker.h \
-    src/portalfilepicker.h \
-    src/scene.h \
-    src/studio.h \
-    src/theme.h \
-    src/translator.h
+    src/portalfilepicker.h
 
 SOURCES += \
     src/main.cpp \
-    src/backend.cpp \
     src/cli.cpp \
-    src/portalfilepicker.cpp \
-    src/scene.cpp \
-    src/studio.cpp \
-    src/theme.cpp \
-    src/translator.cpp
-
-RESOURCES += src/resources.qrc
+    src/portalfilepicker.cpp

@@ -25,6 +25,7 @@
 #include <memory>
 
 #include "backend.h"
+#include "engine.h"
 #include "filepicker.h"
 #include "scene.h"
 #include "studio.h"
@@ -38,11 +39,11 @@ public:
     void newFilm(const QUrl &) override {}
 };
 
-void write(const QString &path, const QByteArray &contents) {
+// Returns whether it worked, so the caller fails where the cause is.
+[[nodiscard]] bool write(const QString &path, const QByteArray &contents) {
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile file(path);
-    QVERIFY(file.open(QIODevice::WriteOnly));
-    file.write(contents);
+    return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
 }
 
 QString binary() { return qEnvironmentVariable("OMOTION_BINARY"); }
@@ -62,7 +63,7 @@ const QByteArray tinyScene =
 class App {
 public:
     explicit App(const QString &language = "en") {
-        write(dir.filePath("language"), language.toUtf8() + "\n");
+        ready = write(dir.filePath("language"), language.toUtf8() + "\n");
         translator = std::make_unique<Translator>(dir.filePath("language"));
         QCoreApplication::installTranslator(translator.get());
         theme = std::make_unique<Theme>(dir.filePath("no-omarchy"));
@@ -81,22 +82,25 @@ public:
         return root;
     }
 
-    // Opens the scene the way main.cpp does: loaded before the window exists.
+    // Opens the scene the way main.cpp does: loaded before the window exists,
+    // and the engine wired by the app's own setUpEngine. With no scene, the
+    // window opens on its welcome.
     bool open(const QString &scene, const QSize &size, double at = 0) {
-        backend->load(scene);
+        if (!ready)
+            return false;
+        if (!scene.isEmpty() && !backend->load(scene))
+            return false;
         engine = std::make_unique<QQmlApplicationEngine>();
-        backend->setEngine(engine.get());
-        engine->rootContext()->setContextProperty("translator", translator.get());
-        engine->rootContext()->setContextProperty("theme", theme.get());
-        engine->rootContext()->setContextProperty("backend", backend.get());
-        engine->rootContext()->setContextProperty("startTime", at);
-        engine->rootContext()->setContextProperty("startFormat", QString());
-        engine->rootContext()->setContextProperty("startSheet", false);
+        setUpEngine(*engine, *backend, *translator, *theme, {at, {}, false});
         engine->load(QUrl("qrc:/Main.qml"));
         if (engine->rootObjects().isEmpty())
             return false;
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
+        if (!window)
+            return false;
         window->resize(size);
+        if (scene.isEmpty())
+            return QTest::qWaitFor([this] { return window->isVisible(); }, 5000);
         return QTest::qWaitFor([this] { return window->property("ready").toBool(); }, 5000);
     }
 
@@ -131,6 +135,7 @@ public:
     std::unique_ptr<Backend> backend;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
+    bool ready = false;
 };
 
 struct Run {
@@ -142,7 +147,13 @@ Run run(const QStringList &arguments, const QString &folder) {
     QProcess process;
     process.setWorkingDirectory(folder);
     process.start(binary(), arguments);
-    process.waitForFinished(120000);
+    // A command that never starts or doesn't finish in time is a failure, not
+    // whatever exit code it hasn't produced yet.
+    if (!process.waitForFinished(120000)) {
+        process.kill();
+        process.waitForFinished();
+        return {-1, process.readAllStandardOutput(), "did not finish: " + process.errorString().toUtf8()};
+    }
     return {process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1,
             process.readAllStandardOutput(), process.readAllStandardError()};
 }
@@ -248,13 +259,62 @@ private slots:
         QVERIFY(qAbs(note.point.x() - 960) < 4 && qAbs(note.point.y() - 540) < 4);
         QCOMPARE(quits.count(), 0);
         QVERIFY(!app.object("noteEditor")->property("opened").toBool());
+    }
 
+    // The note's evidence is the frame rendered by the built omotion, ringed
+    // where the person clicked, and the card shows it once it's written.
+    void pinnedNoteGetsItsEvidenceFrame() {
         if (binary().isEmpty())
-            QSKIP("Set OMOTION_BINARY to check the evidence frame.");
-        const QString evidence = QDir(root).filePath(note.evidence);
+            QSKIP("Set OMOTION_BINARY to render evidence frames.");
+        App app;
+        const QString root = app.studio();
+        QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1480, 900}, 6.0));
+        app.settle();
+        QQuickItem *preview = app.item("preview");
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier,
+                          preview->mapToScene(QPointF(preview->width() / 2, preview->height() / 2)).toPoint());
+        QTRY_VERIFY(app.object("noteEditor")->property("opened").toBool());
+        for (const QChar c : QString("ring"))
+            app.key(0, Qt::NoModifier, QString(c));
+        app.key(Qt::Key_Return);
+        QTRY_COMPARE(Studio::readNotes(root).size(), 1);
+        const QString evidence = QDir(root).filePath(Studio::readNotes(root).first().evidence);
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(evidence).size() > 0, 20000);
         const QImage frame(evidence);
         QCOMPARE(frame.size(), QSize(1920, 1080));
+        const QColor ring = frame.pixelColor(960 + 81, 540);
+        QVERIFY2(ring.red() > 200 && ring.green() < 100, "The point the person clicked is ringed.");
+        QTRY_VERIFY(!app.backend->notes().first().toMap()["evidenceUrl"].toUrl().isEmpty());
+        QVERIFY(!app.backend->messageIsError());
+    }
+
+    // Found by review: the harness didn't wire live retranslation the way
+    // main.cpp does, so a break there passed. Switching the Omarchy language
+    // must change the window's words without a restart.
+    void languageChangesLive() {
+        App app;
+        QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
+        QCOMPARE(app.window->property("title").toString().endsWith("omotion"), true);
+        QQuickItem *panel = app.item("notesPanel");
+        auto heading = [&] {
+            for (QQuickItem *label : panel->findChildren<QQuickItem *>())
+                if (label->property("text").toString().startsWith("Not"))
+                    return label->property("text").toString();
+            return QString();
+        };
+        QCOMPARE(heading(), QString("Notes"));
+        QVERIFY(write(app.dir.filePath("language"), "da\n"));
+        QTRY_COMPARE(heading(), QString("Noter"));
+    }
+
+    // A scene's runtime errors reach the window, where its author is looking.
+    void sceneErrorsShowInTheWindow() {
+        App app;
+        const QString scene = app.dir.filePath("broken.qml");
+        QVERIFY(write(scene, QByteArray(tinyScene).replace("color: \"black\"\n",
+                                                           "color: \"black\"\n    opacity: missing.value\n")));
+        QVERIFY(app.open(scene, {1280, 820}));
+        QTRY_VERIFY(app.backend->warning().contains("missing"));
     }
 
     // Found on the desktop: the agent's reply sat under a full-width evidence
@@ -312,7 +372,7 @@ private slots:
         QVERIFY(app.open(QDir(app.studio()).filePath("scene.qml"), {1480, 900}));
         app.window->resize(1000, 700);
         const QString other = app.dir.filePath("plain.qml");
-        write(other, tinyScene);
+        QVERIFY(write(other, tinyScene));
         QVERIFY(app.backend->load(other));
         QTRY_VERIFY(app.window->property("ready").toBool());
         app.settle();
@@ -350,7 +410,7 @@ private slots:
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");
         QTemporaryDir dir;
-        write(dir.filePath("s.qml"), tinyScene);
+        QVERIFY(write(dir.filePath("s.qml"), tinyScene));
         QCOMPARE(run({"sheet", "s.qml", "--format", "all", "-o", "proof.png"}, dir.path()).code, 0);
         QCOMPARE(filesIn(dir.path()), QStringList({"proof-16x9.png", "proof-1x1.png", "s.qml"}));
     }
@@ -360,7 +420,7 @@ private slots:
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");
         QTemporaryDir dir;
-        write(dir.filePath("s.qml"), tinyScene);
+        QVERIFY(write(dir.filePath("s.qml"), tinyScene));
         QCOMPARE(run({"render", "s.qml", "--format", "all", "-o", "clips"}, dir.path()).code, 0);
         QCOMPARE(run({"frame", "s.qml", "--at", "0.5", "-o", "stills"}, dir.path()).code, 0);
         QCOMPARE(filesIn(dir.path()),
@@ -372,7 +432,7 @@ private slots:
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");
         QTemporaryDir dir;
-        write(dir.filePath("s.qml"), tinyScene);
+        QVERIFY(write(dir.filePath("s.qml"), tinyScene));
         QCOMPARE(run({"frame", "s.qml", "--at", "0", "--mark", "960,540", "-o", "f.png"}, dir.path()).code, 0);
         const QImage frame(dir.filePath("f.png"));
         // The ring's radius is 7.5% of the short side.
@@ -389,8 +449,8 @@ private slots:
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");
         QTemporaryDir dir;
-        write(dir.filePath("s.qml"), QByteArray(tinyScene).replace("color: \"black\"\n",
-                                                                   "color: \"black\"\n    Timer { running: true }\n"));
+        QVERIFY(write(dir.filePath("s.qml"), QByteArray(tinyScene).replace("color: \"black\"\n",
+                                                                           "color: \"black\"\n    Timer { running: true }\n")));
         const Run result = run({"check", "s.qml", "--json"}, dir.path());
         QCOMPARE(result.code, 1);
         const QJsonObject json = QJsonDocument::fromJson(result.out).object();
@@ -429,7 +489,7 @@ private slots:
             note.text = "This highlight should land a beat later.";
             QString error;
             Studio::addNote(root, note, &error);
-            write(QDir(root).filePath("activity.md"), "# Activity\n\n- 14:02 rebuilt the review beat\n");
+            QVERIFY(write(QDir(root).filePath("activity.md"), "# Activity\n\n- 14:02 rebuilt the review beat\n"));
             QVERIFY(app.open(QDir(root).filePath("scene.qml"), {1480, 900}, 6.0));
             shoot(app, "wide");
             app.key(Qt::Key_Question, Qt::ShiftModifier, "?");
@@ -456,17 +516,7 @@ private slots:
         }
         {
             App app;
-            app.backend->load(QString());
-            app.engine = std::make_unique<QQmlApplicationEngine>();
-            app.engine->rootContext()->setContextProperty("translator", app.translator.get());
-            app.engine->rootContext()->setContextProperty("theme", app.theme.get());
-            app.engine->rootContext()->setContextProperty("backend", app.backend.get());
-            app.engine->rootContext()->setContextProperty("startTime", 0.0);
-            app.engine->rootContext()->setContextProperty("startFormat", QString());
-            app.engine->rootContext()->setContextProperty("startSheet", false);
-            app.engine->load(QUrl("qrc:/Main.qml"));
-            app.window = qobject_cast<QQuickWindow *>(app.engine->rootObjects().first());
-            app.window->resize(1280, 820);
+            QVERIFY(app.open(QString(), {1280, 820}));
             shoot(app, "welcome");
         }
         qInfo().noquote() << "Wrote the screenshot set to" << out;

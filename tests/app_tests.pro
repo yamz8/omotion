@@ -3,8 +3,6 @@ CONFIG += c++17 testcase
 TARGET = app_tests
 TEMPLATE = app
 
-INCLUDEPATH += ../src
+include(../src/shared.pri)
 
-HEADERS += ../src/backend.h ../src/filepicker.h ../src/scene.h ../src/studio.h ../src/theme.h ../src/translator.h
-SOURCES += app_tests.cpp ../src/backend.cpp ../src/scene.cpp ../src/studio.cpp ../src/theme.cpp ../src/translator.cpp
-RESOURCES += ../src/resources.qrc
+SOURCES += app_tests.cpp

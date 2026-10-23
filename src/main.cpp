@@ -5,16 +5,15 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSettings>
 #include <QTimer>
 #include <QUrl>
-#include <cstdio>
 
 #include "backend.h"
 #include "cli.h"
+#include "engine.h"
 #include "portalfilepicker.h"
 #include "scene.h"
 #include "studio.h"
@@ -78,23 +77,8 @@ int main(int argc, char *argv[]) {
     Backend backend(&picker);
 
     QQmlApplicationEngine engine;
-    backend.setEngine(&engine);
-    // A scene's runtime errors show in the window, which is where its author is looking.
-    QObject::connect(&engine, &QQmlEngine::warnings, &backend, [&backend](const QList<QQmlError> &warnings) {
-        for (const auto &warning : warnings) {
-            fprintf(stderr, "%s\n", qPrintable(warning.toString()));
-            if (QFileInfo(warning.url().toLocalFile()).absolutePath() == QFileInfo(backend.scenePath()).absolutePath())
-                backend.addWarning(QString("%1:%2: %3").arg(warning.url().fileName()).arg(warning.line())
-                                       .arg(warning.description()));
-        }
-    });
-    QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
-    engine.rootContext()->setContextProperty("translator", &translator);
-    engine.rootContext()->setContextProperty("theme", &theme);
-    engine.rootContext()->setContextProperty("backend", &backend);
-    engine.rootContext()->setContextProperty("startTime", args.value("at").toDouble());
-    engine.rootContext()->setContextProperty("startFormat", args.value("format"));
-    engine.rootContext()->setContextProperty("startSheet", args.isSet("sheet"));
+    setUpEngine(engine, backend, translator, theme,
+                {args.value("at").toDouble(), args.value("format"), args.isSet("sheet")});
 
     // The last scene opens again, as an editor's last file would.
     QSettings settings;

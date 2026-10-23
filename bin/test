@@ -3,13 +3,42 @@ set -eu
 
 # Builds the app, then runs the unit tests and the app tests: the real window
 # offscreen and the built omotion as a command.
+#
+#   bin/test                      every test in both suites
+#   bin/test unit | app           one suite
+#   bin/test [unit|app] NAME...   those tests, each run in the suite that has it
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 "$ROOT/bin/build" > /dev/null
 
-for suite in omotion_tests app_tests; do
+suites="omotion_tests app_tests"
+case "${1:-}" in
+  unit) suites="omotion_tests"; shift ;;
+  app) suites="app_tests"; shift ;;
+esac
+
+for suite in $suites; do
   mkdir -p "$ROOT/build/tests/$suite"
-  cd "$ROOT/build/tests/$suite"
-  qmake6 "$ROOT/tests/$suite.pro" > /dev/null
-  make -j"$(nproc)" > /dev/null
-  QT_QPA_PLATFORM=offscreen OMOTION_BINARY="$ROOT/build/omotion" ./"$suite" "$@"
+  (cd "$ROOT/build/tests/$suite" && qmake6 "$ROOT/tests/$suite.pro" > /dev/null && make -j"$(nproc)" > /dev/null)
 done
+
+ran=0
+for suite in $suites; do
+  binary="$ROOT/build/tests/$suite/$suite"
+  # Named tests go only to the suite that has them.
+  names=""
+  if [ $# -gt 0 ]; then
+    have="$(QT_QPA_PLATFORM=offscreen "$binary" -functions | sed 's/()$//')"
+    for name in "$@"; do
+      if printf '%s\n' "$have" | grep -qx "$name"; then names="$names $name"; fi
+    done
+    [ -z "$names" ] && continue
+  fi
+  # shellcheck disable=SC2086
+  QT_QPA_PLATFORM=offscreen OMOTION_BINARY="$ROOT/build/omotion" "$binary" $names
+  ran=1
+done
+
+if [ "$ran" = 0 ]; then
+  echo "No test named: $*" >&2
+  exit 1
+fi
