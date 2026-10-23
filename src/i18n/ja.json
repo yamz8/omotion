@@ -58,5 +58,41 @@
   "New Film": "新しいフィルム",
   "Start a film with %1, then open your coding agent in its folder.": "%1 でフィルムを始めて、そのフォルダでコーディングエージェントを開きましょう。",
   "%1 already has files in it; pick a new folder for the film.": "%1 にはすでにファイルがあります。フィルム用に新しいフォルダを選んでください。",
-  "Could not create the film: %1": "フィルムを作成できませんでした: %1"
+  "Could not create the film: %1": "フィルムを作成できませんでした: %1",
+  "%1 s · %2": "%1 秒 · %2",
+  "Activity": "アクティビティ",
+  "Assets": "アセット",
+  "Beat: %1": "ビート: %1",
+  "Click the film to pin a note to that moment. The agent fixes each one with evidence, or replies.": "フィルムをクリックすると、その瞬間にメモを留められます。エージェントは各メモを証拠付きで直すか、返信します。",
+  "Contact sheets, stills, reviews, and renders appear here as the agent makes them.": "コンタクトシート、静止画、レビュー、レンダリングは、エージェントが作るとここに表示されます。",
+  "Copied note %1. Paste it into your agent's terminal.": "メモ %1 をコピーしました。エージェントのターミナルに貼り付けてください。",
+  "Copies a request to fix the open notes, to paste into your agent's terminal.": "未解決のメモを直す依頼をコピーします。エージェントのターミナルに貼り付けてください。",
+  "Copy": "コピー",
+  "Copy for Agent": "エージェント用にコピー",
+  "Could not save the note: %1": "メモを保存できませんでした: %1",
+  "Evidence": "証拠",
+  "Folder": "フォルダ",
+  "Gates": "ゲート",
+  "Image": "画像",
+  "Missing: %1": "不足: %1",
+  "No gates.md in this folder.": "このフォルダには gates.md がありません。",
+  "Note %1 saved to notes.md. Tell your agent to check your notes.": "メモ %1 を notes.md に保存しました。エージェントにメモを確認するよう伝えてください。",
+  "Notes": "メモ",
+  "Nothing in assets/ yet.": "assets/ にはまだ何もありません。",
+  "On “%1”": "「%1」の上",
+  "Pin Note": "メモを留める",
+  "Pin a note to that moment": "その瞬間にメモを留める",
+  "Show or hide the studio panels": "スタジオのパネルを表示 / 非表示",
+  "The agent's steps appear here as it writes them to activity.md.": "エージェントが activity.md に書いた手順がここに表示されます。",
+  "Video": "動画",
+  "Waiting for your approval": "あなたの承認待ち",
+  "What should change here?": "ここで何を変えるべきですか?",
+  "You approve this gate": "このゲートはあなたが承認します",
+  "Click": "クリック",
+  "Notes · %n open": {
+    "other": "メモ · 未解決 %n 件"
+  },
+  "Copied a request to check %n open notes. Paste it into your agent's terminal.": {
+    "other": "未解決のメモ %n 件を確認する依頼をコピーしました。エージェントのターミナルに貼り付けてください。"
+  }
 }

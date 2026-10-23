@@ -4,7 +4,10 @@
 #include "scene.h"
 #include "studio.h"
 
+#include <QClipboard>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QGuiApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -24,6 +27,11 @@ Backend::Backend(FilePicker *picker, const QString &renderer, QObject *parent)
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
     connect(&m_debounce, &QTimer::timeout, this, &Backend::filesChanged);
+    m_studioDebounce.setSingleShot(true);
+    m_studioDebounce.setInterval(150);
+    connect(&m_studioWatcher, &QFileSystemWatcher::fileChanged, this, [this] { m_studioDebounce.start(); });
+    connect(&m_studioWatcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_studioDebounce.start(); });
+    connect(&m_studioDebounce, &QTimer::timeout, this, &Backend::reloadStudio);
 
     if (m_picker) {
         connect(m_picker, &FilePicker::openSelected, this, [this](const QUrl &url) { load(url.toString()); });
@@ -95,6 +103,8 @@ bool Backend::load(const QString &pathOrUrl) {
         return false;
     }
     m_path = info.absoluteFilePath();
+    m_root = Studio::rootOf(m_path);
+    reloadStudio();
     ++m_revision;
     watch();
     m_signature = signature();
@@ -290,4 +300,142 @@ void Backend::showOutputs() {
     const QString folder = m_outputs.isEmpty() ? QFileInfo(Scene::defaultOutput(m_path, "16:9")).absolutePath()
                                                : QFileInfo(m_outputs.first()).absolutePath();
     QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+
+QString Backend::studioName() const { return QFileInfo(m_root).fileName(); }
+
+void Backend::watchStudio() {
+    const auto paths = m_studioWatcher.files() + m_studioWatcher.directories();
+    if (!paths.isEmpty())
+        m_studioWatcher.removePaths(paths);
+    if (m_root.isEmpty())
+        return;
+    // The agent saves by writing beside a file and renaming over it, which only
+    // the folder sees; so the folders are watched as well as the files.
+    for (const auto &name : {"", "assets", "reviews", "reviews/notes", "renders", "gates.md", "notes.md",
+                             "activity.md", "assets/assets.md"}) {
+        const QString path = QDir(m_root).filePath(name);
+        if (QFileInfo::exists(path))
+            m_studioWatcher.addPath(path);
+    }
+}
+
+namespace {
+QString kindOf(const QString &suffix) {
+    static const QStringList images{"png", "jpg", "jpeg", "webp", "svg", "gif"};
+    static const QStringList fonts{"ttf", "otf"};
+    static const QStringList audio{"wav", "mp3", "flac", "ogg", "m4a", "aac"};
+    static const QStringList video{"mp4", "mov", "webm", "mkv"};
+    const QString s = suffix.toLower();
+    return images.contains(s) ? "image" : fonts.contains(s) ? "font" : audio.contains(s) ? "audio"
+           : video.contains(s) ? "video" : s == "md" ? "text" : "other";
+}
+}
+
+void Backend::reloadStudio() {
+    watchStudio();
+    m_gates.clear();
+    m_assets.clear();
+    m_evidence.clear();
+    m_notes.clear();
+    m_missing.clear();
+    m_activity.clear();
+    if (!m_root.isEmpty()) {
+        const QDir root(m_root);
+        for (const auto &gate : Studio::readGates(m_root))
+            m_gates << QVariantMap{{"number", gate.number}, {"title", gate.title}, {"passed", gate.passed},
+                                   {"status", gate.status}, {"waiting", gate.waitingForPerson()},
+                                   // Gates 1, 2, and 6 are the person's to pass; the rest are the agent's.
+                                   {"person", gate.number == 1 || gate.number == 2 || gate.number == 6}};
+        for (const auto &info : QDir(root.filePath("assets")).entryInfoList(QDir::Files, QDir::Name))
+            if (info.fileName() != "assets.md")
+                m_assets << QVariantMap{{"name", info.fileName()}, {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
+                                        {"kind", kindOf(info.suffix())}};
+        m_missing = Studio::missingAssets(m_root);
+
+        QFileInfoList files = QDir(root.filePath("reviews")).entryInfoList({"*.png", "*.md", "*.jpg"}, QDir::Files);
+        files += QDir(root.filePath("renders")).entryInfoList({"*.mp4", "*.png", "*.webm", "*.mov"}, QDir::Files);
+        std::sort(files.begin(), files.end(), [](const QFileInfo &a, const QFileInfo &b) {
+            return a.lastModified() > b.lastModified();
+        });
+        for (const auto &info : files.mid(0, 40))
+            m_evidence << QVariantMap{{"name", info.fileName()}, {"path", root.relativeFilePath(info.absoluteFilePath())},
+                                      {"url", QUrl::fromLocalFile(info.absoluteFilePath())},
+                                      {"kind", kindOf(info.suffix())}, {"modified", info.lastModified()}};
+
+        for (const auto &note : Studio::readNotes(m_root)) {
+            const QString evidence = note.evidence.isEmpty() ? QString() : root.filePath(note.evidence);
+            m_notes << QVariantMap{{"id", note.id}, {"done", note.done}, {"at", note.at}, {"format", note.format},
+                                   {"beat", note.beat}, {"target", note.target}, {"text", note.text},
+                                   {"answers", note.answers}, {"evidence", note.evidence},
+                                   {"evidenceUrl", QFileInfo::exists(evidence) ? QUrl::fromLocalFile(evidence) : QUrl()}};
+        }
+        m_activity = Studio::readActivity(m_root);
+    }
+    emit studioChanged();
+}
+
+QString Backend::addNote(double at, const QString &format, const QString &beat, int x, int y, const QString &target,
+                         const QString &text) {
+    if (m_root.isEmpty() || text.trimmed().isEmpty())
+        return {};
+    int last = 0;
+    for (const auto &note : Studio::readNotes(m_root))
+        last = qMax(last, note.id.toInt());
+    const QString next = QString("%1").arg(last + 1, 3, 10, QChar('0'));
+
+    Studio::Note note;
+    note.at = at;
+    note.format = format;
+    note.beat = beat;
+    note.point = {x, y};
+    note.target = target;
+    note.text = text;
+    note.evidence = "reviews/notes/" + next + ".png";
+    QString error;
+    const QString id = Studio::addNote(m_root, note, &error);
+    if (id.isEmpty()) {
+        setMessage(tr("Could not save the note: %1").arg(error), true);
+        return {};
+    }
+    // The evidence is the frame as it renders, made the same way an export is.
+    QDir(m_root).mkpath("reviews/notes");
+    QProcess::startDetached(m_renderer, {"frame", m_path, "--at", QString::number(at, 'f', 4), "--format", format,
+                                         "--mark", QString("%1,%2").arg(x).arg(y), "-o",
+                                         QDir(m_root).filePath("reviews/notes/" + id + ".png")});
+    reloadStudio();
+    setMessage(tr("Note %1 saved to notes.md. Tell your agent to check your notes.").arg(id), false);
+    return id;
+}
+
+void Backend::copyNote(const QString &id) {
+    for (const auto &note : Studio::readNotes(m_root))
+        if (note.id == id) {
+            QGuiApplication::clipboard()->setText(Studio::noteReference(note));
+            setMessage(tr("Copied note %1. Paste it into your agent's terminal.").arg(id), false);
+            return;
+        }
+}
+
+void Backend::copyOpenNotes() {
+    QStringList open;
+    for (const auto &note : Studio::readNotes(m_root))
+        if (!note.done)
+            open << note.id;
+    if (open.isEmpty())
+        return;
+    // English on purpose: it's addressed to the agent, whose skill is in English.
+    QGuiApplication::clipboard()->setText(
+        QString("Check my notes: notes.md has %1 open (%2). Fix each with evidence, or reply under it.")
+            .arg(open.size()).arg(open.join(", ")));
+    setMessage(tr("Copied a request to check %n open notes. Paste it into your agent's terminal.", "", open.size()),
+               false);
+}
+
+void Backend::openStudioPath(const QString &path) {
+    if (m_root.isEmpty())
+        return;
+    const QString full = QFileInfo(path).isAbsolute() ? path : QDir(m_root).filePath(path);
+    if (QFileInfo::exists(full))
+        QDesktopServices::openUrl(QUrl::fromLocalFile(full));
 }

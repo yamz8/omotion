@@ -38,6 +38,8 @@ launch/
   reviews/           contact sheets and defect notes
   renders/           one video per format
   gates.md           the six gates, and who approved each
+  notes.md           your notes, pinned to moments of the film
+  activity.md        the agent's steps
   AGENTS.md          points agents to the skill
   .claude/skills/omotion/SKILL.md
 ```
@@ -53,8 +55,24 @@ The skill lives in the film's folder, not in your home folder, so it always
 matches the omotion that made the film. When omotion is updated, `omotion
 check` says so, and `omotion skill install` in the folder updates it.
 
-To watch the film as it's made, `omotion open ~/Videos/launch/scene.qml`. The
-window reloads every time the agent saves.
+## Directing from the studio
+
+`omotion open ~/Videos/launch/scene.qml` opens the film in the studio window,
+which watches the agent work:
+
+- **Gates** from `gates.md`: which are passed, which is current, and which is
+  waiting for your approval. Each opens the files that are its evidence.
+- **Assets** in `assets/`, with anything `assets.md` lists as missing.
+- **Evidence**: contact sheets, stills, reviews, and renders, newest first.
+- **Activity**: the agent's steps, from `activity.md`.
+- **The film**, reloading every time the agent saves.
+
+To ask for a change, pause and **click the film where it's wrong**. omotion
+pins your note to that moment in `notes.md`, with the beat, the text under the
+pointer, and a frame with the spot ringed. Tell the agent "check my notes", or
+press **Copy for Agent** and paste. The agent fixes each note with evidence and
+ticks it, or replies, and you see it in the window. A note never passes a gate;
+only you do.
 
 ## A scene
 
@@ -102,6 +120,8 @@ Rectangle {
 | O | Open a scene |
 | N | New film |
 | R | Reload the scene |
+| P | Show or hide the studio panels |
+| Click the film | Pin a note to that moment |
 | ? | Show shortcuts |
 | Q | Quit |
 

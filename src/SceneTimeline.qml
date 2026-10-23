@@ -11,8 +11,11 @@ Item {
     property real duration: 0
     property var beats: []
     property int current: -1
+    property var notes: []
+    property string selectedNote: ""
 
     signal seek(real time)
+    signal noteClicked(string id)
 
     implicitHeight: 40
     LayoutMirroring.enabled: false
@@ -62,6 +65,23 @@ Item {
         y: -4
         color: theme.accent
         visible: timeline.duration > 0
+    }
+
+    // The person's notes, above the beats, where they were pinned.
+    Repeater {
+        model: timeline.notes
+        delegate: Rectangle {
+            required property var modelData
+            x: timeline.xFor(modelData.at) - width / 2
+            y: -14
+            width: modelData.id === timeline.selectedNote ? 10 : 8
+            height: width
+            radius: width / 2
+            color: modelData.done ? "#4a4a52" : "#FF2D78"
+            z: 2
+            TapHandler { onTapped: timeline.noteClicked(parent.modelData.id) }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+        }
     }
 
     MouseArea {

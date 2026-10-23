@@ -227,7 +227,8 @@ private slots:
         QStringList created;
         QVERIFY2(Studio::create(root, &error, &created), qPrintable(error));
         for (const auto &file : {"brief.md", "style-guide.md", "shotlist.md", "assets/assets.md", "gates.md",
-                                 "scene.qml", "AGENTS.md", ".claude/skills/omotion/SKILL.md"})
+                                 "notes.md", "activity.md", "scene.qml", "AGENTS.md",
+                                 ".claude/skills/omotion/SKILL.md"})
             QVERIFY2(QFileInfo(QDir(root).filePath(file)).isFile(), file);
         QVERIFY(QFileInfo(QDir(root).filePath("reviews")).isDir());
         QVERIFY(QFileInfo(QDir(root).filePath("renders")).isDir());
@@ -279,6 +280,88 @@ private slots:
 
         QVERIFY(QFile::remove(skill));
         QVERIFY(Studio::skillProblem(root).contains("no agent skill"));
+    }
+
+    void studioReadsItsGates()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        auto gates = Studio::readGates(root);
+        QCOMPARE(gates.size(), 6);
+        QCOMPARE(gates[1].title, QString("Style guide and shot list"));
+        QCOMPARE(gates[1].status, QString("the person approves"));
+        QVERIFY(!gates[1].passed);
+
+        write(QDir(root).filePath("gates.md"),
+              "- [x] 1 References and assets: approved by the person, 2026-10-23\n"
+              "- [ ] 2 Style guide and shot list: waiting for the person's approval since 2026-10-23\n");
+        gates = Studio::readGates(root);
+        QVERIFY(gates[0].passed);
+        QCOMPARE(gates[0].status, QString("approved by the person, 2026-10-23"));
+        QVERIFY(gates[1].waitingForPerson());
+        QVERIFY(!gates[0].waitingForPerson());
+    }
+
+    void notesRoundTripWithTheAgent()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        QCOMPARE(Studio::readNotes(root).size(), 0);
+
+        Studio::Note note;
+        note.at = 12.6;
+        note.format = "16:9";
+        note.beat = "Gates";
+        note.point = {1152, 446};
+        note.target = "you approve";
+        note.text = "these marks\nleave too soon";
+        note.evidence = "reviews/notes/001.png";
+        QCOMPARE(Studio::addNote(root, note, &error), QString("001"));
+        note.text = "second";
+        note.target.clear();
+        QCOMPARE(Studio::addNote(root, note, &error), QString("002"));
+
+        // The agent ticks the first with its proof, as the skill says.
+        QFile file(QDir(root).filePath("notes.md"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QString text = QString::fromUtf8(file.readAll());
+        file.close();
+        QVERIFY(text.contains("- [ ] 001 · 12.60s · 16:9 · Gates · (1152, 446) · on \"you approve\""));
+        text.replace("- [ ] 001", "- [x] 001");
+        text.replace("  note: these marks leave too soon\n",
+                     "  note: these marks leave too soon\n  fixed: held to 13.05 s; proof\n    reviews/fix.png\n");
+        write(QDir(root).filePath("notes.md"), text.toUtf8());
+
+        const auto notes = Studio::readNotes(root);
+        QCOMPARE(notes.size(), 2);
+        QVERIFY(notes[0].done);
+        QCOMPARE(notes[0].text, QString("these marks leave too soon"));
+        QCOMPARE(notes[0].point, QPoint(1152, 446));
+        QCOMPARE(notes[0].answers, QStringList{"fixed: held to 13.05 s; proof reviews/fix.png"});
+        QVERIFY(!notes[1].done);
+        QCOMPARE(notes[1].target, QString());
+        QVERIFY(Studio::noteReference(notes[0]).startsWith("Note 001 in notes.md (12.60s in 16:9, beat Gates"));
+        // Adding another keeps the agent's edits.
+        QCOMPARE(Studio::addNote(root, note, &error), QString("003"));
+        QVERIFY(Studio::readNotes(root)[0].done);
+    }
+
+    void studioListsMissingAssetsAndActivity()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        write(QDir(root).filePath("assets/assets.md"),
+              "| Asset | File | Source | Status |\n| --- | --- | --- | --- |\n"
+              "| Logo | - | - | MISSING: requested |\n| Icon | icon.svg | given | have |\n");
+        QCOMPARE(Studio::missingAssets(root), QStringList{"Logo"});
+        write(QDir(root).filePath("activity.md"), "# Activity\n\n- 03:06 first\n- 03:14 second\n");
+        QCOMPARE(Studio::readActivity(root), QStringList({"03:14 second", "03:06 first"}));
     }
 
     void themeFallsBack()

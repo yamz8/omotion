@@ -5,6 +5,9 @@
         <file alias="SceneTimeline.qml">SceneTimeline.qml</file>
         <file alias="ContactSheet.qml">ContactSheet.qml</file>
         <file alias="ShortcutHelp.qml">ShortcutHelp.qml</file>
+        <file alias="StudioPanel.qml">StudioPanel.qml</file>
+        <file alias="NotesPanel.qml">NotesPanel.qml</file>
+        <file alias="NoteEditor.qml">NoteEditor.qml</file>
         <file alias="Motion.qml">Motion.qml</file>
         <file alias="starter.qml">starter.qml</file>
         <file alias="format.md">format.md</file>
@@ -13,6 +16,8 @@
         <file alias="studio/assets.md">studio/assets.md</file>
         <file alias="studio/brief.md">studio/brief.md</file>
         <file alias="studio/gates.md">studio/gates.md</file>
+        <file alias="studio/notes.md">studio/notes.md</file>
+        <file alias="studio/activity.md">studio/activity.md</file>
         <file alias="studio/shotlist.md">studio/shotlist.md</file>
         <file alias="studio/style-guide.md">studio/style-guide.md</file>
         <file alias="i18n/en.json">i18n/en.json</file>

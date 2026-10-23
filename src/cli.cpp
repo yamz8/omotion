@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPainter>
 #include <QSaveFile>
 #include <cmath>
 #include <cstdio>
@@ -27,6 +28,14 @@ int fail(const QString &message) {
 QString seconds(double t) { return QString::number(t, 'f', 2) + "s"; }
 // A path ending in a slash, or naming a folder that exists, is where the file goes.
 bool namesDirectory(const QString &path) { return path.endsWith('/') || QFileInfo(path).isDir(); }
+// A file name given for several formats keeps its name, with the format added:
+// proof.png becomes proof-16x9.png, so one format never overwrites another,
+// and no other file is touched.
+QString withFormat(const QString &path, const QString &slug) {
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().isEmpty() ? QString() : "." + info.suffix();
+    return info.dir().filePath(info.completeBaseName() + "-" + slug + suffix);
+}
 
 QJsonObject toJson(const Problem &problem) {
     return {{"severity", problem.error ? "error" : "warning"},
@@ -194,6 +203,7 @@ int frame(const QStringList &arguments) {
     command.parser.addOption({"at", "Time in seconds", "seconds"});
     command.parser.addOption({{"o", "output"}, "PNG file, or a folder for it (default: <scene>-<format>-<seconds>.png)", "path"});
     command.parser.addOption({"width", "Scale the image to this width", "pixels"});
+    command.parser.addOption({"mark", "Ring a point of the frame, in its pixels, such as 1100,446", "x,y"});
     command.format("the scene's first format");
     command.json();
     command.parser.process(arguments);
@@ -214,6 +224,23 @@ int frame(const QStringList &arguments) {
     if (at < 0 || at > scene.duration())
         return fail(QString("%1 is outside the scene's %2.").arg(seconds(at), seconds(scene.duration())));
     QImage image = scene.frame(at);
+    if (command.parser.isSet("mark")) {
+        const QStringList point = command.parser.value("mark").split(',');
+        bool x = false, y = false;
+        const QPointF center(point.value(0).toDouble(&x), point.value(1).toDouble(&y));
+        if (point.size() != 2 || !x || !y)
+            return fail("Give the point to mark as x,y in the frame's pixels, such as 1100,446.");
+        // A ring wide enough to surround what it points at rather than cover it,
+        // in a pink films rarely use, with a dark edge to read on light frames.
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const double radius = qMin(image.width(), image.height()) * 0.075;
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor(0, 0, 0, 170), radius * 0.16));
+        painter.drawEllipse(center, radius, radius);
+        painter.setPen(QPen(QColor("#FF2D78"), radius * 0.08));
+        painter.drawEllipse(center, radius, radius);
+    }
     if (command.parser.isSet("width")) {
         const int width = command.parser.value("width").toInt();
         if (width < 16 || width > 7680)
@@ -243,7 +270,7 @@ int sheet(const QStringList &arguments) {
     Command command("sheet", "Render a contact sheet: one frame from the middle of every beat, or the moments "
                              "named with --times, labelled with beat, time, and frame.");
     command.parser.addOption({"times", "Comma-separated seconds to show instead of the beats", "list"});
-    command.parser.addOption({{"o", "output"}, "PNG file, or a folder for one per format (default: <scene>-<format>-sheet.png beside the scene)", "path"});
+    command.parser.addOption({{"o", "output"}, "PNG file (with the format added when there are several), or a folder (default: <scene>-<format>-sheet.png beside the scene)", "path"});
     command.parser.addOption({"columns", "Tiles per row", "count"});
     command.format("the scene's first format");
     command.json();
@@ -279,7 +306,7 @@ int sheet(const QStringList &arguments) {
         else if (namesDirectory(output))
             output = QDir(output).filePath(file);
         else if (formats.size() > 1)
-            output = QFileInfo(output).absoluteDir().filePath(file);
+            output = withFormat(output, scene.format().slug());
         QDir().mkpath(QFileInfo(output).absolutePath());
         if (!scene.contactSheet(times, command.parser.value("columns").toInt()).save(output, "PNG"))
             return fail("Could not save " + output);
@@ -298,7 +325,7 @@ int sheet(const QStringList &arguments) {
 int render(const QStringList &arguments) {
     Command command("render", "Encode the scene to MP4 through ffmpeg, once per format, from the source rather "
                               "than a crop.");
-    command.parser.addOption({{"o", "output"}, "MP4 file for one format, or a directory for several "
+    command.parser.addOption({{"o", "output"}, "MP4 file (with the format added when there are several), or a folder "
                                                "(default: renders/<scene>-<format>.mp4 beside the scene)", "path"});
     command.parser.addOption({"progress", "Print a JSON line per frame"});
     command.format("all of the scene's formats");
@@ -318,8 +345,9 @@ int render(const QStringList &arguments) {
             return fail(error);
         QString target = Scene::defaultOutput(scene.path(), formats[i]);
         if (!output.isEmpty())
-            target = formats.size() == 1 && !namesDirectory(output)
-                         ? output : QDir(output).filePath(QFileInfo(target).fileName());
+            target = namesDirectory(output) ? QDir(output).filePath(QFileInfo(target).fileName())
+                     : formats.size() == 1 ? output
+                                           : withFormat(output, scene.format().slug());
         const QString format = formats[i];
         const int count = formats.size();
         auto report = [&](int frame, int frames) {

@@ -6,8 +6,8 @@ import QtMultimedia
 
 ApplicationWindow {
     id: win
-    width: 1280
-    height: 820
+    width: backend.studioRoot !== "" ? 1480 : 1280
+    height: backend.studioRoot !== "" ? 900 : 820
     minimumWidth: 760
     minimumHeight: 520
     visible: true
@@ -25,6 +25,10 @@ ApplicationWindow {
     property bool helpVisible: false
     property var sceneComponent: null
     property string loadError: ""
+    property bool panelsVisible: true
+    property string selectedNote: ""
+    readonly property bool editing: noteEditor.opened
+    readonly property bool studio: backend.studioRoot !== "" && panelsVisible
 
     readonly property var scene: preview.scene
     readonly property bool ready: scene !== null && preview.problem === "" && loadError === ""
@@ -109,6 +113,41 @@ ApplicationWindow {
             backend.exportVideo(all ? sceneFormats : [format])
     }
 
+    function seekNote(t, noteFormat) {
+        playing = false
+        sheetVisible = false
+        if (noteFormat !== format && sceneFormats.indexOf(noteFormat) >= 0)
+            format = noteFormat
+        seek(t)
+    }
+
+    function selectNote(id) {
+        selectedNote = id
+        for (const note of backend.notes)
+            if (note.id === id)
+                seekNote(note.at, note.format)
+    }
+
+    // A click on the film opens a note pinned to that moment and point.
+    function pinNote(px, py) {
+        const frameScale = preview.frameScale
+        const left = (preview.width - preview.frameSize.width * frameScale) / 2
+        const top = (preview.height - preview.frameSize.height * frameScale) / 2
+        const fx = (px - left) / frameScale, fy = (py - top) / frameScale
+        if (fx < 0 || fy < 0 || fx > preview.frameSize.width || fy > preview.frameSize.height)
+            return
+        playing = false
+        noteEditor.at = Math.round(time * fps) / fps
+        noteEditor.format = format
+        noteEditor.beat = currentBeat >= 0 ? beats[currentBeat].name : ""
+        noteEditor.point = Qt.point(fx, fy)
+        noteEditor.target = preview.textAt(fx, fy)
+        const spot = preview.mapToItem(win.contentItem, px, py)
+        noteEditor.x = Math.max(12, Math.min(win.width - noteEditor.width - 12, spot.x + 12))
+        noteEditor.y = Math.max(12, Math.min(win.height - 240, spot.y + 12))
+        noteEditor.open()
+    }
+
     function quit() {
         if (backend.exporting)
             quitDialog.open()
@@ -186,27 +225,29 @@ ApplicationWindow {
     }
 
     // "?" is Shift+/ on most layouts, and arrives either way.
-    Shortcut { sequences: ["?", "Shift+?"]; context: Qt.ApplicationShortcut; onActivated: win.helpVisible = !win.helpVisible }
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: win.quit() }
-    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: win.togglePlay() }
-    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; onActivated: win.step(-1) }
-    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; onActivated: win.step(1) }
-    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; onActivated: win.step(-win.fps) }
-    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; onActivated: win.step(win.fps) }
-    Shortcut { sequence: "["; context: Qt.ApplicationShortcut; onActivated: win.jumpBeat(-1) }
-    Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; onActivated: win.jumpBeat(1) }
-    Shortcut { sequence: "Home"; context: Qt.ApplicationShortcut; onActivated: { win.playing = false; win.seek(0) } }
-    Shortcut { sequence: "End"; context: Qt.ApplicationShortcut; onActivated: { win.playing = false; win.seek(win.lastTime) } }
-    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: win.cycleFormat() }
-    Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; onActivated: if (win.ready) win.sheetVisible = !win.sheetVisible }
-    Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; onActivated: win.exportFormats(false) }
-    Shortcut { sequence: "Shift+E"; context: Qt.ApplicationShortcut; onActivated: win.exportFormats(true) }
-    Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; onActivated: backend.openScene() }
-    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; onActivated: backend.newFilm() }
-    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; onActivated: backend.reload() }
+    Shortcut { sequences: ["?", "Shift+?"]; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.helpVisible = !win.helpVisible }
+    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.quit() }
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.togglePlay() }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.step(-1) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.step(1) }
+    Shortcut { sequence: "Shift+Left"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.step(-win.fps) }
+    Shortcut { sequence: "Shift+Right"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.step(win.fps) }
+    Shortcut { sequence: "["; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.jumpBeat(-1) }
+    Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.jumpBeat(1) }
+    Shortcut { sequence: "Home"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: { win.playing = false; win.seek(0) } }
+    Shortcut { sequence: "End"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: { win.playing = false; win.seek(win.lastTime) } }
+    Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.cycleFormat() }
+    Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: if (win.ready) win.sheetVisible = !win.sheetVisible }
+    Shortcut { sequence: "E"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.exportFormats(false) }
+    Shortcut { sequence: "Shift+E"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.exportFormats(true) }
+    Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.openScene() }
+    Shortcut { sequence: "N"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.newFilm() }
+    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: backend.reload() }
+    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.panelsVisible = !win.panelsVisible }
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
+        enabled: !win.editing
         onActivated: {
             if (win.helpVisible)
                 win.helpVisible = false
@@ -226,202 +267,231 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
-            Item {
-                id: stage
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                spacing: 0
 
-                ScenePreview {
-                    id: preview
-                    anchors.fill: parent
-                    anchors.margins: 24
-                    visible: !win.sheetVisible && backend.scenePath !== ""
-                    component: win.sceneComponent
-                    format: win.format
-                    time: win.time
-                    outlined: true
+                StudioPanel {
+                    Layout.preferredWidth: 250
+                    Layout.fillHeight: true
+                    visible: win.studio && win.width >= 1100
                 }
 
-                ContactSheet {
-                    anchors.fill: parent
-                    visible: win.sheetVisible && win.ready
-                    component: visible ? win.sceneComponent : null
-                    format: win.format
-                    times: win.sheetTimes
-                    beats: win.beats
-                    fps: win.fps
-                    current: win.currentBeat
-                    onPicked: t => {
-                        win.seek(t)
-                        win.sheetVisible = false
-                    }
-                }
+                Item {
+                    id: stage
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
 
-                // Nothing open yet.
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    width: Math.min(parent.width - 48, 520)
-                    visible: backend.scenePath === ""
-                    spacing: 14
-
-                    Label {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "omotion"
-                        font.pixelSize: 40
-                        font.weight: Font.Bold
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        text: qsTr("Preview motion scenes written as functions of time, look at every beat at once, and render each format.")
-                        color: "#b4b4bb"
-                    }
-                    RowLayout {
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.topMargin: 10
-                        spacing: 12
-                        Button {
-                            Material.roundedScale: theme.radius
-                            text: qsTr("Open Scene…")
-                            highlighted: true
-                            focusPolicy: Qt.NoFocus
-                            onClicked: backend.openScene()
-                        }
-                        Button {
-                            Material.roundedScale: theme.radius
-                            text: qsTr("New Film…")
-                            flat: true
-                            focusPolicy: Qt.NoFocus
-                            onClicked: backend.newFilm()
-                        }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.topMargin: 16
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        // The command stays left to right inside right-to-left text.
-                        text: qsTr("Start a film with %1, then open your coding agent in its folder.").arg("\u2066omotion new <folder>\u2069")
-                        color: "#7d7d85"
-                        font.pixelSize: 13
-                    }
-                }
-
-                // A scene that doesn't load says why, where its author is looking.
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: Math.min(parent.width - 48, 860)
-                    height: Math.min(parent.height - 48, errorColumn.implicitHeight + 40)
-                    visible: backend.scenePath !== "" && (win.loadError !== "" || preview.problem !== "")
-                    radius: theme.radius
-                    color: "#1a1214"
-                    border.color: "#6b2a32"
-
-                    ColumnLayout {
-                        id: errorColumn
+                    ScenePreview {
+                        id: preview
+                        objectName: "preview"
                         anchors.fill: parent
-                        anchors.margins: 20
-                        spacing: 10
+                        anchors.margins: 24
+                        visible: !win.sheetVisible && backend.scenePath !== ""
+                        component: win.sceneComponent
+                        format: win.format
+                        time: win.time
+                        outlined: true
+                    }
+
+                    // In a studio, clicking the film pins a note there.
+                    MouseArea {
+                        anchors.fill: preview
+                        enabled: backend.studioRoot !== "" && preview.visible && win.ready
+                        cursorShape: enabled ? Qt.CrossCursor : Qt.ArrowCursor
+                        onClicked: mouse => win.pinNote(mouse.x, mouse.y)
+                    }
+
+                    ContactSheet {
+                        anchors.fill: parent
+                        visible: win.sheetVisible && win.ready
+                        component: visible ? win.sceneComponent : null
+                        format: win.format
+                        times: win.sheetTimes
+                        beats: win.beats
+                        fps: win.fps
+                        current: win.currentBeat
+                        onPicked: t => {
+                            win.seek(t)
+                            win.sheetVisible = false
+                        }
+                    }
+
+                    // Nothing open yet.
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        width: Math.min(parent.width - 48, 520)
+                        visible: backend.scenePath === ""
+                        spacing: 14
 
                         Label {
-                            text: qsTr("%1 didn’t load").arg(backend.sceneName)
-                            font.pixelSize: 18
-                            font.weight: Font.DemiBold
-                            color: "#ff8a95"
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "omotion"
+                            font.pixelSize: 40
+                            font.weight: Font.Bold
                         }
-                        ScrollView {
+                        Label {
                             Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredHeight: errorText.implicitHeight
-                            TextArea {
-                                id: errorText
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.Wrap
-                                text: win.loadError !== "" ? win.loadError : preview.problem
-                                font.family: "monospace"
-                                font.pixelSize: 13
-                                background: null
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            text: qsTr("Preview motion scenes written as functions of time, look at every beat at once, and render each format.")
+                            color: "#b4b4bb"
+                        }
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            Layout.topMargin: 10
+                            spacing: 12
+                            Button {
+                                Material.roundedScale: theme.radius
+                                text: qsTr("Open Scene…")
+                                highlighted: true
+                                focusPolicy: Qt.NoFocus
+                                onClicked: backend.openScene()
+                            }
+                            Button {
+                                Material.roundedScale: theme.radius
+                                text: qsTr("New Film…")
+                                flat: true
+                                focusPolicy: Qt.NoFocus
+                                onClicked: backend.newFilm()
                             }
                         }
                         Label {
                             Layout.fillWidth: true
+                            Layout.topMargin: 16
+                            horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
-                            text: qsTr("Fix the file and save it; omotion reloads by itself.")
-                            color: "#b4b4bb"
+                            // The command stays left to right inside right-to-left text.
+                            text: qsTr("Start a film with %1, then open your coding agent in its folder.").arg("\u2066omotion new <folder>\u2069")
+                            color: "#7d7d85"
+                            font.pixelSize: 13
                         }
                     }
-                }
 
-                // The last error the scene raised while running.
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 24
-                    height: warningLabel.implicitHeight + 16
-                    visible: backend.warning !== "" && win.loadError === ""
-                    radius: Math.min(4, theme.radius)
-                    color: "#2a2014"
-                    border.color: "#6b5122"
-                    Label {
-                        id: warningLabel
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        text: backend.warning
-                        elide: Text.ElideRight
-                        font.family: "monospace"
-                        font.pixelSize: 12
-                        color: "#ffd38a"
+                    // A scene that doesn't load says why, where its author is looking.
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: Math.min(parent.width - 48, 860)
+                        height: Math.min(parent.height - 48, errorColumn.implicitHeight + 40)
+                        visible: backend.scenePath !== "" && (win.loadError !== "" || preview.problem !== "")
+                        radius: theme.radius
+                        color: "#1a1214"
+                        border.color: "#6b2a32"
+
+                        ColumnLayout {
+                            id: errorColumn
+                            anchors.fill: parent
+                            anchors.margins: 20
+                            spacing: 10
+
+                            Label {
+                                text: qsTr("%1 didn’t load").arg(backend.sceneName)
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                                color: "#ff8a95"
+                            }
+                            ScrollView {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.preferredHeight: errorText.implicitHeight
+                                TextArea {
+                                    id: errorText
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                    text: win.loadError !== "" ? win.loadError : preview.problem
+                                    font.family: "monospace"
+                                    font.pixelSize: 13
+                                    background: null
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: qsTr("Fix the file and save it; omotion reloads by itself.")
+                                color: "#b4b4bb"
+                            }
+                        }
                     }
-                }
 
-                // What an export did.
-                Rectangle {
-                    id: toast
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 24
-                    width: Math.min(parent.width - 48, toastRow.implicitWidth + 28)
-                    height: 48
-                    visible: backend.message !== ""
-                    radius: theme.radius
-                    color: backend.messageIsError ? "#2a1418" : "#1d1d22"
-                    border.color: backend.messageIsError ? "#6b2a32" : "#34343c"
-
-                    RowLayout {
-                        id: toastRow
-                        anchors.fill: parent
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 8
-                        spacing: 8
+                    // The last error the scene raised while running.
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 24
+                        height: warningLabel.implicitHeight + 16
+                        visible: backend.warning !== "" && win.loadError === ""
+                        radius: Math.min(4, theme.radius)
+                        color: "#2a2014"
+                        border.color: "#6b5122"
                         Label {
-                            Layout.fillWidth: true
-                            text: backend.message
-                            elide: Text.ElideMiddle
-                            color: backend.messageIsError ? "#ff8a95" : "#e6e6ea"
-                        }
-                        Button {
-                            Material.roundedScale: theme.radius
-                            visible: backend.outputs.length > 0
-                            text: qsTr("Show in Folder")
-                            flat: true
-                            focusPolicy: Qt.NoFocus
-                            onClicked: backend.showOutputs()
-                        }
-                        ToolButton {
-                            text: "✕"
-                            focusPolicy: Qt.NoFocus
-                            onClicked: backend.clearMessage()
+                            id: warningLabel
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            text: backend.warning
+                            elide: Text.ElideRight
+                            font.family: "monospace"
+                            font.pixelSize: 12
+                            color: "#ffd38a"
                         }
                     }
 
-                    Timer {
-                        running: toast.visible && !backend.messageIsError
-                        interval: 10000
-                        onTriggered: backend.clearMessage()
+                    // What an export did.
+                    Rectangle {
+                        id: toast
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 24
+                        width: Math.min(parent.width - 48, toastRow.implicitWidth + 28)
+                        height: 48
+                        visible: backend.message !== ""
+                        radius: theme.radius
+                        color: backend.messageIsError ? "#2a1418" : "#1d1d22"
+                        border.color: backend.messageIsError ? "#6b2a32" : "#34343c"
+
+                        RowLayout {
+                            id: toastRow
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 8
+                            spacing: 8
+                            Label {
+                                Layout.fillWidth: true
+                                text: backend.message
+                                elide: Text.ElideMiddle
+                                color: backend.messageIsError ? "#ff8a95" : "#e6e6ea"
+                            }
+                            Button {
+                                Material.roundedScale: theme.radius
+                                visible: backend.outputs.length > 0
+                                text: qsTr("Show in Folder")
+                                flat: true
+                                focusPolicy: Qt.NoFocus
+                                onClicked: backend.showOutputs()
+                            }
+                            ToolButton {
+                                text: "✕"
+                                focusPolicy: Qt.NoFocus
+                                onClicked: backend.clearMessage()
+                            }
+                        }
+
+                        Timer {
+                            running: toast.visible && !backend.messageIsError
+                            interval: 10000
+                            onTriggered: backend.clearMessage()
+                        }
                     }
+                }
+
+                NotesPanel {
+                    Layout.preferredWidth: 300
+                    Layout.fillHeight: true
+                    visible: win.studio && win.width >= 900
+                    selected: win.selectedNote
+                    onSeek: (t, noteFormat) => win.seekNote(t, noteFormat)
                 }
             }
 
@@ -515,6 +585,9 @@ ApplicationWindow {
                         duration: win.duration
                         beats: win.beats
                         current: win.currentBeat
+                        notes: backend.notes
+                        selectedNote: win.selectedNote
+                        onNoteClicked: id => win.selectNote(id)
                         onSeek: t => {
                             win.playing = false
                             win.seek(t)
@@ -601,6 +674,11 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    NoteEditor {
+        id: noteEditor
+        parent: Overlay.overlay
     }
 
     ShortcutHelp {

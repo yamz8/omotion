@@ -23,6 +23,8 @@ Rectangle {
         { keys: ["O"], what: qsTr("Open a scene") },
         { keys: ["N"], what: qsTr("New film") },
         { keys: ["R"], what: qsTr("Reload the scene") },
+        { keys: ["P"], what: qsTr("Show or hide the studio panels") },
+        { keys: [qsTr("Click")], what: qsTr("Pin a note to that moment") },
         { keys: ["?"], what: qsTr("Show shortcuts") },
         { keys: ["Q"], what: qsTr("Quit") }
     ]

@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
+#include <QVariantList>
 
 class FilePicker;
 class QQmlEngine;
@@ -28,6 +29,15 @@ class Backend : public QObject {
     Q_PROPERTY(bool messageIsError READ messageIsError NOTIFY messageChanged)
     Q_PROPERTY(QStringList outputs READ outputs NOTIFY messageChanged)
     Q_PROPERTY(QStringList formatNames READ formatNames CONSTANT)
+    // The studio the scene belongs to, read from its files as the agent works.
+    Q_PROPERTY(QString studioRoot READ studioRoot NOTIFY studioChanged)
+    Q_PROPERTY(QString studioName READ studioName NOTIFY studioChanged)
+    Q_PROPERTY(QVariantList gates READ gates NOTIFY studioChanged)
+    Q_PROPERTY(QVariantList assets READ assets NOTIFY studioChanged)
+    Q_PROPERTY(QStringList missingAssets READ missingAssets NOTIFY studioChanged)
+    Q_PROPERTY(QVariantList evidence READ evidence NOTIFY studioChanged)
+    Q_PROPERTY(QStringList activity READ activity NOTIFY studioChanged)
+    Q_PROPERTY(QVariantList notes READ notes NOTIFY studioChanged)
 
 public:
     // renderer is the program that runs "render"; this binary by default.
@@ -46,6 +56,14 @@ public:
     bool messageIsError() const { return m_messageIsError; }
     QStringList outputs() const { return m_outputs; }
     QStringList formatNames() const;
+    QString studioRoot() const { return m_root; }
+    QString studioName() const;
+    QVariantList gates() const { return m_gates; }
+    QVariantList assets() const { return m_assets; }
+    QStringList missingAssets() const { return m_missing; }
+    QVariantList evidence() const { return m_evidence; }
+    QStringList activity() const { return m_activity; }
+    QVariantList notes() const { return m_notes; }
 
     void setEngine(QQmlEngine *engine) { m_engine = engine; }
 
@@ -64,6 +82,16 @@ public:
     Q_INVOKABLE void clearMessage();
     void addWarning(const QString &warning);
 
+    // Pins a note to a moment of the film in notes.md, and renders that frame,
+    // with the point ringed, as its evidence. Returns the note's id.
+    Q_INVOKABLE QString addNote(double at, const QString &format, const QString &beat, int x, int y,
+                                const QString &target, const QString &text);
+    // Puts a note, or a pointer to every open note, on the clipboard for the agent.
+    Q_INVOKABLE void copyNote(const QString &id);
+    Q_INVOKABLE void copyOpenNotes();
+    // Opens a file or folder of the studio with the desktop's default app.
+    Q_INVOKABLE void openStudioPath(const QString &path);
+
     bool createFilm(const QString &folder);
 
 signals:
@@ -71,6 +99,7 @@ signals:
     void warningChanged();
     void exportChanged();
     void messageChanged();
+    void studioChanged();
 
 private:
     void watch();
@@ -80,6 +109,8 @@ private:
     void readExportOutput();
     void exportFinished(int code, QProcess::ExitStatus status);
     void removePartials();
+    void watchStudio();
+    void reloadStudio();
 
     FilePicker *m_picker;
     QString m_renderer;
@@ -98,6 +129,12 @@ private:
     QString m_exportFormat;
     double m_progress = 0;
     bool m_canceled = false;
+
+    QString m_root;
+    QFileSystemWatcher m_studioWatcher;
+    QTimer m_studioDebounce;
+    QVariantList m_gates, m_assets, m_evidence, m_notes;
+    QStringList m_missing, m_activity;
 
     QString m_message;
     bool m_messageIsError = false;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QList>
+#include <QPoint>
 #include <QString>
 #include <QStringList>
 
@@ -27,4 +29,41 @@ QByteArray stampedSkill();
 // Empty when the studio's skill is the one this omotion would write, or the
 // person took it over by removing its stamp; otherwise why it's out of date.
 QString skillProblem(const QString &root);
+
+// One line of gates.md: "- [x] 2 Style guide and shot list: approved by ...".
+struct Gate {
+    int number = 0;
+    QString title;
+    bool passed = false;
+    QString status; // What follows the title, such as who approved it or what it waits for.
+    bool waitingForPerson() const;
+};
+QList<Gate> readGates(const QString &root);
+
+// A note the person pinned to a moment of the film, kept in notes.md. The
+// agent treats an open one as a defect: it fixes it with evidence and ticks
+// it, or replies and leaves it open.
+struct Note {
+    QString id; // "001"
+    bool done = false;
+    double at = 0;
+    QString format;
+    QString beat;
+    QPoint point;   // In the format's frame, in pixels.
+    QString target; // The text under the pointer, if any.
+    QString evidence;
+    QString text;
+    QStringList answers; // The agent's "fixed:" and "reply:" lines.
+};
+QList<Note> readNotes(const QString &root);
+// Appends the note with the next free id, which it returns; the rest of the
+// file is left as it is, so an agent's edits to other notes are kept.
+QString addNote(const QString &root, Note note, QString *error);
+// The note as one line, for pasting into an agent's terminal.
+QString noteReference(const Note &note);
+
+// Assets that assets.md lists as missing.
+QStringList missingAssets(const QString &root);
+// activity.md's entries, newest first.
+QStringList readActivity(const QString &root);
 }

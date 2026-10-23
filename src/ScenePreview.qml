@@ -44,6 +44,30 @@ Item {
         }
     }
 
+    // The topmost visible text at a point of the frame, in the format's pixels,
+    // so a note can say what it's about.
+    function textAt(px, py) {
+        if (!scene)
+            return ""
+        let found = ""
+        function visit(item, opacity) {
+            if (!item.visible)
+                return
+            opacity *= item.opacity
+            if (opacity < 0.05)
+                return
+            if (typeof item.text === "string" && item.font !== undefined && item.text.trim() !== "") {
+                const local = item.mapFromItem(scene, px, py)
+                if (local.x >= 0 && local.y >= 0 && local.x <= item.width && local.y <= item.height)
+                    found = item.text
+            }
+            for (let i = 0; i < item.children.length; ++i)
+                visit(item.children[i], opacity)
+        }
+        visit(scene, 1)
+        return found.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim()
+    }
+
     function rebuild() {
         if (scene) {
             scene.destroy()

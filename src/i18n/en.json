@@ -1,1 +1,10 @@
-{}
+{
+  "Notes · %n open": {
+    "one": "Notes · %n open",
+    "other": "Notes · %n open"
+  },
+  "Copied a request to check %n open notes. Paste it into your agent's terminal.": {
+    "one": "Copied a request to check %n open note. Paste it into your agent's terminal.",
+    "other": "Copied a request to check %n open notes. Paste it into your agent's terminal."
+  }
+}

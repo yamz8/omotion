@@ -41,6 +41,8 @@ film/
   reviews/          contact sheets, stills, and defect notes
   renders/          the exports, one per format
   gates.md          which gates are passed, and who approved them
+  notes.md          the person's notes, each pinned to a moment of the film
+  activity.md       your steps, one line each, which the person watches
   AGENTS.md         points agents to this skill
 ```
 
@@ -51,6 +53,46 @@ updates it.
 **At every stop**, your message carries the proposals the person should
 approve and the questions only they can answer, with the files' paths for
 the rest; don't paste whole files.
+
+**The person watches the studio** in the omotion window: the gates, the
+assets, the evidence, your activity, and the film itself, which reloads each
+time you save. They answer by pinning notes to moments of it.
+
+**Notes are defects.** Read `notes.md` at the start of every turn, and again
+before you pass a gate. Each open note gives a time, a format, a beat, a
+point, often the text under it, and a frame with the point ringed as its
+evidence. Treat each one as gate 5 treats a defect: fix it locally, render
+that moment again with `omotion frame` or `sheet --times` to prove it, then
+tick the note and add a line under it:
+
+```
+- [x] 004 · 12.60s · 16:9 · Gates · (1152, 446) · on "you approve"
+  evidence: reviews/notes/004.png
+  note: these marks leave too soon
+  fixed: marks now arrive at 11.2–11.4 s and hold to 13.05 s; proof reviews/fix004-16x9.png
+```
+
+Name proof after its note (`reviews/fix-note004-16x9.png`), never over
+evidence that's already there. Never tick a note without that proof.
+
+- If the note leaves a value open ("make it pink"), choose one, fix it, and
+  add a `reply:` asking the person to confirm; leave the note open.
+- If you think a note is wrong, or it needs a decision only the person can
+  make, add a `reply:` line and leave it open.
+- A note that changes something already approved (the style guide, the shot
+  list, the copy) is the person's own decision: apply it, update that file,
+  and add to that gate's line in `gates.md`: "amended by note 004".
+- A note that changes a film already approved at gate 6 reopens gate 6:
+  re-render, untick it, and wait for the person again.
+
+A note is never an approval: it doesn't pass a gate, even when it says
+"looks good". In your message, say which notes you ticked and which you left
+open, and why; the person checks it against the window.
+
+**Activity:** after each step that changes the studio, add one line to
+`activity.md` (create it if it's missing): the local time as HH:MM, what
+changed, and where its evidence is, such as
+`- 14:02 rebuilt the gates beat; strip in reviews/strip-gates-16x9.png`.
 
 **Resuming:** read `gates.md` first. Continue from the first gate not marked
 passed, and say which file is missing if a passed gate's evidence is gone.
@@ -174,7 +216,8 @@ checklist:
 
 ## Gate 5: Repair the three largest defects
 
-Write `reviews/NNN.md` (001, 002, and so on). Score hook, readability,
+Open notes in `notes.md` come first: they are the person's own review.
+Then write `reviews/NNN.md` (001, 002, and so on). Score hook, readability,
 continuity, motion, and sound sync from 1 to 5, then list **the three largest
 defects**, each with:
 

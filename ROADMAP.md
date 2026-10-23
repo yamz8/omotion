@@ -103,7 +103,7 @@ for approval at gates 1 and 2 before writing a frame (✅ shown with two test
 agents on the skill alone). A second agent session,
 started cold, can resume from `omotion status` alone.
 
-### v0.2.5: The studio window · M
+### v0.2.5: The studio window · M ✅
 
 The agent keeps working headless in the film's folder; the omotion window
 becomes the studio that watches it. Directing film 1 meant relaying notes
@@ -127,7 +127,11 @@ direct input to the loop, in files (§9), with evidence (§7).
 
 **Done when:** directing a film needs no relaying: the person pins a note in
 the window, the agent fixes it with proof, and the tick appears in the window
-without the person writing a message beyond "check my notes".
+without the person writing a message beyond "check my notes". (✅ Shown on a
+copy of film 1: a note pinned through the window, an agent told only "check
+my notes" fixed it with ringed proof frames, reopened gate 6, and asked to
+confirm the one value the note left open. Its `fixed:` line, the reopened
+gate, and its activity appeared in the window.)
 
 ### Checkpoint: prove the loop, then choose the renderer · S
 
