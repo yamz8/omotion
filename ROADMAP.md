@@ -311,7 +311,7 @@ asked for out of order in under 2 s, decoding included.
 - ✅ **Deliverables from §1 and the final prompt**: final videos, poster frames,
   contact sheets, storyboard PDF, source, asset list, and a short "what still
   needs human review" note.
-- **Speed**: parallel rendering across processes by frame range; progress and
+- ✅ **Speed**: parallel rendering across processes by frame range; progress and
   cancellation in the window and the CLI.
 - **Reproducibility**: fonts and assets bundled with the project, so a film
   renders identically on another machine.

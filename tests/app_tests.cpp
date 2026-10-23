@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -562,6 +563,29 @@ private slots:
         // A second capture of the same page never replaces the first.
         QCOMPARE(run({"capture", url, "--size", "640x480"}, dir.filePath("film")).code, 0);
         QVERIFY(QFileInfo(dir.filePath("film/assets/screens/page-2.png")).isFile());
+    }
+
+    void cliRendersBeatsInParallelToTheSameFilm() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        QVERIFY(write(dir.filePath("s.qml"), QByteArray(tinyScene)
+                                                 .replace("property real duration: 1", "property real duration: 3")
+                                                 .replace("{ at: 0.5, name: \"Two\" }",
+                                                          "{ at: 1, name: \"Two\" }, { at: 2, name: \"Three\" }")));
+        const Run parallel = run({"render", "s.qml", "--format", "16:9", "--jobs", "3", "-o", "a/", "--progress"},
+                                 dir.path());
+        QCOMPARE(parallel.code, 0);
+        // A progress line per frame, ending at every frame.
+        QVERIFY(parallel.out.contains("\"frame\":30,\"frames\":30"));
+        QCOMPARE(run({"render", "s.qml", "--format", "16:9", "--jobs", "1", "-o", "b/"}, dir.path()).code, 0);
+        QProcess psnr;
+        psnr.start("ffmpeg", {"-hide_banner", "-i", dir.filePath("a/s-16x9.mp4"), "-i", dir.filePath("b/s-16x9.mp4"),
+                              "-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"});
+        QVERIFY(psnr.waitForFinished(60000));
+        const auto match = QRegularExpression(R"(average:(inf|[\d.]+))").match(QString::fromUtf8(psnr.readAllStandardError()));
+        QVERIFY(match.hasMatch());
+        QVERIFY2(match.captured(1) == "inf" || match.captured(1).toDouble() > 45, qPrintable(match.captured(1)));
     }
 
     void cliRendersTheInstagramFeedFormat() {

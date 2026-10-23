@@ -17,6 +17,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QThread>
 #include <QUrl>
 
 // Rendering encodes each beat on its own and joins them, so a patch to one
@@ -25,6 +26,8 @@
 // change.
 
 namespace {
+QString renderer;
+
 // Encoder settings belong to the cache key: a change to them is a new film.
 const QStringList videoSettings{"-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"};
 
@@ -183,12 +186,62 @@ bool run(QProcess &process, QString *error) {
 }
 }
 
+void Scene::setRenderer(const QString &path) { renderer = path; }
+
 QByteArray Scene::frameKey(double t) {
     seek(t);
     QCryptographicHash hash(QCryptographicHash::Sha256);
     if (!addItem(hash, m_root, 1))
         return {};
     return hash.result().toHex().left(24);
+}
+
+bool Scene::encodeRange(int first, int count, const QString &output, QString *error,
+                        const std::function<void()> &frameDone) {
+    const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+    if (ffmpeg.isEmpty()) {
+        *error = "ffmpeg is not installed; install it with: omarchy-pkg-add ffmpeg";
+        return false;
+    }
+    QStringList arguments{"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgra",
+                          "-s", QString("%1x%2").arg(m_format.size.width()).arg(m_format.size.height()),
+                          "-r", QString::number(m_fps), "-i", "-"};
+    arguments << videoSettings << output;
+    QProcess encoder;
+    encoder.setProcessChannelMode(QProcess::SeparateChannels);
+    encoder.start(ffmpeg, arguments);
+    if (!encoder.waitForStarted()) {
+        *error = "Could not start ffmpeg: " + encoder.errorString();
+        return false;
+    }
+    for (int f = first; f < first + count; ++f) {
+        // Format_RGB32 is BGRA in memory on little-endian machines, which is
+        // what ffmpeg is told to expect.
+        const QImage image = frame(f / double(m_fps));
+        if (image.size() != m_format.size) {
+            encoder.kill();
+            encoder.waitForFinished();
+            QFile::remove(output);
+            *error = QString("A frame came back at %1x%2 instead of %3x%4.")
+                         .arg(image.width()).arg(image.height())
+                         .arg(m_format.size.width()).arg(m_format.size.height());
+            return false;
+        }
+        for (int y = 0; y < image.height(); ++y)
+            encoder.write(reinterpret_cast<const char *>(image.constScanLine(y)), image.width() * 4);
+        while (encoder.bytesToWrite() > 0 && encoder.state() == QProcess::Running)
+            encoder.waitForBytesWritten(1000);
+        if (encoder.state() != QProcess::Running)
+            break;
+        if (frameDone)
+            frameDone();
+    }
+    encoder.closeWriteChannel();
+    if (!run(encoder, error)) {
+        QFile::remove(output);
+        return false;
+    }
+    return true;
 }
 
 QString Scene::cachePath(const QString &output) const {
@@ -259,57 +312,85 @@ bool Scene::render(const QString &output, QString *error, const std::function<vo
     }
 
     int done = 0;
+    QList<const Segment *> pending;
     for (const auto &segment : segments) {
         if (segment.reused) {
             done += segment.count;
             m_reusedFrames += segment.count;
-            if (progress)
-                progress(done, frames);
-            continue;
+        } else {
+            pending << &segment;
         }
-        const QString part = segment.file + ".part.mp4";
-        QStringList arguments{"-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgra",
-                              "-s", QString("%1x%2").arg(m_format.size.width()).arg(m_format.size.height()),
-                              "-r", QString::number(m_fps), "-i", "-"};
-        arguments << videoSettings << part;
-        QProcess encoder;
-        encoder.setProcessChannelMode(QProcess::SeparateChannels);
-        encoder.start(ffmpeg, arguments);
-        if (!encoder.waitForStarted()) {
-            *error = "Could not start ffmpeg: " + encoder.errorString();
-            return false;
+    }
+    if (progress)
+        progress(done, frames);
+
+    // Beats to encode, each in a process of its own when there are several,
+    // since one process renders on one core.
+    const int jobs = qMin<int>(pending.size(), m_jobs > 0 ? m_jobs : qMax(1, QThread::idealThreadCount() / 2));
+    if (jobs > 1 && !renderer.isEmpty()) {
+        QList<QPair<QProcess *, const Segment *>> running;
+        auto stop = [&] {
+            for (auto &[process, segment] : running) {
+                process->kill();
+                process->waitForFinished();
+                QFile::remove(segment->file + ".part.mp4");
+                delete process;
+            }
+            running.clear();
+        };
+        int next = 0;
+        while (next < pending.size() || !running.isEmpty()) {
+            while (next < pending.size() && running.size() < jobs) {
+                const Segment *segment = pending[next++];
+                auto *process = new QProcess;
+                QStringList arguments{"_segment", m_path, "--format", m_format.name, "--first",
+                                      QString::number(segment->first), "--count", QString::number(segment->count),
+                                      "--output", segment->file + ".part.mp4", "--seed", QString::number(Scene::seed())};
+                process->start(renderer, arguments);
+                running << qMakePair(process, segment);
+            }
+            for (int i = running.size() - 1; i >= 0; --i) {
+                QProcess *process = running[i].first;
+                process->waitForReadyRead(20);
+                // A line per frame encoded.
+                while (process->canReadLine()) {
+                    process->readLine();
+                    if (progress)
+                        progress(++done, frames);
+                }
+                if (process->state() != QProcess::NotRunning)
+                    continue;
+                const Segment *segment = running[i].second;
+                const bool ok = process->exitStatus() == QProcess::NormalExit && process->exitCode() == 0;
+                const QString message = QString::fromUtf8(process->readAllStandardError()).trimmed();
+                running.removeAt(i);
+                delete process;
+                if (!ok) {
+                    stop();
+                    *error = message.isEmpty() ? "A beat failed to encode." : message;
+                    return false;
+                }
+                QFile::remove(segment->file);
+                if (!QFile::rename(segment->file + ".part.mp4", segment->file)) {
+                    stop();
+                    *error = "Could not keep " + segment->file;
+                    return false;
+                }
+            }
         }
-        for (int f = segment.first; f < segment.first + segment.count; ++f) {
-            // Format_RGB32 is BGRA in memory on little-endian machines, which
-            // is what ffmpeg is told to expect.
-            const QImage image = frame(f / double(m_fps));
-            if (image.size() != m_format.size) {
-                encoder.kill();
-                encoder.waitForFinished();
-                QFile::remove(part);
-                *error = QString("A frame came back at %1x%2 instead of %3x%4.")
-                             .arg(image.width()).arg(image.height())
-                             .arg(m_format.size.width()).arg(m_format.size.height());
+    } else {
+        for (const Segment *segment : pending) {
+            const QString part = segment->file + ".part.mp4";
+            if (!encodeRange(segment->first, segment->count, part, error, [&] {
+                    if (progress)
+                        progress(++done, frames);
+                }))
+                return false;
+            QFile::remove(segment->file);
+            if (!QFile::rename(part, segment->file)) {
+                *error = "Could not keep " + segment->file;
                 return false;
             }
-            for (int y = 0; y < image.height(); ++y)
-                encoder.write(reinterpret_cast<const char *>(image.constScanLine(y)), image.width() * 4);
-            while (encoder.bytesToWrite() > 0 && encoder.state() == QProcess::Running)
-                encoder.waitForBytesWritten(1000);
-            if (encoder.state() != QProcess::Running)
-                break;
-            if (progress)
-                progress(++done, frames);
-        }
-        encoder.closeWriteChannel();
-        if (!run(encoder, error)) {
-            QFile::remove(part);
-            return false;
-        }
-        QFile::remove(segment.file);
-        if (!QFile::rename(part, segment.file)) {
-            *error = "Could not keep " + segment.file;
-            return false;
         }
     }
 

@@ -8,6 +8,7 @@
 #include "studio.h"
 
 #include <QCommandLineParser>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -19,7 +20,10 @@
 #include <QUrl>
 #include <QSaveFile>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
+#include <sys/prctl.h>
+#include <unistd.h>
 
 namespace {
 void print(FILE *stream, const QString &text) { fprintf(stream, "%s\n", qPrintable(text)); }
@@ -397,6 +401,8 @@ int render(const QStringList &arguments) {
                                                "(default: renders/<scene>-<format>.mp4 beside the scene)", "path"});
     command.parser.addOption({"progress", "Print a JSON line per frame"});
     command.parser.addOption({"fresh", "Encode every beat again, rather than only the beats whose frames changed"});
+    command.parser.addOption({"jobs", "Beats to encode at once, each in its own process (default: half the cores)",
+                              "count"});
     command.format("all of the scene's formats");
     command.seed();
     command.json();
@@ -428,6 +434,8 @@ int render(const QStringList &arguments) {
             if (progress)
                 print({{"format", format}, {"index", i}, {"count", count}, {"frame", frame}, {"frames", frames}}, true);
         };
+        if (command.parser.isSet("jobs"))
+            scene.setJobs(qMax(1, command.parser.value("jobs").toInt()));
         if (!scene.render(target, &error, report, command.parser.isSet("fresh")))
             return fail(error);
         outputs << QJsonObject{{"format", format}, {"video", QFileInfo(target).absoluteFilePath()},
@@ -709,6 +717,36 @@ int beats(const QStringList &arguments) {
     return 0;
 }
 
+// One beat of a parallel render, run by render itself: encodes a range of
+// frames and prints a line as each is done. It dies with the render that
+// started it, so cancelling the render stops every beat.
+int segment(const QStringList &arguments) {
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+    if (getppid() == 1)
+        return 1;
+    QCommandLineParser parser;
+    parser.addPositionalArgument("command", "_segment");
+    parser.addPositionalArgument("scene", "Scene");
+    parser.addOption({"format", "Format", "format"});
+    parser.addOption({"first", "First frame", "frame"});
+    parser.addOption({"count", "Frames", "count"});
+    parser.addOption({"output", "MP4", "path"});
+    parser.addOption({"seed", "Seed", "number"});
+    parser.process(arguments);
+    Scene::setSeed(parser.value("seed").toInt());
+    Scene scene;
+    QString error;
+    if (!scene.load(parser.positionalArguments().value(1), parser.value("format"), &error))
+        return fail(error);
+    if (!scene.encodeRange(parser.value("first").toInt(), parser.value("count").toInt(), parser.value("output"), &error,
+                           [] {
+                               fputs("1\n", stdout);
+                               fflush(stdout);
+                           }))
+        return fail(error);
+    return 0;
+}
+
 // The skill lives in each film's folder, so it always matches the omotion that
 // wrote it and travels with the film; nothing is installed in the home folder.
 int skill(const QStringList &arguments) {
@@ -772,11 +810,15 @@ QString cliSummary() {
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "reference", "capture", "deliver", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "reference", "capture", "deliver", "skill", "help", "_segment"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
     const QString command = arguments.value(1);
+    // Renders hand beats to this same binary, one process each.
+    Scene::setRenderer(QCoreApplication::applicationFilePath());
+    if (command == "_segment")
+        return segment(arguments);
     return command == "new"      ? create(arguments)
            : command == "status" ? status(arguments)
            : command == "check"  ? check(arguments)

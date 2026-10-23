@@ -124,6 +124,15 @@ public:
     // encodes every beat.
     bool render(const QString &output, QString *error,
                 const std::function<void(int frame, int frames)> &progress = {}, bool fresh = false);
+    // Beats encoded at once, each in its own process, when there are several
+    // to encode: 0 is half the cores. The renderer is the omotion binary the
+    // processes run, set by the command line; without one, beats encode in turn.
+    void setJobs(int jobs) { m_jobs = jobs; }
+    static void setRenderer(const QString &path);
+    // Encodes frames first to first + count - 1 into output, frameDone after
+    // each: one beat of a render.
+    bool encodeRange(int first, int count, const QString &output, QString *error,
+                     const std::function<void()> &frameDone = {});
     // Frames the last render took from the cache.
     int reusedFrames() const { return m_reusedFrames; }
     // The state of every visible item at t, hashed: frames with the same key
@@ -145,6 +154,7 @@ private:
     QQuickItem *m_root = nullptr;
     double m_scale = 1;
     int m_reusedFrames = 0;
+    int m_jobs = 0;
     double m_duration = 0;
     int m_fps = 30;
     QList<Beat> m_beats;

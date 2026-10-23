@@ -147,5 +147,7 @@ and then hold. If everything overshoots, nothing feels precise.
   or a cue sound, brought to -14 LUFS, the loudness feeds play at).
   Each beat is encoded on its own and kept in `renders/.cache`, so after a
   patch only the beats whose frames changed are encoded again (`--fresh`
-  encodes them all).
+  encodes them all). Beats to encode run at once, each in its own process
+  (`--jobs N`, half the cores by default), and stop together when the render
+  is cancelled.
 - `omotion open scene.qml` previews it, reloading whenever the file is saved.
