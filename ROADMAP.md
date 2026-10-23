@@ -202,6 +202,16 @@ automatically, with timestamps. After a patch to one beat, re-rendering
 touches only that beat's frames, and checking and rendering a sheet for a
 15-second film take under 10 seconds.
 
+**Status:** built. On film 1, `check` reports the defects people found by
+hand: the 16:9 supporting text at 6-8 px on a phone (the peer review) and
+the empty frame 0 (the person's note 001), each with its time and place. A
+one-line patch to one beat re-encodes 96 of 450 frames, and the result
+matches a fresh render exactly. Checking and sheeting film 1 in both formats
+takes 6.0 s of CPU; on this machine, with a load average of 16 on 8 cores,
+that was 11.9 s of wall time, so the 10-second target still wants a run on
+an idle machine. Not measured: words inside pictures, and the price in film
+2's demo slide, which only a reviewer reading the frames can catch.
+
 ### v0.4: Sound on the same timeline · L
 
 From §6: "If it has no shape without the picture, the sound design is
