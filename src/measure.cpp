@@ -28,7 +28,9 @@ QString quoted(const QString &text) {
 
 // Plain characters a viewer reads, without any markup.
 QString readable(QString text) {
-    text.remove(QRegularExpression("<[^>]*>"));
+    static const QRegularExpression markup("<[^>]*>");
+    if (text.contains('<'))
+        text.remove(markup);
     return text.simplified();
 }
 
@@ -61,6 +63,7 @@ struct Seen {
     QRectF rect;    // On the frame, as far as it's visible.
     QRectF full;    // On the frame, all of it.
     double opacity; // Including every ancestor's.
+    QString text;   // What a text item reads as, once per frame.
 };
 
 void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *seen) {
@@ -76,8 +79,9 @@ void walk(QQuickItem *item, double opacity, const QRectF &clip, QList<Seen> *see
         const QRectF full = isText(item) ? item->mapRectToScene(item->boundingRect())
                                          : item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
         const QRectF shown = full & visible;
-        if (!shown.isEmpty() && (!isText(item) || !readable(item->property("text").toString()).isEmpty()))
-            seen->append({item, shown, full, opacity});
+        const QString text = isText(item) ? readable(item->property("text").toString()) : QString();
+        if (!shown.isEmpty() && (!isText(item) || !text.isEmpty()))
+            seen->append({item, shown, full, opacity, text});
     }
     for (QQuickItem *child : item->childItems())
         walk(child, opacity, visible, seen);
@@ -154,7 +158,7 @@ QList<Problem> Measure::text(Scene &scene) {
         for (const Seen &seen : drawn[i]) {
             if (!isText(seen.item))
                 continue;
-            const QString text = readable(seen.item->property("text").toString());
+            const QString &text = seen.text;
             Shown &shown = texts[{seen.item, text}];
             shown.item = seen.item;
             shown.text = text;
@@ -168,7 +172,7 @@ QList<Problem> Measure::text(Scene &scene) {
         for (const Seen &seen : drawn[i]) {
             if (!isText(seen.item))
                 continue;
-            Shown &shown = texts[{seen.item, readable(seen.item->property("text").toString())}];
+            Shown &shown = texts[{seen.item, seen.text}];
             if (shown.peak >= 0.3 && seen.opacity >= shown.peak * 0.95 && seen.rect == seen.full &&
                 frame.adjusted(-1, -1, 1, 1).contains(seen.full)) {
                 shown.frames << i;
@@ -181,8 +185,9 @@ QList<Problem> Measure::text(Scene &scene) {
         for (const Seen &a : drawn[i]) {
             if (!isText(a.item))
                 continue;
-            const Shown &shown = texts.value({a.item, readable(a.item->property("text").toString())});
-            if (!shown.at.contains(i))
+            // Looked up in place: a Shown holds every frame it's seen in.
+            const auto found = texts.constFind({a.item, a.text});
+            if (found == texts.constEnd() || !found->at.contains(i))
                 continue;
             for (const Seen &b : drawn[i]) {
                 if (b.item == a.item || isAncestor(b.item, a.item) || isAncestor(a.item, b.item) || b.opacity < 0.3)
