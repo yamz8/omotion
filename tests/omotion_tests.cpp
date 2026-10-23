@@ -411,6 +411,30 @@ private slots:
     }
 
     // The style guide's tokens reach the scene, and check holds it to them.
+    // A font from this machine renders differently on the next one.
+    void studioFilmsLoadTheirOwnFonts()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        QVERIFY(QFile::copy("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", dir.filePath("film/assets/mono.ttf"))
+                || !QFileInfo::exists("/usr/share/fonts/liberation/LiberationMono-Regular.ttf"));
+        if (!QFileInfo::exists(dir.filePath("film/assets/mono.ttf")))
+            QSKIP("Liberation Mono is not installed");
+        write(dir.filePath("film/scene.qml"),
+              sceneSource("    FontLoader { id: mono; source: \"assets/mono.ttf\" }\n"
+                          "    Text { x: 300; y: 300; text: \"Ours\"; font.family: mono.name; font.pixelSize: 60 }\n"
+                          "    Text { x: 300; y: 500; text: \"Theirs\"; font.family: \"DejaVu Sans\"; font.pixelSize: 60 }\n"));
+        Scene scene;
+        QVERIFY(scene.load(dir.filePath("film/scene.qml"), "16:9", &error));
+        QStringList found;
+        for (const auto &problem : scene.check())
+            if (problem.message.contains("machine's fonts"))
+                found << problem.message;
+        QCOMPARE(found.size(), 1);
+        QVERIFY(found[0].startsWith("Text \"Theirs\" is set in DejaVu Sans"));
+    }
+
     void scenesUseTheStyleGuidesTokens()
     {
         QTemporaryDir dir;

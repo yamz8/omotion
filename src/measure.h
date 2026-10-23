@@ -37,6 +37,10 @@ QList<Problem> rules(const QString &scenePath, const QString &styleGuide);
 // More than a frame apart is an error for a cue, a warning for a cut.
 QList<Problem> sync(Scene &scene);
 
+// Text set in a font that no FontLoader in the scene loads, which comes from
+// whatever this machine has installed and renders differently elsewhere.
+QList<Problem> fonts(Scene &scene);
+
 // Frame 0, often the thumbnail, showing nothing but one color, and nothing
 // changing in the first two seconds.
 QList<Problem> hook(Scene &scene);

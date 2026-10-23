@@ -692,6 +692,10 @@ QList<Problem> Scene::check(bool thorough) {
     if (!studio.isEmpty() && QFileInfo(m_path) == QFileInfo(QDir(studio).filePath("scene.qml"))) {
         problems << assetManifest(sources, studio);
         problems << Measure::style(*this, QDir(studio).filePath("style-guide.md"));
+        // The starter is replaced at gate 3; until then its fonts are moot.
+        QFile scene(m_path), starter(":/starter.qml");
+        if (!scene.open(QIODevice::ReadOnly) || !starter.open(QIODevice::ReadOnly) || scene.readAll() != starter.readAll())
+            problems << Measure::fonts(*this);
     }
     // The checklist's measurable items: text a viewer can read, and a reason
     // to stop scrolling.

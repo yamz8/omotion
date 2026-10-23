@@ -529,6 +529,36 @@ QList<Problem> Measure::sync(Scene &scene) {
     return problems;
 }
 
+QList<Problem> Measure::fonts(Scene &scene) {
+    QSet<QString> loaded;
+    QList<QObject *> objects = scene.root()->findChildren<QObject *>();
+    objects << scene.root();
+    for (QObject *object : objects)
+        if (object->inherits("QQuickFontLoader") && object->property("status").toInt() == 1 /* Ready */)
+            loaded << object->property("name").toString().toLower();
+    QMap<QString, QString> foreign; // family -> the first text in it
+    for (double t : scene.sheetTimes()) {
+        scene.seek(t);
+        QList<Seen> seen;
+        walk(scene.root(), 1, QRectF(-1e7, -1e7, 2e7, 2e7), &seen);
+        for (const Seen &s : seen) {
+            if (!isText(s.item))
+                continue;
+            const QString family = s.item->property("font").value<QFont>().family();
+            if (!loaded.contains(family.toLower()) && !foreign.contains(family))
+                foreign.insert(family, readable(s.item->property("text").toString()));
+        }
+    }
+    QList<Problem> problems;
+    for (auto it = foreign.cbegin(); it != foreign.cend(); ++it)
+        problems << Problem{false,
+                            QString("Text %1 is set in %2, which comes from this machine's fonts, so the film renders "
+                                    "differently where they differ. Put the font's file in assets/ and load it with "
+                                    "FontLoader.").arg(quoted(it.value()), it.key().isEmpty() ? "the default font" : it.key()),
+                            {}, -1, {}};
+    return problems;
+}
+
 QList<Problem> Measure::hook(Scene &scene) {
     QList<Problem> problems;
     const QImage first = scene.frame(0);
