@@ -2,7 +2,8 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-mkdir -p "$ROOT/build"
+mkdir -p "$ROOT/build/core"
+(cd "$ROOT/build/core" && qmake6 "$ROOT/src/core.pro" && make -j"$(nproc)")
 cd "$ROOT/build"
 
 qmake6 "$ROOT/omotion.pro"
