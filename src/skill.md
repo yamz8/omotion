@@ -44,9 +44,10 @@ film/
   AGENTS.md         points agents to this skill
 ```
 
-**Start every turn** by reading `gates.md` and the open notes in `notes.md`.
-Continue from the first gate not passed, and say which file is missing if a
-passed gate's evidence is gone. A gate you've finished but the person hasn't
+**Start every turn** with `omotion status film/ --json`: the gate you're at,
+what each gate's evidence lacks, and the open notes, which you then read in
+`notes.md`. Continue from the first gate not passed. If a passed gate's
+evidence is gone, `status` fails and names the file: tell the person. A gate you've finished but the person hasn't
 approved stays unchecked and says what it waits for:
 
 ```

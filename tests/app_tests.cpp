@@ -458,6 +458,29 @@ private slots:
         QVERIFY(QString::fromUtf8(result.out).contains("Timer runs on the wall clock"));
     }
 
+    void cliStatusSaysWhereTheFilmIs() {
+        if (binary().isEmpty())
+            QSKIP("Set OMOTION_BINARY to run the CLI tests.");
+        QTemporaryDir dir;
+        QCOMPARE(run({"new", "film"}, dir.path()).code, 0);
+        const Run fresh = run({"status", "film"}, dir.path());
+        QCOMPARE(fresh.code, 0);
+        QVERIFY2(fresh.out.contains("at gate 1, References and assets"), fresh.out);
+
+        // A passed gate whose evidence is gone fails, and says what's missing.
+        QVERIFY(write(dir.filePath("film/gates.md"),
+                      "- [x] 1 References and assets: approved by the person, 2026-10-23\n"
+                      "- [ ] 2 Style guide and shot list: waiting for the person's approval since 2026-10-23\n"));
+        QVERIFY(write(dir.filePath("film/notes.md"), "# Notes\n\n- [ ] 001 · 1.00s · 16:9 · Hook · (10, 10)\n  note: bigger\n"));
+        const Run json = run({"status", "--json"}, dir.filePath("film/reviews"));
+        QCOMPARE(json.code, 1);
+        const QJsonObject status = QJsonDocument::fromJson(json.out).object();
+        QCOMPARE(status["gate"].toInt(), 2);
+        QVERIFY(status["gates"].toArray()[1].toObject()["waiting_for_person"].toBool());
+        QCOMPARE(status["open_notes"].toArray()[0].toObject()["id"].toString(), QString("001"));
+        QCOMPARE(status["problems"].toArray()[0].toString(), QString("Gate 1 is passed, but brief.md is still the template."));
+    }
+
     void cliSkillInstallOnlyWritesIntoAStudio() {
         if (binary().isEmpty())
             QSKIP("Set OMOTION_BINARY to run the CLI tests.");

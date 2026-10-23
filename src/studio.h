@@ -66,6 +66,11 @@ QString noteTime(double at);
 // The note as one line, for pasting into an agent's terminal.
 QString noteReference(const Note &note);
 
+// What a gate's evidence still lacks, read only from the studio's files, so a
+// later session can see where the film stands and what to do next. formats
+// are the scene's, whose renders gate 6 needs.
+QStringList missingEvidence(const QString &root, int gate, const QStringList &formats);
+
 // Assets that assets.md lists as missing.
 QStringList missingAssets(const QString &root);
 // activity.md's entries, newest first.

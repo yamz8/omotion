@@ -305,6 +305,46 @@ private slots:
         QVERIFY(!gates[0].waitingForPerson());
     }
 
+    void studioSaysWhatEachGateLacks()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QString root = dir.filePath("film");
+        const QDir film(root);
+        QCOMPARE(Studio::missingEvidence(root, 1, {}),
+                 QStringList({"brief.md is still the template", "assets/assets.md is still the template"}));
+        QCOMPARE(Studio::missingEvidence(root, 3, {}),
+                 QStringList({"scene.qml is still the template", "no stills in reviews/"}));
+
+        write(film.filePath("brief.md"), "# Brief\nfilled\n");
+        write(film.filePath("assets/assets.md"), "| Asset | File | Source | Status |\n| --- | --- | --- | --- |\n"
+                                                 "| Logo | | | missing |\n");
+        QVERIFY(Studio::missingEvidence(root, 1, {}).isEmpty());
+
+        // The person's note frames aren't the agent's stills.
+        film.mkpath("reviews/notes");
+        write(film.filePath("reviews/notes/001.png"), "png");
+        QCOMPARE(Studio::missingEvidence(root, 3, {}).last(), QString("no stills in reviews/"));
+        write(film.filePath("reviews/scene-16x9-1.00.png"), "png");
+        QCOMPARE(Studio::missingEvidence(root, 4, {}), QStringList{"no contact sheet in reviews/"});
+        film.mkpath("reviews/round2");
+        write(film.filePath("reviews/round2/scene-16x9-sheet.png"), "png");
+        QVERIFY(Studio::missingEvidence(root, 4, {}).isEmpty());
+        write(film.filePath("reviews/001.md"), "# Review\n");
+        QVERIFY(Studio::missingEvidence(root, 5, {}).isEmpty());
+
+        // Gate 6 wants a render per format, made after the scene's last change.
+        write(film.filePath("renders/scene-16x9.mp4"), "mp4");
+        QFile video(film.filePath("renders/scene-16x9.mp4"));
+        QVERIFY(video.open(QIODevice::ReadWrite));
+        video.setFileTime(QFileInfo(film.filePath("scene.qml")).lastModified().addSecs(-60),
+                          QFileDevice::FileModificationTime);
+        video.close();
+        QCOMPARE(Studio::missingEvidence(root, 6, {"16:9", "9:16"}),
+                 QStringList({"renders/scene-16x9.mp4 is older than scene.qml", "renders/scene-9x16.mp4 is missing"}));
+    }
+
     void notesRoundTripWithTheAgent()
     {
         QTemporaryDir dir;

@@ -1,7 +1,9 @@
 #include "studio.h"
+#include "scene.h"
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -262,6 +264,76 @@ QString Studio::noteReference(const Note &note) {
         where += ", on \"" + note.target + "\"";
     return QString("Note %1 in notes.md (%2): %3").arg(note.id, where, note.text) +
            (note.evidence.isEmpty() ? QString() : QString(" Evidence: %1.").arg(note.evidence));
+}
+
+namespace {
+// A file still as omotion new wrote it hasn't been filled in.
+QString unfilled(const QString &root, const QString &name, const QString &templatePath) {
+    QFile file(QDir(root).filePath(name));
+    if (!file.open(QIODevice::ReadOnly))
+        return name + " is missing";
+    if (file.readAll() == resource(templatePath))
+        return name + " is still the template";
+    return {};
+}
+
+// Files under a folder of the studio whose names match, skipping the notes'
+// frames, which are the person's evidence, not the agent's.
+QStringList filesUnder(const QString &root, const QString &folder, const QRegularExpression &name) {
+    QStringList found;
+    QDirIterator it(QDir(root).filePath(folder), QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString path = QDir(root).relativeFilePath(it.next());
+        if (!path.startsWith(folder + "/notes/") && name.match(it.fileName()).hasMatch())
+            found << path;
+    }
+    return found;
+}
+}
+
+QStringList Studio::missingEvidence(const QString &root, int gate, const QStringList &formats) {
+    QStringList missing;
+    auto add = [&](const QString &problem) {
+        if (!problem.isEmpty())
+            missing << problem;
+    };
+    const QFileInfo scene(QDir(root).filePath("scene.qml"));
+    switch (gate) {
+    // Assets marked missing aren't counted: the person may approve the gate
+    // without some of them, and missingAssets() lists them on their own.
+    case 1:
+        add(unfilled(root, "brief.md", ":/studio/brief.md"));
+        add(unfilled(root, "assets/assets.md", ":/studio/assets.md"));
+        break;
+    case 2:
+        add(unfilled(root, "style-guide.md", ":/studio/style-guide.md"));
+        add(unfilled(root, "shotlist.md", ":/studio/shotlist.md"));
+        break;
+    case 3:
+        add(unfilled(root, "scene.qml", ":/starter.qml"));
+        if (filesUnder(root, "reviews", QRegularExpression(R"(\.png$)")).isEmpty())
+            missing << "no stills in reviews/";
+        break;
+    case 4:
+        if (filesUnder(root, "reviews", QRegularExpression(R"(sheet.*\.png$)")).isEmpty())
+            missing << "no contact sheet in reviews/";
+        break;
+    case 5:
+        if (filesUnder(root, "reviews", QRegularExpression(R"(^\d{3}\.md$)")).isEmpty())
+            missing << "no review in reviews/ (001.md, 002.md, ...)";
+        break;
+    case 6:
+        for (const auto &format : formats) {
+            const QFileInfo video(Scene::defaultOutput(scene.absoluteFilePath(), format));
+            const QString name = QDir(root).relativeFilePath(video.absoluteFilePath());
+            if (!video.isFile())
+                missing << name + " is missing";
+            else if (scene.isFile() && video.lastModified() < scene.lastModified())
+                missing << name + " is older than scene.qml";
+        }
+        break;
+    }
+    return missing;
 }
 
 QStringList Studio::missingAssets(const QString &root) {

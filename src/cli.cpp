@@ -375,6 +375,90 @@ int render(const QStringList &arguments) {
     return 0;
 }
 
+int status(const QStringList &arguments) {
+    Command command("status", "Say which gate the film has reached, what each gate's evidence still lacks, and "
+                              "which notes are open, from the film's files.", false);
+    command.parser.addPositionalArgument("folder", "The film's folder (default: the one you're in)", "[folder]");
+    command.json();
+    command.parser.process(arguments);
+    const QString from = command.argument(1).isEmpty() ? QDir::currentPath() : command.argument(1);
+    const QString root = Studio::rootOf(from);
+    if (root.isEmpty())
+        return fail(from + " isn't inside a film made by omotion. Start one with: omotion new <folder>");
+
+    // Gate 6 needs a render per format, which only the scene knows.
+    QStringList formats;
+    QString sceneError;
+    Scene scene;
+    if (scene.load(QDir(root).filePath("scene.qml"), "16:9", &sceneError))
+        formats = scene.formats();
+
+    const QList<Studio::Gate> gates = Studio::readGates(root);
+    QJsonArray gateList;
+    QStringList problems;
+    const Studio::Gate *current = nullptr;
+    for (const auto &gate : gates) {
+        QStringList missing = Studio::missingEvidence(root, gate.number, formats);
+        if (gate.number == 6 && !sceneError.isEmpty())
+            missing.prepend("scene.qml doesn't load: " + sceneError);
+        if (!gate.passed && !current)
+            current = &gate;
+        // A passed gate whose evidence is gone can't be trusted until it's back.
+        if (gate.passed)
+            for (const auto &item : missing)
+                problems << QString("Gate %1 is passed, but %2.").arg(gate.number).arg(item);
+        gateList << QJsonObject{{"number", gate.number}, {"title", gate.title}, {"passed", gate.passed},
+                                {"status", gate.status}, {"waiting_for_person", gate.waitingForPerson()},
+                                {"missing", QJsonArray::fromStringList(missing)}};
+    }
+    QStringList open;
+    QJsonArray notes;
+    for (const auto &note : Studio::readNotes(root))
+        if (!note.done) {
+            open << note.id;
+            notes << QJsonObject{{"id", note.id}, {"at", note.at}, {"format", note.format}, {"note", note.text}};
+        }
+    const QString skill = Studio::skillProblem(root);
+    const QStringList assets = Studio::missingAssets(root);
+
+    QString where;
+    if (gates.isEmpty())
+        where = "gates.md lists no gates";
+    else if (!current)
+        where = "every gate is passed: the film is approved";
+    else if (current->waitingForPerson())
+        where = QString("at gate %1, %2, waiting for the person's approval").arg(current->number).arg(current->title);
+    else
+        where = QString("at gate %1, %2").arg(current->number).arg(current->title);
+
+    if (command.parser.isSet("json")) {
+        print({{"studio", root}, {"gate", current ? QJsonValue(current->number) : QJsonValue()},
+               {"summary", where}, {"gates", gateList}, {"open_notes", notes},
+               {"missing_assets", QJsonArray::fromStringList(assets)},
+               {"skill", skill.isEmpty() ? QJsonValue() : QJsonValue(skill)},
+               {"ok", problems.isEmpty()}, {"problems", QJsonArray::fromStringList(problems)}});
+        return problems.isEmpty() ? 0 : 1;
+    }
+    print(stdout, root + ": " + where + ".");
+    for (const auto &value : gateList) {
+        const QJsonObject gate = value.toObject();
+        print(stdout, QString("  [%1] %2 %3%4").arg(gate["passed"].toBool() ? "x" : " ")
+                          .arg(gate["number"].toInt()).arg(gate["title"].toString(),
+                               gate["status"].toString().isEmpty() ? QString() : ": " + gate["status"].toString()));
+        for (const auto &item : gate["missing"].toArray())
+            print(stdout, "        missing: " + item.toString());
+    }
+    print(stdout, open.isEmpty() ? QString("No open notes.")
+                                 : QString("Open notes: %1 (in notes.md).").arg(open.join(", ")));
+    if (!assets.isEmpty())
+        print(stdout, "Assets marked missing in assets/assets.md: " + assets.join("; ") + ".");
+    if (!skill.isEmpty())
+        print(stdout, skill);
+    for (const auto &problem : problems)
+        print(stderr, "error: " + problem);
+    return problems.isEmpty() ? 0 : 1;
+}
+
 // The skill lives in each film's folder, so it always matches the omotion that
 // wrote it and travels with the film; nothing is installed in the home folder.
 int skill(const QStringList &arguments) {
@@ -423,6 +507,7 @@ QString cliSummary() {
            "  open [scene]              Preview a scene, on the last one by default\n\n"
            "Commands that need no display (omotion help <command> for options):\n"
            "  new <folder>              Start a film: brief, shot list, gates, scene, agent skill\n"
+           "  status [folder]           Which gate the film is at, and what each gate lacks\n"
            "  check <scene>             Report every problem, in every format\n"
            "  frame <scene> --at <s>    Render one frame to PNG\n"
            "  sheet <scene>             Render a contact sheet of the beats to PNG\n"
@@ -432,12 +517,13 @@ QString cliSummary() {
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "check", "frame", "sheet", "render", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "render", "skill", "help"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
     const QString command = arguments.value(1);
     return command == "new"      ? create(arguments)
+           : command == "status" ? status(arguments)
            : command == "check"  ? check(arguments)
            : command == "frame"  ? frame(arguments)
            : command == "sheet"  ? sheet(arguments)
