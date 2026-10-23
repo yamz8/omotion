@@ -11,6 +11,7 @@ HEADERS += \
     filepicker.h \
     measure.h \
     review.h \
+    sound.h \
     scene.h \
     studio.h \
     theme.h \
@@ -22,6 +23,7 @@ SOURCES += \
     measure.cpp \
     render.cpp \
     review.cpp \
+    sound.cpp \
     scene.cpp \
     studio.cpp \
     theme.cpp \

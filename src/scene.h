@@ -38,6 +38,15 @@ struct Beat {
     QString exit;
 };
 
+// A sound or moment on the timeline: a synthesized sound to play there, or
+// just a name, and the beat it must land on, if any.
+struct SceneCue {
+    double at = 0;
+    QString name;
+    QString sound; // "click", "tick", "hit", "whoosh", or empty.
+    QString on;    // A beat's name, or empty to pair it with what changes nearest.
+};
+
 struct Problem {
     bool error = true;
     QString message;
@@ -71,6 +80,13 @@ public:
     QStringList formats() const { return m_formats; }
     // Absolute path of the soundtrack, or empty.
     QString audio() const { return m_audio; }
+    // Seconds cut from the start of the track, and seconds of film before it
+    // starts.
+    double audioTrim() const { return m_audioTrim; }
+    double audioDelay() const { return m_audioDelay; }
+    // The film time at which the track plays the given second of itself.
+    double filmTime(double trackTime) const { return trackTime - m_audioTrim + m_audioDelay; }
+    QList<SceneCue> cues() const { return m_cues; }
 
     QImage frame(double t);
     // Moves the scene to t and lays it out, without rendering, so its items
@@ -128,6 +144,9 @@ private:
     QList<Beat> m_beats;
     QStringList m_formats;
     QString m_audio;
+    double m_audioTrim = 0;
+    double m_audioDelay = 0;
+    QList<SceneCue> m_cues;
     QStringList m_warnings;
     QList<Problem> m_declarationProblems;
 };

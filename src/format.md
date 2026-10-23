@@ -22,6 +22,11 @@ Rectangle {
         { at: 5.0, name: "Proof", purpose: "...", enter: "...", exit: "..." }
     ]
     property string audio: "track.wav" // optional, beside the scene, starts at t = 0
+    property real audioTrim: 0         // optional: seconds cut from the track's start
+    property real audioDelay: 0        // optional: seconds of film before the track starts
+    property var cues: [               // optional: sounds and moments on the timeline
+        { at: 2.2, name: "reveal", sound: "hit", on: "Problem" }
+    ]
 
     width: 1920; height: 1080          // omotion sets the format's size
     color: "#0d0d10"
@@ -58,6 +63,14 @@ Rectangle {
   `check` matches the beats to `shotlist.md` one for one: a beat without a
   purpose, a missing beat, or a different start time is an error; a renamed
   beat or a state that differs from the approved one is a warning.
+- **Cues are sounds that belong to something on screen.** `sound` is one of
+  `click`, `tick`, `hit`, or `whoosh` (which swells into the cue), made the
+  same way on every render and mixed with the track. A cue `on` a beat lands
+  on that beat; without `on`, `check` pairs it with the largest change on
+  screen within 0.25 s. Either way, more than a frame apart is an error.
+- **Cut to the music.** `omotion beats track.wav` writes the track's tempo
+  and beats to `track.wav.beats.json`; `check` then warns about any beat that
+  cuts more than a frame off the music's.
 - Images and fonts load from files beside the scene; refer to them relatively.
   In a film's folder they come from `assets/` and are listed in
   `assets/assets.md`: `check` fails on anything loaded from elsewhere.
@@ -94,7 +107,8 @@ and then hold. If everything overshoots, nothing feels precise.
 - `omotion review scene.qml` writes the next `reviews/NNN.md`: sheets,
   measures, scores, and the three largest defects with cropped evidence.
 - `omotion render scene.qml` writes `renders/<scene>-16x9.mp4` and one file per
-  other format, encoded with ffmpeg (H.264, with AAC audio when `audio` is set).
+  other format, encoded with ffmpeg (H.264, with AAC audio when there's a track
+  or a cue sound, brought to -14 LUFS, the loudness feeds play at).
   Each beat is encoded on its own and kept in `renders/.cache`, so after a
   patch only the beats whose frames changed are encoded again (`--fresh`
   encodes them all).

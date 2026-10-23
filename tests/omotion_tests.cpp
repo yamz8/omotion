@@ -17,6 +17,7 @@
 #include "filepicker.h"
 #include "measure.h"
 #include "review.h"
+#include "sound.h"
 #include "scene.h"
 #include "studio.h"
 #include "theme.h"
@@ -297,6 +298,109 @@ private slots:
         QCOMPARE(result["number"].toString(), QString("002"));
         QVERIFY(!result["sent_back"].toBool());
         QVERIFY(QFileInfo(dir.filePath("film/reviews/001/defect-1-16x9.png")).isFile());
+    }
+
+    void findsTheBeatOfATrack()
+    {
+        // Kicks on each beat at 97 BPM, ticks between them, and a bed of noise.
+        QTemporaryDir dir;
+        const double period = 60.0 / 97;
+        QList<Sound::Cue> drums;
+        for (double at = 0.31; at < 12; at += period) {
+            drums << Sound::Cue{at, "hit"};
+            drums << Sound::Cue{at + period / 2, "tick"};
+        }
+        QString error;
+        QVERIFY(Sound::writeCues(drums, 12, dir.filePath("drums.wav"), &error));
+        const QList<float> samples = Sound::decode(dir.filePath("drums.wav"), 22050, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(samples.size(), 12 * 22050);
+        const Sound::Grid grid = Sound::beats(samples, 22050);
+        QVERIFY2(std::abs(grid.tempo - 97) < 1, qPrintable(QString::number(grid.tempo)));
+        // Every kick found, within a frame at 30 fps.
+        for (int i = 0; i < drums.size(); i += 2) {
+            const double kick = drums[i].at;
+            const double nearest = *std::min_element(grid.beats.cbegin(), grid.beats.cend(), [&](double a, double b) {
+                return std::abs(a - kick) < std::abs(b - kick);
+            });
+            QVERIFY2(std::abs(nearest - kick) < 1 / 30.0, qPrintable(QString("%1 vs %2").arg(kick).arg(nearest)));
+        }
+        const QList<float> peaks = Sound::peaks(samples, 100);
+        QCOMPARE(peaks.size(), 100);
+        QCOMPARE(*std::max_element(peaks.cbegin(), peaks.cend()), 1.0f);
+    }
+
+    void cuesLandOnWhatTheyBelongTo()
+    {
+        QTemporaryDir dir;
+        // A square appears at 1.0 s; the beats are at 0 and 1 s, at 10 fps.
+        auto problems = [&](const QByteArray &cues, const QByteArray &more = {}) {
+            write(dir.filePath("s.qml"),
+                  "import QtQuick\nRectangle {\n    property real t\n    property real duration: 2\n"
+                  "    property int fps: 10\n    color: \"black\"\n"
+                  "    property var beats: [{ at: 0, name: \"One\" }, { at: 1, name: \"Two\" }]\n"
+                  "    property var cues: [" + cues + "]\n" + more +
+                  "    Rectangle { width: 400; height: 400; color: \"white\"; visible: parent.t >= 1 }\n}\n");
+            Scene scene;
+            QString error;
+            if (!scene.load(dir.filePath("s.qml"), "16:9", &error))
+                return QList<Problem>{Problem{true, error, {}, -1, {}}};
+            return scene.check();
+        };
+        QVERIFY(!anyMessage(problems(R"({ at: 1.0, name: "pop", sound: "click" })"), "Cue"));
+        QVERIFY(anyMessage(problems(R"({ at: 1.3, name: "pop", sound: "click" })"),
+                           "Cue \"pop\" at 1.30s is 3 frames after the change on screen at 1.00s."));
+        QVERIFY(anyMessage(problems(R"({ at: 0.5, name: "pop" })"), "Nothing visible changes within 0.25 s of cue"));
+        QVERIFY(anyMessage(problems(R"({ at: 1.2, name: "pop", on: "Two" })"),
+                           "Cue \"pop\" at 1.20s is 2 frames after the beat \"Two\" it's on, at 1.00s."));
+        QVERIFY(anyMessage(problems(R"({ at: 1.0, name: "pop", on: "Three" })"), "which isn't one of the beats"));
+        QVERIFY(anyMessage(problems(R"({ at: 1.0, name: "pop", sound: "boom" })"), "use click, tick, hit, whoosh"));
+
+        // Against the music: the track starts 0.5 s in, trimmed by 0.2 s, so
+        // its beat at 0.9 s plays at 1.2 s of the film.
+        QString error;
+        QVERIFY(Sound::writeCues({}, 3, dir.filePath("track.wav"), &error));
+        write(dir.filePath("track.wav.beats.json"), R"({ "tempo": 60, "beats": [0.9, 1.9] })");
+        const QByteArray track = "    property string audio: \"track.wav\"\n"
+                                 "    property real audioTrim: 0.2\n    property real audioDelay: 0.5\n";
+        QVERIFY(anyMessage(problems({}, track), "Beat \"Two\" cuts at 1.00s, 2 frames before the music's beat at 1.20s."));
+    }
+
+    void renderMixesTheCuesAndTheTrackToOneLoudness()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QProcess make;
+        make.start("ffmpeg", {"-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=4,volume=0.02",
+                              dir.filePath("track.wav")});
+        QVERIFY(make.waitForFinished() && make.exitCode() == 0);
+        auto loudness = [&](const QString &video) {
+            QProcess probe;
+            probe.start("ffmpeg", {"-hide_banner", "-i", video, "-af", "ebur128", "-f", "null", "-"});
+            probe.waitForFinished(-1);
+            const QString log = QString::fromUtf8(probe.readAllStandardError());
+            const auto match = QRegularExpression(R"(Integrated loudness:\s+I:\s+(-?[\d.]+) LUFS)").match(log);
+            return match.hasMatch() ? match.captured(1).toDouble() : 0.0;
+        };
+        write(dir.filePath("s.qml"), sceneSource("    property string audio: \"track.wav\"\n"
+                                                 "    property var cues: [{ at: 1, name: \"hit\", sound: \"hit\" }]\n"));
+        Scene scene;
+        QString error;
+        QVERIFY(scene.load(dir.filePath("s.qml"), "16:9", &error));
+        QVERIFY2(scene.render(dir.filePath("out.mp4"), &error), qPrintable(error));
+        QProcess probe;
+        probe.start("ffprobe", {"-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", dir.filePath("out.mp4")});
+        QVERIFY(probe.waitForFinished());
+        QCOMPARE(QString::fromUtf8(probe.readAllStandardOutput()).split('\n').filter("audio").size(), 1);
+
+        // A quiet track alone comes out at the feeds' loudness.
+        write(dir.filePath("t.qml"), sceneSource("    property string audio: \"track.wav\"\n"));
+        Scene quiet;
+        QVERIFY(quiet.load(dir.filePath("t.qml"), "16:9", &error));
+        QVERIFY(quiet.render(dir.filePath("quiet.mp4"), &error));
+        const double lufs = loudness(dir.filePath("quiet.mp4"));
+        QVERIFY2(std::abs(lufs + 14) < 1.5, qPrintable(QString::number(lufs)));
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

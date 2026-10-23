@@ -192,9 +192,11 @@ defect to fix.
 
 ## Gate 6: Audio, formats, and deliverables (the person approves)
 
-- **Audio:** if the brief has a track, set `audio` in the scene and cut
-  against its beats. If the sound has no shape without the picture, it isn't
-  finished.
+- **Audio:** if the brief has a track, put it in `assets/`, set `audio` in
+  the scene, run `omotion beats` on it, and cut to its beats; `check` holds
+  the cuts to them. Give each moment that should be heard a cue with its
+  sound, `on` the beat it belongs to. If the sound has no shape without the
+  picture, it isn't finished. The music's license is the person's decision.
 - **Render:** `omotion render film/scene.qml --json` writes one MP4 per format
   into `renders/`.
 - **Posters:** the strongest frame in each format (`omotion frame ... -o

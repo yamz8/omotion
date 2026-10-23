@@ -1,6 +1,7 @@
 #include "cli.h"
 #include "measure.h"
 #include "review.h"
+#include "sound.h"
 #include "scene.h"
 #include "studio.h"
 
@@ -525,6 +526,49 @@ int review(const QStringList &arguments) {
     return 0;
 }
 
+int beats(const QStringList &arguments) {
+    Command command("beats", "Measure a track's tempo and beats, and write them beside it as <track>.beats.json, "
+                             "where check finds them to hold the film's cuts to the music.", false);
+    command.parser.addPositionalArgument("track", "The audio file", "<track>");
+    command.json();
+    command.parser.process(arguments);
+    const QString track = command.argument(1);
+    if (track.isEmpty() || !QFileInfo(track).isFile())
+        return fail("Name the audio file, such as assets/track.wav.");
+    QString error;
+    const int rate = 22050;
+    const QList<float> samples = Sound::decode(track, rate, &error);
+    if (!error.isEmpty())
+        return fail(error);
+    const Sound::Grid grid = Sound::beats(samples, rate);
+    if (grid.beats.isEmpty())
+        return fail(track + " has no steady beat omotion can find; cut to the picture instead.");
+    QJsonArray times;
+    for (double t : grid.beats)
+        times << std::round(t * 1000) / 1000;
+    const QJsonObject result{{"track", QFileInfo(track).absoluteFilePath()},
+                             {"tempo", std::round(grid.tempo * 10) / 10},
+                             {"duration", samples.size() / double(rate)},
+                             {"beats", times}};
+    const QString path = QFileInfo(track).absoluteFilePath() + ".beats.json";
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(QJsonDocument(result).toJson()) < 0 || !file.commit())
+        return fail(path + ": " + file.errorString());
+    if (command.parser.isSet("json")) {
+        print(result);
+        return 0;
+    }
+    QStringList first;
+    for (int i = 0; i < qMin<int>(8, grid.beats.size()); ++i)
+        first << QString::number(grid.beats[i], 'f', 2);
+    print(stdout, QString("%1 BPM, %2 beats: %3%4\nWrote %5")
+                      .arg(grid.tempo, 0, 'f', 1)
+                      .arg(grid.beats.size())
+                      .arg(first.join(", "), grid.beats.size() > 8 ? ", ..." : "")
+                      .arg(path));
+    return 0;
+}
+
 // The skill lives in each film's folder, so it always matches the omotion that
 // wrote it and travels with the film; nothing is installed in the home folder.
 int skill(const QStringList &arguments) {
@@ -579,12 +623,13 @@ QString cliSummary() {
            "  sheet <scene>             Render a contact sheet of the beats to PNG\n"
            "  review <scene>            Write the next review: sheets, measures, scores, defects\n"
            "  render <scene>            Encode MP4s, one per format\n"
+           "  beats <track>             Measure a track's tempo and beats for cutting to it\n"
            "  help format               How to write a scene\n"
            "  skill [install]           Print the agent skill, or write it into this film's folder";
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "skill", "help"}.contains(word);
+    return QStringList{"new", "status", "check", "frame", "sheet", "review", "render", "beats", "skill", "help"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
@@ -596,6 +641,7 @@ int runCli(const QStringList &arguments) {
            : command == "sheet"  ? sheet(arguments)
            : command == "review" ? review(arguments)
            : command == "render" ? render(arguments)
+           : command == "beats"  ? beats(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
 }

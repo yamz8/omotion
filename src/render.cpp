@@ -1,5 +1,6 @@
 #include "scene.h"
 #include "studio.h"
+#include "sound.h"
 
 #include <QCryptographicHash>
 #include <QDebug>
@@ -324,11 +325,35 @@ bool Scene::render(const QString &output, QString *error, const std::function<vo
     }
     QStringList arguments{"-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
                           "-i", cache.filePath("segments.txt")};
-    if (!m_audio.isEmpty())
+    // The sound: the track, trimmed and delayed, with the cues' synthesized
+    // sounds mixed in, brought to the loudness feeds play at (-14 LUFS).
+    QStringList mix;
+    int input = 1;
+    if (!m_audio.isEmpty()) {
         arguments << "-i" << m_audio;
+        mix << QString("[%1:a]atrim=start=%2,asetpts=PTS-STARTPTS,adelay=%3:all=1[track]")
+                   .arg(input++).arg(m_audioTrim, 0, 'f', 6).arg(qRound(m_audioDelay * 1000));
+    }
+    QList<Sound::Cue> sounds;
+    for (const auto &cue : m_cues)
+        if (!cue.sound.isEmpty())
+            sounds << Sound::Cue{cue.at, cue.sound};
+    if (!sounds.isEmpty()) {
+        const QString cueTrack = cache.filePath("cues.wav");
+        if (!Sound::writeCues(sounds, frames / double(m_fps), cueTrack, error))
+            return false;
+        arguments << "-i" << cueTrack;
+        mix << QString("[%1:a]anull[cues]").arg(input++);
+    }
     arguments << "-map" << "0:v" << "-c:v" << "copy";
-    if (!m_audio.isEmpty())
-        arguments << "-map" << "1:a" << "-c:a" << "aac" << "-b:a" << "192k";
+    if (!mix.isEmpty()) {
+        const QString both = !m_audio.isEmpty() && !sounds.isEmpty()
+                                 ? "[track][cues]amix=inputs=2:normalize=0:duration=longest"
+                                 : m_audio.isEmpty() ? "[cues]anull" : "[track]anull";
+        arguments << "-filter_complex"
+                  << mix.join(';') + ";" + both + ",loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[sound]"
+                  << "-map" << "[sound]" << "-c:a" << "aac" << "-b:a" << "192k";
+    }
     arguments << "-t" << QString::number(frames / double(m_fps), 'f', 6) << "-movflags" << "+faststart" << partial;
     QProcess join;
     join.start(ffmpeg, arguments);

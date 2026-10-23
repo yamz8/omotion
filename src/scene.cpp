@@ -1,6 +1,7 @@
 #include "scene.h"
 #include "studio.h"
 #include "measure.h"
+#include "sound.h"
 
 #include <QDir>
 #include <QFile>
@@ -402,6 +403,42 @@ bool Scene::readDeclarations(QString *error) {
         else
             problem(true, "The audio file " + audio + " does not exist beside the scene.");
     }
+    m_audioTrim = meta->indexOfProperty("audioTrim") >= 0 ? m_root->property("audioTrim").toDouble() : 0;
+    m_audioDelay = meta->indexOfProperty("audioDelay") >= 0 ? m_root->property("audioDelay").toDouble() : 0;
+    if (m_audioTrim < 0 || m_audioDelay < 0)
+        problem(true, "audioTrim and audioDelay are seconds, 0 or more: what to cut from the track's start, and "
+                      "how long the film runs before it starts.");
+
+    m_cues.clear();
+    if (meta->indexOfProperty("cues") >= 0) {
+        const QVariantList list = plain(m_root->property("cues")).toList();
+        for (int i = 0; i < list.size(); ++i) {
+            const QVariantMap entry = plain(list[i]).toMap();
+            bool number = false;
+            SceneCue cue;
+            cue.at = entry.value("at").toDouble(&number);
+            cue.name = entry.value("name").toString().trimmed();
+            cue.sound = entry.value("sound").toString().trimmed();
+            cue.on = entry.value("on").toString().trimmed();
+            if (!number || cue.name.isEmpty()) {
+                problem(true, QString("Cue %1 needs a number \"at\" and a \"name\": { at: 1.5, name: \"click\" }.")
+                                  .arg(i + 1));
+                continue;
+            }
+            if (cue.at < 0 || cue.at >= m_duration) {
+                problem(true, QString("Cue \"%1\" is at %2, outside the scene's %3.")
+                                  .arg(cue.name, seconds(cue.at), seconds(m_duration)));
+                continue;
+            }
+            if (!cue.sound.isEmpty() && !Sound::names().contains(cue.sound))
+                problem(true, QString("Cue \"%1\" asks for the sound \"%2\"; use %3, or no sound.")
+                                  .arg(cue.name, cue.sound, Sound::names().join(", ")));
+            if (!cue.on.isEmpty() && std::none_of(m_beats.cbegin(), m_beats.cend(),
+                                                  [&](const Beat &beat) { return beat.name == cue.on; }))
+                problem(true, QString("Cue \"%1\" is on \"%2\", which isn't one of the beats.").arg(cue.name, cue.on));
+            m_cues << cue;
+        }
+    }
     return true;
 }
 
@@ -630,6 +667,7 @@ QList<Problem> Scene::check(bool thorough) {
     // to stop scrolling.
     problems << Measure::text(*this);
     problems << Measure::hook(*this);
+    problems << Measure::sync(*this);
 
     Scene other;
     QString error;

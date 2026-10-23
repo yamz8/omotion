@@ -5,6 +5,9 @@
 #include <QFont>
 #include <QFontInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineF>
 #include <QMap>
 #include <QQuickItem>
@@ -394,6 +397,85 @@ QList<Problem> Measure::style(Scene &scene, const QString &styleGuide) {
                             QString("Fonts that style-guide.md doesn't name: %1. Load the guide's from assets/ with "
                                     "FontLoader, or add them to it.").arg(list.join(", ")),
                             {}, -1, {}};
+    return problems;
+}
+
+QList<Problem> Measure::sync(Scene &scene) {
+    QList<Problem> problems;
+    const double fps = scene.fps();
+    const QString format = scene.format().name;
+    QList<double> change;
+    for (const auto &cue : scene.cues()) {
+        if (!cue.on.isEmpty()) {
+            for (const auto &beat : scene.beats())
+                if (beat.name == cue.on) {
+                    const double frames = (cue.at - beat.at) * fps;
+                    if (std::abs(frames) > 1 + 1e-6)
+                        problems << Problem{true,
+                                            QString("Cue \"%1\" at %2 is %3 frames %4 the beat \"%5\" it's on, at %6.")
+                                                .arg(cue.name, seconds(cue.at))
+                                                .arg(qRound(std::abs(frames)))
+                                                .arg(frames > 0 ? "after" : "before", beat.name, seconds(beat.at)),
+                                            {}, cue.at, {}};
+                }
+            continue;
+        }
+        // Without a beat, a cue belongs to the largest visible change within
+        // a quarter of a second of it.
+        if (change.isEmpty()) {
+            Scene small;
+            QString error;
+            if (!small.load(scene.path(), format, &error, 0.125))
+                return problems;
+            change = changes(small);
+        }
+        const int at = int(std::lround(cue.at * fps));
+        const int reach = int(std::lround(0.25 * fps));
+        int peak = -1;
+        for (int f = qMax(1, at - reach); f <= qMin(int(change.size()) - 1, at + reach); ++f)
+            if (peak < 0 || change[f] > change[peak])
+                peak = f;
+        if (peak < 0 || change[peak] < 0.002) {
+            problems << Problem{false,
+                                QString("Nothing visible changes within 0.25 s of cue \"%1\" at %2; a sound needs "
+                                        "something to belong to.").arg(cue.name, seconds(cue.at)),
+                                format, cue.at, {}};
+            continue;
+        }
+        const int off = at - peak;
+        if (std::abs(off) > 1)
+            problems << Problem{true,
+                                QString("Cue \"%1\" at %2 is %3 frames %4 the change on screen at %5.")
+                                    .arg(cue.name, seconds(cue.at))
+                                    .arg(std::abs(off))
+                                    .arg(off > 0 ? "after" : "before", seconds(peak / fps)),
+                                format, cue.at, {}};
+    }
+
+    // Cuts against the music.
+    QFile file(scene.audio() + ".beats.json");
+    if (!scene.audio().isEmpty() && file.open(QIODevice::ReadOnly)) {
+        const QJsonObject grid = QJsonDocument::fromJson(file.readAll()).object();
+        QList<double> music;
+        for (const auto &value : grid["beats"].toArray())
+            music << scene.filmTime(value.toDouble());
+        const double period = grid["tempo"].toDouble() > 0 ? 60.0 / grid["tempo"].toDouble() : 0;
+        for (const auto &beat : scene.beats()) {
+            if (beat.at <= 0 || music.isEmpty())
+                continue;
+            const double nearest = *std::min_element(music.cbegin(), music.cend(), [&](double a, double b) {
+                return std::abs(a - beat.at) < std::abs(b - beat.at);
+            });
+            const double frames = (beat.at - nearest) * fps;
+            if (std::abs(frames) > 1 + 1e-6 && (period == 0 || std::abs(beat.at - nearest) < period / 2))
+                problems << Problem{false,
+                                    QString("Beat \"%1\" cuts at %2, %3 frames %4 the music's beat at %5.")
+                                        .arg(beat.name, seconds(beat.at))
+                                        .arg(qRound(std::abs(frames)))
+                                        .arg(frames > 0 ? "after" : "before", seconds(nearest)),
+                                    {}, beat.at, {}};
+        }
+    }
     return problems;
 }
 

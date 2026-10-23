@@ -138,6 +138,7 @@ omotion sheet film/scene.qml --format all    # contact sheets as PNG
 omotion review film/scene.qml                # reviews/NNN.md: measures, scores, defects
 omotion frame film/scene.qml --at 3.5        # one frame as PNG
 omotion render film/scene.qml                # renders/scene-16x9.mp4, scene-9x16.mp4
+omotion beats film/assets/track.wav          # the track's tempo and beats, to cut to
 omotion open film/scene.qml                  # the window
 omotion skill install                        # update the film's agent skill (run in its folder)
 ```

@@ -26,6 +26,12 @@ QList<Problem> text(Scene &scene);
 // the beat it first appears in. Empty when the guide is missing or a template.
 QList<Problem> style(Scene &scene, const QString &styleGuide);
 
+// Sound against picture, in frames: each cue against the beat it's on, or
+// else the visual change nearest it, and each beat's cut against the music's
+// beat from the track's beat grid (track.wav.beats.json, from omotion beats).
+// More than a frame apart is an error for a cue, a warning for a cut.
+QList<Problem> sync(Scene &scene);
+
 // Frame 0, often the thumbnail, showing nothing but one color, and nothing
 // changing in the first two seconds.
 QList<Problem> hook(Scene &scene);
