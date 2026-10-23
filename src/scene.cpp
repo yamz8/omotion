@@ -3,6 +3,7 @@
 #include "measure.h"
 #include "sound.h"
 #include "style.h"
+#include "clips.h"
 
 #include <QDir>
 #include <QFile>
@@ -52,6 +53,12 @@ void registerSceneTypes() {
     static const bool registered = [] {
         qmlRegisterSingletonType(QUrl("qrc:/Motion.qml"), "Omotion", 1, 0, "Motion");
         qmlRegisterType(QUrl("qrc:/Camera.qml"), "Omotion", 1, 0, "Camera");
+        qmlRegisterType(QUrl("qrc:/Clip.qml"), "Omotion", 1, 0, "Clip");
+        qmlRegisterSingletonType<Clips>("Omotion", 1, 0, "Clips", [](QQmlEngine *engine, QJSEngine *) -> QObject * {
+            auto *clips = new Clips(engine->property("omotionScenePath").toString());
+            engine->setProperty("omotionClips", QVariant::fromValue(clips));
+            return clips;
+        });
         qmlRegisterSingletonType<StyleTokens>("Omotion", 1, 0, "Style", [](QQmlEngine *engine, QJSEngine *) -> QObject * {
             auto *style = new StyleTokens(engine->property("omotionStyleGuide").toString());
             engine->setProperty("omotionStyle", QVariant::fromValue(style));
@@ -149,7 +156,14 @@ QString typeName(const QObject *object);
 // with the type that loads it. QML and JavaScript files are the scene's own
 // components, not assets.
 void collectSources(QObject *object, const QDir &folder, QMap<QString, QString> *sources) {
-    const int index = object->metaObject()->indexOfProperty("source");
+    // A clip's frames are decoded from its video, which is what it loads.
+    const int clipIndex = object->inherits("QQuickImage") ? object->metaObject()->indexOfProperty("video") : -1;
+    if (clipIndex >= 0) {
+        const QString video = object->metaObject()->property(clipIndex).read(object).toString();
+        if (!video.isEmpty())
+            sources->insert(QFileInfo(video).isAbsolute() ? video : folder.absoluteFilePath(video), "Clip");
+    }
+    const int index = clipIndex >= 0 ? -1 : object->metaObject()->indexOfProperty("source");
     if (index >= 0) {
         const QVariant value = object->metaObject()->property(index).read(object);
         const QUrl url = value.typeId() == QMetaType::QUrl ? value.toUrl() : QUrl(value.toString());
@@ -299,6 +313,7 @@ bool Scene::load(const QString &path, const QString &formatName, QString *error,
             m_warnings << warning.toString();
     });
     StyleTokens::use(m_engine.get(), StyleTokens::guideFor(m_path));
+    Clips::use(m_engine.get(), m_path);
     QQmlComponent component(m_engine.get(), QUrl::fromLocalFile(m_path), QQmlComponent::PreferSynchronous);
     if (component.isError()) {
         *error = errorsText(component.errors());

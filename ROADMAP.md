@@ -287,7 +287,7 @@ From §2: "If you do not supply a visual grammar, the model supplies its own."
 - ✅ **Asset capture** from a real product site into `assets/`, using a browser
   if one is installed, then listed for approval at gate 1. **(spike)**:
   driving a headless browser from omotion, and handling sites that need a login.
-- **Seekable footage**: a `Clip` item that shows a video file's frame at t,
+- ✅ **Seekable footage**: a `Clip` item that shows a video file's frame at t,
   for the photoreal and organic shots the article says code-made motion
   can't do. **(spike)**: exact frame-accurate seeking, and whether decoding
   each frame on demand is fast enough to render.
@@ -296,6 +296,15 @@ From §2: "If you do not supply a visual grammar, the model supplies its own."
 is within ΔE 5 of colors sampled from the reference, and its average time
 between scene changes is within 20% of the reference's. A film made from that
 guide also lands within those same tolerances when measured the same way.
+
+**Status:** built. A test renders three reference films with known colors and
+shot lengths, measures each within ΔE 5 and 20%, then makes a film from each
+measured guide and measures that within the same tolerances. On omotion's
+own films, scene changes land within 0.2 s of the beats. The spikes'
+answers: capture drives the installed Chromium headless in a profile of its
+own, so pages behind a login are left to the person's own screenshot; and a
+clip decoded once into numbered frames is exactly frame-accurate, 60 frames
+asked for out of order in under 2 s, decoding included.
 
 ### v1.0: Production · L
 

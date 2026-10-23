@@ -8,6 +8,7 @@ TEMPLATE = lib
 HEADERS += \
     backend.h \
     engine.h \
+    clips.h \
     filepicker.h \
     measure.h \
     reference.h \
@@ -21,6 +22,7 @@ HEADERS += \
 
 SOURCES += \
     backend.cpp \
+    clips.cpp \
     engine.cpp \
     measure.cpp \
     render.cpp \

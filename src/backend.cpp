@@ -5,6 +5,7 @@
 #include "sound.h"
 #include "studio.h"
 #include "style.h"
+#include "clips.h"
 
 #include <QClipboard>
 #include <QCoreApplication>
@@ -95,8 +96,10 @@ QUrl Backend::resolve(const QString &relative) const {
 
 void Backend::setEngine(QQmlEngine *engine) {
     m_engine = engine;
-    if (m_engine && !m_path.isEmpty())
+    if (m_engine && !m_path.isEmpty()) {
         StyleTokens::use(m_engine, StyleTokens::guideFor(m_path));
+        Clips::use(m_engine, m_path);
+    }
 }
 
 QVariantList Backend::waveform(const QString &track, double trim, double delay, double duration, int count) {
@@ -164,8 +167,10 @@ bool Backend::load(const QString &pathOrUrl) {
     }
     m_path = info.absoluteFilePath();
     m_root = Studio::rootOf(m_path);
-    if (m_engine)
+    if (m_engine) {
         StyleTokens::use(m_engine, StyleTokens::guideFor(m_path));
+        Clips::use(m_engine, m_path);
+    }
     reloadStudio();
     ++m_revision;
     watch();

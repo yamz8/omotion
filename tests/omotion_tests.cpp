@@ -13,6 +13,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <cmath>
+#include <numeric>
+#include <random>
+#include <QElapsedTimer>
 
 #include "backend.h"
 #include "filepicker.h"
@@ -568,6 +571,53 @@ private slots:
         QVERIFY(text.contains("Pacing (measured): a scene change every 1.5 s"));
         QVERIFY(!text.contains("Palette: actual colors"));
         QVERIFY(text.contains("TOKENS"));
+    }
+
+    // The v0.6 spike: a clip's frames, asked for in any order, are the
+    // frames it has at those moments, exactly.
+    void clipShowsTheFrameAtItsTime()
+    {
+        if (QStandardPaths::findExecutable("ffmpeg").isEmpty())
+            QSKIP("ffmpeg is not installed");
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QDir film(dir.filePath("film"));
+        // A clip whose frame n is gray 8n: 30 frames, a second at 30 fps.
+        write(dir.filePath("counter.qml"), "import QtQuick\nRectangle {\n    property real t\n    property real duration: 1\n"
+                                           "    property int fps: 30\n    color: Qt.rgba(Math.round(t * 30) * 8 / 255,"
+                                           " Math.round(t * 30) * 8 / 255, Math.round(t * 30) * 8 / 255, 1)\n}\n");
+        Scene counter;
+        QVERIFY(counter.load(dir.filePath("counter.qml"), "16:9", &error));
+        QVERIFY2(counter.render(film.filePath("assets/counter.mp4"), &error), qPrintable(error));
+        write(film.filePath("assets/assets.md"), "| Asset | File | Source | Status |\n| --- | --- | --- | --- |\n"
+                                                 "| Counter | counter.mp4 | made by the test | have |\n");
+
+        write(film.filePath("scene.qml"),
+              "import QtQuick\nimport Omotion\nRectangle {\n    id: scene\n    property real t\n    property real duration: 2\n"
+              "    property int fps: 30\n    color: \"black\"\n"
+              "    Clip { id: footage; video: \"assets/counter.mp4\"; time: scene.t - 0.5; fps: scene.fps;"
+              " width: 1920; height: 1080 }\n}\n");
+        Scene scene;
+        QVERIFY2(scene.load(film.filePath("scene.qml"), "16:9", &error), qPrintable(error));
+        QElapsedTimer timer;
+        timer.start();
+        QList<int> order(60);
+        std::iota(order.begin(), order.end(), 0);
+        std::mt19937 random(7);
+        std::shuffle(order.begin(), order.end(), random);
+        for (int f : order) {
+            // The clip starts at 0.5 s: its first frame before, its last after.
+            const int shown = qBound(0, f - 15, 29);
+            const int gray = scene.frame(f / 30.0).pixelColor(960, 540).red();
+            QVERIFY2(std::abs(gray - shown * 8) <= 3, qPrintable(QString("film frame %1 shows %2, not clip frame %3")
+                                                                      .arg(f).arg(gray / 8.0).arg(shown)));
+        }
+        qInfo() << "60 clip frames, decoding included, in" << timer.elapsed() << "ms";
+        // Decoded once, under the film's cache; the clip is the asset it loads.
+        QCOMPARE(QDir(film.filePath("renders/.cache/clips")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 1);
+        for (const auto &problem : scene.check())
+            QVERIFY2(!problem.message.contains("assets"), qPrintable(problem.message));
     }
 
     void contactSheetShowsTheMiddleOfEachBeat()

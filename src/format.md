@@ -114,6 +114,12 @@ Camera {
 }
 ```
 
+**Clip** shows footage, a frame at a time, chosen by number: `Clip { video:
+"assets/footage.mp4"; time: scene.t - 2; fps: scene.fps; width: 960; height:
+540 }` shows the clip from 2 s, its first frame before and its last after.
+The clip is decoded once into `renders/.cache/clips`, so any frame can be
+asked for in any order; `length` is how long it runs.
+
 A scene that declares `property int seed` gets the seed from `--seed N` on
 any command; `Motion.random(seed * 100 + i)` then makes repeatable
 variations, and `render --seed 3` writes `renders/scene-16x9-seed3.mp4`.
