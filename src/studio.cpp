@@ -350,6 +350,8 @@ QStringList Studio::missingEvidence(const QString &root, int gate, const QString
     case 1:
         add(unfilled(root, "brief.md", ":/studio/brief.md"));
         add(unfilled(root, "assets/assets.md", ":/studio/assets.md"));
+        for (const auto &listed : listedAssetsNotFound(root))
+            missing << "assets.md lists " + listed + ", which isn't in assets/";
         break;
     case 2:
         add(unfilled(root, "style-guide.md", ":/studio/style-guide.md"));
@@ -380,6 +382,68 @@ QStringList Studio::missingEvidence(const QString &root, int gate, const QString
         break;
     }
     return missing;
+}
+
+QStringList Studio::listedAssetFiles(const QString &root) {
+    QStringList files;
+    QFile file(QDir(root).filePath("assets/assets.md"));
+    if (!file.open(QIODevice::ReadOnly))
+        return files;
+    static const QRegularExpression name(R"(^[\w.\-/*?]+(\.\w+|/)$)");
+    bool header = true;
+    for (const auto &line : QString::fromUtf8(file.readAll()).split('\n')) {
+        if (!line.trimmed().startsWith('|'))
+            continue;
+        const QStringList cells = line.split('|');
+        // | Asset | File | Source | Status |: skip the header, its rule, and
+        // rows for assets the studio doesn't have.
+        if (cells.size() < 4 || cells[1].trimmed().startsWith("---"))
+            continue;
+        if (header) {
+            header = false;
+            continue;
+        }
+        const QString status = cells.mid(3).join('|');
+        if (status.contains("missing", Qt::CaseInsensitive) || status.contains("not needed", Qt::CaseInsensitive))
+            continue;
+        for (QString token : cells[2].split(QRegularExpression(R"([,+\s]+)"), Qt::SkipEmptyParts)) {
+            token.remove('`');
+            if (token.startsWith("assets/"))
+                token = token.mid(7);
+            if (name.match(token).hasMatch())
+                files << token;
+        }
+    }
+    return files;
+}
+
+bool Studio::isListedAsset(const QString &root, const QString &relative) {
+    for (const auto &listed : listedAssetFiles(root)) {
+        if (listed.endsWith('/') ? relative.startsWith(listed)
+                                 : QRegularExpression(QRegularExpression::wildcardToRegularExpression(
+                                                          listed))
+                                       .match(relative)
+                                       .hasMatch())
+            return true;
+    }
+    return false;
+}
+
+QStringList Studio::listedAssetsNotFound(const QString &root) {
+    QStringList notFound;
+    const QDir assets(QDir(root).filePath("assets"));
+    for (const auto &listed : listedAssetFiles(root)) {
+        bool found = false;
+        if (listed.contains('*') || listed.contains('?')) {
+            const QFileInfo pattern(assets.filePath(listed));
+            found = !QDir(pattern.absolutePath()).entryList({pattern.fileName()}, QDir::Files).isEmpty();
+        } else {
+            found = QFileInfo::exists(assets.filePath(listed));
+        }
+        if (!found)
+            notFound << listed;
+    }
+    return notFound;
 }
 
 QStringList Studio::missingAssets(const QString &root) {

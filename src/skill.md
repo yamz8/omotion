@@ -74,8 +74,11 @@ Fill in `brief.md`, keeping two kinds of line apart:
   9:16 for Stories, Reels, and TikTok.
 
 Collect the real assets into `assets/` and list each in `assets/assets.md`
-with where it came from; list the ones you still need there too, marked
-missing. **A missing product asset (a logo, a screen, a product photo) is a
+with where it came from, naming its file by its path in `assets/`
+(`screens/editor.png`, or `slides/*.png` for a set); list the ones you still
+need there too, marked missing. Fonts and sound are assets too. `check`
+fails on a file the film loads from outside `assets/` and on a listed file
+that isn't there, and warns about one that isn't listed. **A missing product asset (a logo, a screen, a product photo) is a
 blocker:** ask for it, and never draw a convincing fake. The film may invent
 camera moves and openings, never the dashboard or the logo. Whether the film
 shows the product at all is a choice you can offer: without a logo, the name

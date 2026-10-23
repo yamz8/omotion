@@ -84,6 +84,15 @@ QList<ShotListBeat> readShotList(const QString &root);
 // are the scene's, whose renders gate 6 needs.
 QStringList missingEvidence(const QString &root, int gate, const QStringList &formats);
 
+// The files assets.md lists for the assets the studio has, relative to
+// assets/ ("screens/editor.png"); a name may hold * or ?, and one ending in /
+// is a folder.
+QStringList listedAssetFiles(const QString &root);
+// Whether a path relative to assets/ is one assets.md lists.
+bool isListedAsset(const QString &root, const QString &relative);
+// Listed files that aren't in assets/, each as assets.md writes it.
+QStringList listedAssetsNotFound(const QString &root);
+
 // Assets that assets.md lists as missing.
 QStringList missingAssets(const QString &root);
 // activity.md's entries, newest first.

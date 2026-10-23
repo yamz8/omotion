@@ -394,6 +394,56 @@ private slots:
                     .startsWith("error: Beat \"One\" has no purpose"));
     }
 
+    // A film shows only files the person approved, each with its source.
+    void sceneLoadsOnlyListedAssets()
+    {
+        QTemporaryDir dir;
+        QString error;
+        QVERIFY(Studio::create(dir.filePath("film"), &error));
+        const QDir film(dir.filePath("film"));
+        film.mkpath("assets/screens");
+        for (const auto &name : {"assets/logo.png", "assets/screens/a.png", "assets/extra.png", "outside.png"})
+            QVERIFY(QImage(4, 4, QImage::Format_RGB32).save(film.filePath(name)));
+        write(film.filePath("assets/assets.md"),
+              "| Asset | File | Source | Status |\n| --- | --- | --- | --- |\n"
+              "| Logo | `logo.png` | the person | have |\n"
+              "| Screens | screens/*.png | the app | have |\n"
+              "| Deck | deck.png + gone.png | the app | have |\n"
+              "| Music | — | the person | missing |\n");
+        QCOMPARE(Studio::listedAssetFiles(film.path()), QStringList({"logo.png", "screens/*.png", "deck.png", "gone.png"}));
+        QVERIFY(Studio::isListedAsset(film.path(), "screens/a.png"));
+        QVERIFY(!Studio::isListedAsset(film.path(), "screens/deep/a.png"));
+        QCOMPARE(Studio::listedAssetsNotFound(film.path()), QStringList({"deck.png", "gone.png"}));
+        QCOMPARE(Studio::missingEvidence(film.path(), 1, {}).mid(1),
+                 QStringList({"assets.md lists deck.png, which isn't in assets/",
+                              "assets.md lists gone.png, which isn't in assets/"}));
+
+        write(film.filePath("scene.qml"),
+              sceneSource("    Image { source: \"assets/logo.png\" }\n"
+                          "    Repeater { model: 1; Image { source: \"assets/screens/a.png\" } }\n"
+                          "    Image { source: parent.t > 1 ? \"assets/extra.png\" : \"\" }\n"
+                          "    Image { source: \"outside.png\" }\n"
+                          "    Image { source: \"https://example.com/x.png\" }\n"));
+        Scene scene;
+        QVERIFY2(scene.load(film.filePath("scene.qml"), "16:9", &error), qPrintable(error));
+        QStringList found;
+        for (const auto &problem : scene.check())
+            if (problem.message.contains("assets"))
+                found << QString(problem.error ? "error: " : "warning: ") + problem.message;
+        found.sort();
+        QCOMPARE(found, QStringList({
+            "error: Image loads https://example.com/x.png from the network; download it into assets/ and list it in "
+            "assets/assets.md with where it came from.",
+            "error: Image loads outside.png from outside assets/; copy it into assets/ and list it in "
+            "assets/assets.md with where it came from.",
+            "error: assets/assets.md lists deck.png, which isn't in assets/. Add the file, or mark the asset missing "
+            "and ask the person for it.",
+            "error: assets/assets.md lists gone.png, which isn't in assets/. Add the file, or mark the asset missing "
+            "and ask the person for it.",
+            "warning: assets/extra.png isn't listed in assets/assets.md; add it with where it came from.",
+        }));
+    }
+
     void notesRoundTripWithTheAgent()
     {
         QTemporaryDir dir;

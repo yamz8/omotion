@@ -77,10 +77,10 @@ person approving anything.
   stamped with the omotion that wrote it, so it travels with the film and
   always matches it; `check` reports a stale one, and `omotion skill install`
   in the folder updates it.
-- **Beats become a contract.** Each beat gains `purpose`, `enter`, and `exit`.
+- ✅ **Beats become a contract.** Each beat gains `purpose`, `enter`, and `exit`.
   `check` makes a missing purpose an error, and checks that `shotlist.md` and
   the scene's `beats` agree.
-- **An asset manifest.** `assets/` lists the approved files. `check` flags any
+- ✅ **An asset manifest.** `assets/` lists the approved files. `check` flags any
   image or font loaded from outside it. A file named in the brief but missing
   from `assets/` is a blocking error, not a warning.
 - ✅ **`omotion status`** reports which gate the project has reached, what each

@@ -59,6 +59,8 @@ Rectangle {
   purpose, a missing beat, or a different start time is an error; a renamed
   beat or a state that differs from the approved one is a warning.
 - Images and fonts load from files beside the scene; refer to them relatively.
+  In a film's folder they come from `assets/` and are listed in
+  `assets/assets.md`: `check` fails on anything loaded from elsewhere.
   Other QML files beside the scene can be used as components.
 
 ## Motion (import Omotion)

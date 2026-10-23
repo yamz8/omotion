@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QJSValue>
+#include <QMap>
+#include <QUrl>
 #include <QPainter>
 #include <QProcess>
 #include <QQmlComponent>
@@ -124,6 +126,65 @@ QList<Problem> beatContract(const QList<Beat> &beats, const QString &root, doubl
     if (std::abs(shots.last().end - duration) > tolerance)
         add(false, QString("shotlist.md ends at %1, but the scene lasts %2.")
                        .arg(seconds(shots.last().end), seconds(duration)));
+    return problems;
+}
+
+QString typeName(const QObject *object);
+
+// Every file the scene's objects load through a "source" (images, fonts,
+// media), as an absolute path or, when it isn't a local file, the URL, each
+// with the type that loads it. QML and JavaScript files are the scene's own
+// components, not assets.
+void collectSources(QObject *object, const QDir &folder, QMap<QString, QString> *sources) {
+    const int index = object->metaObject()->indexOfProperty("source");
+    if (index >= 0) {
+        const QVariant value = object->metaObject()->property(index).read(object);
+        const QUrl url = value.typeId() == QMetaType::QUrl ? value.toUrl() : QUrl(value.toString());
+        if (!url.isEmpty() && url.scheme() != "qrc" && url.scheme() != "data") {
+            const QString path = url.isRelative() ? folder.absoluteFilePath(url.path())
+                                 : url.isLocalFile() ? url.toLocalFile()
+                                                     : QString();
+            const QString suffix = QFileInfo(path.isEmpty() ? url.path() : path).suffix().toLower();
+            if (suffix != "qml" && suffix != "js" && suffix != "mjs")
+                sources->insert(path.isEmpty() ? url.toString() : QFileInfo(path).absoluteFilePath(), typeName(object));
+        }
+    }
+    for (QObject *child : object->children())
+        collectSources(child, folder, sources);
+    // Items a Repeater or Loader made are children of an item, not of it.
+    if (auto *item = qobject_cast<QQuickItem *>(object))
+        for (QQuickItem *child : item->childItems())
+            if (child->parent() != object)
+                collectSources(child, folder, sources);
+}
+
+// The files a studio's film loads against its assets: every file comes from
+// assets/, where assets.md says where it came from, so the film never shows
+// something nobody approved.
+QList<Problem> assetManifest(const QMap<QString, QString> &sources, const QString &root) {
+    QList<Problem> problems;
+    const QDir studio(root);
+    const QString assets = QDir(studio.filePath("assets")).absolutePath() + "/";
+    for (auto it = sources.cbegin(); it != sources.cend(); ++it) {
+        const QString &file = it.key();
+        if (!QFileInfo(file).isAbsolute())
+            problems << Problem{true, QString("%1 loads %2 from the network; download it into assets/ and list it "
+                                              "in assets/assets.md with where it came from.").arg(it.value(), file),
+                                {}, -1};
+        else if (!file.startsWith(assets))
+            problems << Problem{true, QString("%1 loads %2 from outside assets/; copy it into assets/ and list it "
+                                              "in assets/assets.md with where it came from.")
+                                          .arg(it.value(), studio.relativeFilePath(file)),
+                                {}, -1};
+        else if (!Studio::isListedAsset(root, file.mid(assets.size())))
+            problems << Problem{false, QString("%1 isn't listed in assets/assets.md; add it with where it came from.")
+                                           .arg(studio.relativeFilePath(file)),
+                                {}, -1};
+    }
+    for (const auto &listed : Studio::listedAssetsNotFound(root))
+        problems << Problem{true, QString("assets/assets.md lists %1, which isn't in assets/. Add the file, or mark "
+                                          "the asset missing and ask the person for it.").arg(listed),
+                            {}, -1};
     return problems;
 }
 
@@ -482,8 +543,12 @@ QList<Problem> Scene::check() {
     const QRectF frameRect(QPointF(0, 0), QSizeF(m_format.size));
     QList<QImage> forward;
     QSet<QPair<const QQuickItem *, bool>> textReported;
+    QMap<QString, QString> sources;
+    if (!m_audio.isEmpty())
+        sources.insert(m_audio, "audio");
     for (double t : times) {
         forward << frame(t);
+        collectSources(m_root, QFileInfo(m_path).absoluteDir(), &sources);
         QList<TextIssue> issues;
         findTextIssues(m_root, 1, QRectF(-1e7, -1e7, 2e7, 2e7), frameRect, &issues);
         for (const auto &issue : issues) {
@@ -498,6 +563,9 @@ QList<Problem> Scene::check() {
                                 m_format.name, t};
         }
     }
+
+    if (!studio.isEmpty() && QFileInfo(m_path) == QFileInfo(QDir(studio).filePath("scene.qml")))
+        problems << assetManifest(sources, studio);
 
     Scene other;
     QString error;
