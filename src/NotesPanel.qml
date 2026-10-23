@@ -145,16 +145,6 @@ Rectangle {
                         font.pixelSize: 11
                         color: "#8d8d95"
                     }
-                    Image {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: visible ? width * sourceSize.height / Math.max(1, sourceSize.width) : 0
-                        visible: card.modelData.evidenceUrl != ""
-                        source: card.modelData.evidenceUrl != "" ? card.modelData.evidenceUrl + "?" + card.modelData.evidenceStamp : ""
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: backend.openStudioPath(card.modelData.evidence) }
-                    }
                     Repeater {
                         model: card.modelData.answers
                         delegate: Label {
@@ -165,6 +155,18 @@ Rectangle {
                             font.pixelSize: 12
                             color: modelData.startsWith("fixed:") ? theme.accent : "#c9c9cf"
                         }
+                    }
+                    // The agent's answer comes first, since it's what changes; the
+                    // evidence is a thumbnail that opens full size.
+                    Image {
+                        Layout.preferredWidth: Math.min(parent.width, 200)
+                        Layout.preferredHeight: visible ? Layout.preferredWidth * sourceSize.height / Math.max(1, sourceSize.width) : 0
+                        visible: card.modelData.evidenceUrl != ""
+                        source: card.modelData.evidenceUrl != "" ? card.modelData.evidenceUrl + "?" + card.modelData.evidenceStamp : ""
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: backend.openStudioPath(card.modelData.evidence) }
                     }
                 }
             }
