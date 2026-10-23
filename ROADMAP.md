@@ -321,6 +321,10 @@ asked for out of order in under 2 s, decoding included.
 - **Release**: tagged releases, the `omacom/omarchy-pkgs` package, all 50 Omarchy
   languages, and a gallery of films with their studios.
 
+**So far:** the window speaks all 50 Omarchy languages; 42 of the catalogs
+are drafts that a native speaker should review, especially the words for
+gates, beats, assets, and contact sheets.
+
 **Done when:** one command produces every deliverable for a template studio.
 The same studio renders on a second machine with every frame matching within
 the seek check's tolerance. omotion installs from `omarchy-pkgs` on a fresh
